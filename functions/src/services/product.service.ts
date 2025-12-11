@@ -22,11 +22,10 @@ export class ProductService {
    */
   async getAllProducts(): Promise<Producto[]> {
     try {
-      // Consultar colección de productos
+      // Consultar colección de productos (sin orderBy para evitar índice compuesto)
       const snapshot = await firestore
         .collection(PRODUCTOS_COLLECTION)
         .where("activo", "==", true) // Filtrar solo productos activos
-        .orderBy("descripcion", "asc") // Ordenar alfabéticamente
         .get();
 
       // Si no hay productos, retornar array vacío
@@ -56,6 +55,9 @@ export class ProductService {
           updatedAt: data.updatedAt,
         } as Producto;
       });
+
+      // Ordenar alfabéticamente en memoria
+      productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
 
       console.log(`Se obtuvieron ${productos.length} productos activos`);
       return productos;
@@ -116,7 +118,6 @@ export class ProductService {
         .collection(PRODUCTOS_COLLECTION)
         .where("categoriaId", "==", categoriaId)
         .where("activo", "==", true)
-        .orderBy("descripcion", "asc")
         .get();
 
       const productos: Producto[] = snapshot.docs.map(
@@ -126,6 +127,9 @@ export class ProductService {
             ...doc.data(),
           } as Producto)
       );
+
+      // Ordenar alfabéticamente en memoria
+      productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
 
       return productos;
     } catch (error) {
@@ -145,7 +149,6 @@ export class ProductService {
         .collection(PRODUCTOS_COLLECTION)
         .where("lineaId", "==", lineaId)
         .where("activo", "==", true)
-        .orderBy("descripcion", "asc")
         .get();
 
       const productos: Producto[] = snapshot.docs.map(
@@ -155,6 +158,9 @@ export class ProductService {
             ...doc.data(),
           } as Producto)
       );
+
+      // Ordenar alfabéticamente en memoria
+      productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
 
       return productos;
     } catch (error) {
