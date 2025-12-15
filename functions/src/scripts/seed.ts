@@ -2,7 +2,7 @@
  * Script de Seeds para inicializar Firestore
  * Crea las colecciones y datos iniciales para la tienda del Club León
  *
- * Ejecutar con: npm run seed
+ * Ejecutar con: npm run se
  */
 
 import * as dotenv from "dotenv";
