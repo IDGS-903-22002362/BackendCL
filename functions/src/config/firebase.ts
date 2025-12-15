@@ -6,8 +6,24 @@
 import * as admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
-// Inicialización simple (Firebase usa credenciales internas)
-admin.initializeApp();
+// Inicialización con configuración explícita para Storage
+const isLocal = process.env.IS_LOCAL === "true";
+
+if (isLocal) {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const serviceAccount = require("../../../serviceAccountKey.json");
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: process.env.STORAGE_BUCKET || "e-comerce-leon.appspot.com",
+    projectId: process.env.PROJECT_ID || "e-comerce-leon",
+  });
+} else {
+  // Inicialización simple (Firebase usa credenciales internas en producción)
+  admin.initializeApp({
+    storageBucket: process.env.STORAGE_BUCKET || "e-comerce-leon.appspot.com",
+  });
+}
 
 // Obtenemos Firestore usando la base de datos 'tiendacl'
 const db = getFirestore("tiendacl");

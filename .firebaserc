@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "e-comerce-leon"
-  }
+    "default": "e-comerce-leon",
+    "tiendacl": "e-comerce-leon"
+  },
+  "targets": {},
+  "etags": {}
 }
