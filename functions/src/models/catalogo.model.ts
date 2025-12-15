@@ -3,14 +3,19 @@
  * Incluye: Líneas, Categorías, Proveedores y Tallas
  */
 
+import { Timestamp } from "firebase-admin/firestore";
+
 /**
  * Interface para Línea de productos
  * Ej: caballero, dama, infantil, souvenir, bebé
  */
 export interface Linea {
   id?: string;
-  codigo: number; // Código numérico único para ordenamiento
-  nombre: string; // Nombre de la línea (ej: "Caballero", "Dama")
+  codigo: number;
+  nombre: string;
+  activo?: boolean;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
 }
 
 /**

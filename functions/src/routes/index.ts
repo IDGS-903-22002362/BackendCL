@@ -12,6 +12,7 @@
 
 import { Router } from "express";
 import productsRoutes from "./products.routes";
+import linesRoutes from "./lines.routes";
 
 const router = Router();
 
@@ -20,6 +21,8 @@ const router = Router();
 // ===================================
 
 router.use("/productos", productsRoutes);
+router.use("/lineas", linesRoutes);
+
 
 // Futuros módulos:
 // router.use('/usuarios', usersRoutes);
