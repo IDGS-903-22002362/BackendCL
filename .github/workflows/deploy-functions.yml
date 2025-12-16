@@ -37,3 +37,17 @@ jobs:
       env:
         FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
       run: firebase deploy --only functions
+
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send notification to Discord
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"content\": \"🚀 **Nuevo push en BackendCL**\n👤 Autor: ${GITHUB_ACTOR}\n📝 Commit: ${GITHUB_SHA}\"
+          }" \
+          $DISCORD_WEBHOOK
