@@ -1,5 +1,5 @@
 /**
- * FIREBASE FUNCTIONS ENTRY POINTOte
+ * FIREBASE FUNCTIONS ENTRY POINTOteoooo
  * ---------------------------------------------------------------------
  * Este es el ÚNICO archivo que Firebase lee directamente al iniciar.
  * Su responsabilidad es exportar los triggers de Cloud Functions.
