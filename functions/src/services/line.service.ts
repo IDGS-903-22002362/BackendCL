@@ -36,7 +36,7 @@ class LineService {
                         updatedAt: data.updatedAt,
                     };
                 })
-                .filter((linea) => linea.activo); // 👈 soft delete compatible
+                .filter((linea) => linea.activo);
 
             // Ordenar por código
             //lineas.sort((a, b) => a.codigo - b.codigo);
