@@ -3,7 +3,7 @@
  * Maneja la subida y gestión de archivos en Firebase Storage
  */
 
-import { storage } from "../config/firebase";
+import { storageTienda } from "../config/firebase";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 
@@ -12,7 +12,7 @@ import { v4 as uuidv4 } from "uuid";
  * Encapsula las operaciones de Firebase Storage
  */
 export class StorageService {
-  private bucket = storage.bucket();
+  private bucket = storageTienda.bucket();
 
   /**
    * Sube un archivo a Firebase Storage
