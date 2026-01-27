@@ -4,3 +4,4 @@ dist/
 serviceAccountKey.json
 *.log
 .DS_Store
+serviceAccountAppOficial.json 
