@@ -3,7 +3,7 @@
  */
 
 import * as dotenv from "dotenv";
-import { firestore } from "../config/firebase";
+import { firestoreTienda } from "../config/firebase";
 
 dotenv.config();
 
@@ -19,7 +19,7 @@ async function diagnosticar() {
     console.log("\n2. Intentando conectar con Firestore...");
 
     // Intentar una operación simple
-    const testRef = firestore.collection("_test").doc("conexion");
+    const testRef = firestoreTienda.collection("_test").doc("conexion");
     await testRef.set({
       timestamp: new Date(),
       mensaje: "Prueba de conexión",

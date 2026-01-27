@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { firestore } from "../../config/firebase";
+import { firestoreTienda } from "../../config/firebase";
 
 /**
  * Controller de Debug para diagnosticar problemas
@@ -9,7 +9,7 @@ export const debugFirestore = async (_req: Request, res: Response) => {
         console.log("🔍 Iniciando diagnóstico de Firestore...");
 
         // Verificar conexión a Firestore
-        const testCollection = firestore.collection("lineas");
+        const testCollection = firestoreTienda.collection("lineas");
         console.log("✅ Conexión a Firestore establecida");
 
         // Intentar obtener todos los documentos sin filtros
