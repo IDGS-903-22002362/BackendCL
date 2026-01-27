@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "795182473270",
+    "project_id": "app-oficial-leon",
+    "storage_bucket": "app-oficial-leon.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:795182473270:android:8d73cb58875e31596a7897",
+        "android_client_info": {
+          "package_name": "com.example.frontcl"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCktV4EXPTcQB3EtEyuqFfR1m9YsMKRkzU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

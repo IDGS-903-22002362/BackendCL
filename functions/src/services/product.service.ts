@@ -3,7 +3,8 @@
  * Maneja toda la lógica de negocio relacionada con productos
  */
 
-import { firestore, admin } from "../config/firebase";
+import { firestoreTienda } from "../config/firebase";
+import { admin } from "../config/firebase.admin";
 import { Producto } from "../models/producto.model";
 
 /**
@@ -23,7 +24,7 @@ export class ProductService {
   async getAllProducts(): Promise<Producto[]> {
     try {
       // Consultar colección de productos (sin orderBy para evitar índice compuesto)
-      const snapshot = await firestore
+      const snapshot = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .where("activo", "==", true) // Filtrar solo productos activos
         .get();
@@ -74,7 +75,7 @@ export class ProductService {
    */
   async getProductById(id: string): Promise<Producto | null> {
     try {
-      const doc = await firestore
+      const doc = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .doc(id)
         .get();
@@ -114,7 +115,7 @@ export class ProductService {
    */
   async getProductsByCategory(categoriaId: string): Promise<Producto[]> {
     try {
-      const snapshot = await firestore
+      const snapshot = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .where("categoriaId", "==", categoriaId)
         .where("activo", "==", true)
@@ -122,10 +123,10 @@ export class ProductService {
 
       const productos: Producto[] = snapshot.docs.map(
         (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as Producto)
+        ({
+          id: doc.id,
+          ...doc.data(),
+        } as Producto)
       );
 
       // Ordenar alfabéticamente en memoria
@@ -145,7 +146,7 @@ export class ProductService {
    */
   async getProductsByLine(lineaId: string): Promise<Producto[]> {
     try {
-      const snapshot = await firestore
+      const snapshot = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .where("lineaId", "==", lineaId)
         .where("activo", "==", true)
@@ -153,10 +154,10 @@ export class ProductService {
 
       const productos: Producto[] = snapshot.docs.map(
         (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as Producto)
+        ({
+          id: doc.id,
+          ...doc.data(),
+        } as Producto)
       );
 
       // Ordenar alfabéticamente en memoria
@@ -182,7 +183,7 @@ export class ProductService {
 
       const searchTermLower = searchTerm.toLowerCase();
 
-      const snapshot = await firestore
+      const snapshot = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .where("activo", "==", true)
         .get();
@@ -190,10 +191,10 @@ export class ProductService {
       const productos: Producto[] = snapshot.docs
         .map(
           (doc) =>
-            ({
-              id: doc.id,
-              ...doc.data(),
-            } as Producto)
+          ({
+            id: doc.id,
+            ...doc.data(),
+          } as Producto)
         )
         .filter(
           (producto) =>
@@ -220,7 +221,7 @@ export class ProductService {
       const now = admin.firestore.Timestamp.now();
 
       // Validar que la clave no exista
-      const existingProduct = await firestore
+      const existingProduct = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .where("clave", "==", productoData.clave)
         .limit(1)
@@ -233,7 +234,7 @@ export class ProductService {
       }
 
       // Crear el documento con timestamps
-      const docRef = await firestore.collection(PRODUCTOS_COLLECTION).add({
+      const docRef = await firestoreTienda.collection(PRODUCTOS_COLLECTION).add({
         ...productoData,
         createdAt: now,
         updatedAt: now,
@@ -271,7 +272,7 @@ export class ProductService {
     updateData: Partial<Omit<Producto, "id" | "createdAt" | "updatedAt">>
   ): Promise<Producto> {
     try {
-      const docRef = firestore.collection(PRODUCTOS_COLLECTION).doc(id);
+      const docRef = firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(id);
       const doc = await docRef.get();
 
       if (!doc.exists) {
@@ -280,7 +281,7 @@ export class ProductService {
 
       // Si se intenta actualizar la clave, validar que no exista
       if (updateData.clave) {
-        const existingProduct = await firestore
+        const existingProduct = await firestoreTienda
           .collection(PRODUCTOS_COLLECTION)
           .where("clave", "==", updateData.clave)
           .limit(1)
@@ -326,7 +327,7 @@ export class ProductService {
    */
   async deleteProduct(id: string): Promise<void> {
     try {
-      const docRef = firestore.collection(PRODUCTOS_COLLECTION).doc(id);
+      const docRef = firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(id);
       const doc = await docRef.get();
 
       if (!doc.exists) {

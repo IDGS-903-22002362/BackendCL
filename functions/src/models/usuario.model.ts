@@ -12,15 +12,23 @@ import { Timestamp } from "firebase-admin/firestore";
 export interface UsuarioApp {
   id?: string; // Documento ID en Firestore
   uid: string; // UID de Firebase Authentication
+  provider: "google" | "apple" | "email";
   nombre: string; // Nombre completo del usuario
   email: string; // Correo electrónico
   telefono?: string; // Teléfono de contacto (opcional)
   puntosActuales: number; // Saldo actual de puntos
   nivel?: string; // Nivel de lealtad (ej: "Bronce", "Plata", "Oro", "Platino")
   fechaNacimiento?: Date; // Para promociones de cumpleaños
+  perfilCompleto: boolean;
   activo: boolean; // Si la cuenta está activa
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
+}
+export interface CrearUsuarioAppDTO {
+  nombre: string;
+  email: string;
+  telefono?: string;
+  fechaNacimiento?: Date;
 }
 
 /**
@@ -68,14 +76,7 @@ export type OrigenPuntos =
 /**
  * DTOs para gestión de usuarios
  */
-export interface CrearUsuarioAppDTO {
-  uid: string;
-  nombre: string;
-  email: string;
-  telefono?: string;
-  fechaNacimiento?: Date;
-  nivel?: string;
-}
+
 
 export interface ActualizarUsuarioAppDTO {
   nombre?: string;
