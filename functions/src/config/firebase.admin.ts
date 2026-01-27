@@ -2,14 +2,9 @@
 import * as admin from "firebase-admin";
 
 if (!admin.apps.length) {
-  let serviceAccount;
-
-  // Priorizar variable de entorno, luego archivo local
-  if (process.env.SERVICE_ACCOUNT_APP_OFICIAL) {
-    serviceAccount = JSON.parse(process.env.SERVICE_ACCOUNT_APP_OFICIAL);
-  } else {
-    serviceAccount = require("../../../serviceAccountAppOficial.json");
-  }
+  const serviceAccount = JSON.parse(
+    process.env.SERVICE_ACCOUNT_APP_OFICIAL as string,
+  );
 
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
