@@ -47,6 +47,9 @@ jobs:
           ls -lh serviceAccount*.json
 
       - name: Build Functions
+        env:
+          SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           cd functions
           npm run build
