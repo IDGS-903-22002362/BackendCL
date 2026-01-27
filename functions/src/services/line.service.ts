@@ -3,7 +3,8 @@
  * Maneja toda la lógica de negocio relacionada con el catálogo de líneas
  */
 
-import { firestore, admin } from "../config/firebase";
+import { firestoreTienda } from "../config/firebase";
+import { admin } from "../config/firebase.admin";
 import { Linea } from "../models/catalogo.model";
 
 const LINEAS_COLLECTION = "lineas";
@@ -15,7 +16,7 @@ class LineService {
      */
     async getAllLines(): Promise<Linea[]> {
         try {
-            const snapshot = await firestore
+            const snapshot = await firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .get();
 
@@ -53,7 +54,7 @@ class LineService {
      */
     async getLineById(id: string): Promise<Linea | null> {
         try {
-            const doc = await firestore
+            const doc = await firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .doc(id)
                 .get();
@@ -90,7 +91,7 @@ class LineService {
         try {
             const term = termino.toLowerCase();
 
-            const snapshot = await firestore
+            const snapshot = await firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .get();
 
@@ -125,7 +126,7 @@ class LineService {
             const now = admin.firestore.Timestamp.now();
 
             // Validar código único
-            const snapshot = await firestore
+            const snapshot = await firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .where("codigo", "==", linea.codigo)
                 .limit(1)
@@ -143,7 +144,7 @@ class LineService {
                 .trim()
                 .replace(/\s+/g, "_");
 
-            const docRef = firestore
+            const docRef = firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .doc(docId);
 
@@ -186,7 +187,7 @@ class LineService {
         updateData: Partial<Pick<Linea, "codigo" | "nombre">>
     ): Promise<Linea> {
         try {
-            const docRef = firestore
+            const docRef = firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .doc(id);
 
@@ -198,7 +199,7 @@ class LineService {
 
             // Validar código único si se actualiza
             if (updateData.codigo !== undefined) {
-                const snapshot = await firestore
+                const snapshot = await firestoreTienda
                     .collection(LINEAS_COLLECTION)
                     .where("codigo", "==", updateData.codigo)
                     .limit(1)
@@ -244,7 +245,7 @@ class LineService {
      */
     async deleteLine(id: string): Promise<void> {
         try {
-            const docRef = firestore
+            const docRef = firestoreTienda
                 .collection(LINEAS_COLLECTION)
                 .doc(id);
 
