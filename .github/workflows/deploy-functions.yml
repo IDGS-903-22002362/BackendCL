@@ -53,7 +53,7 @@ jobs:
 
       - name: Deploy to Firebase
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountAppOficial.json
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
         run: firebase deploy --only functions
 
   notify:
