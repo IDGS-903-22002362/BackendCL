@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
-import storageService from "../../services/storage.service";
 
 /**
  * Controller: Users Command (Escritura)
