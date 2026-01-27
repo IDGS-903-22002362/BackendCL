@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { firestoreApp } from "../../config/app.firebase";
-import userAppService from "../../services/user.service";
 
 import { admin } from "../../config/firebase.admin";
 
@@ -22,7 +21,6 @@ export const socialLogin = async (req: Request, res: Response) => {
             uid,
             email,
             name,
-            picture,
         } = decoded;
 
         if (!email) {

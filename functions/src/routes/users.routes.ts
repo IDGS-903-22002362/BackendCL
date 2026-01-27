@@ -5,7 +5,6 @@
  */
 
 import { Router } from "express";
-import multer from "multer";
 import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
