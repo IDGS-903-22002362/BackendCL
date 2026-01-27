@@ -6,7 +6,8 @@
  */
 
 import * as dotenv from "dotenv";
-import { firestore, admin } from "../config/firebase";
+import { firestoreTienda } from "../config/firebase";
+import { admin } from "../config/firebase.admin";
 
 // Cargar variables de entorno
 dotenv.config();
@@ -82,11 +83,11 @@ async function seedLineas() {
     { id: "souvenir", codigo: 5, nombre: "Souvenir" },
   ];
 
-  const batch = firestore.batch();
+  const batch = firestoreTienda.batch();
 
   for (const linea of lineas) {
     const { id, ...data } = linea;
-    const ref = firestore.collection("lineas").doc(id);
+    const ref = firestoreTienda.collection("lineas").doc(id);
     batch.set(ref, data);
   }
 
@@ -113,11 +114,11 @@ async function seedCategorias() {
     { id: "balon", nombre: "Balón", lineaId: "souvenir", orden: 10 },
   ];
 
-  const batch = firestore.batch();
+  const batch = firestoreTienda.batch();
 
   for (const categoria of categorias) {
     const { id, ...data } = categoria;
-    const ref = firestore.collection("categorias").doc(id);
+    const ref = firestoreTienda.collection("categorias").doc(id);
     batch.set(ref, data);
   }
 
@@ -144,11 +145,11 @@ async function seedTallas() {
     { id: "gde", codigo: "GDE", descripcion: "Grande (Niño)", orden: 10 },
   ];
 
-  const batch = firestore.batch();
+  const batch = firestoreTienda.batch();
 
   for (const talla of tallas) {
     const { id, ...data } = talla;
-    const ref = firestore.collection("tallas").doc(id);
+    const ref = firestoreTienda.collection("tallas").doc(id);
     batch.set(ref, data);
   }
 
@@ -193,7 +194,7 @@ async function seedProveedores() {
   ];
 
   const promises = proveedores.map((proveedor) =>
-    firestore.collection("proveedores").add(proveedor)
+    firestoreTienda.collection("proveedores").add(proveedor)
   );
 
   await Promise.all(promises);
@@ -245,11 +246,11 @@ async function seedUbicaciones() {
     },
   ];
 
-  const batch = firestore.batch();
+  const batch = firestoreTienda.batch();
 
   for (const ubicacion of ubicaciones) {
     const { id, ...data } = ubicacion;
-    const ref = firestore.collection("ubicaciones").doc(id);
+    const ref = firestoreTienda.collection("ubicaciones").doc(id);
     batch.set(ref, data);
   }
 
@@ -264,7 +265,7 @@ async function seedProductos() {
   log.info("Creando productos de ejemplo...");
 
   // Obtener IDs de proveedores
-  const proveedoresSnapshot = await firestore
+  const proveedoresSnapshot = await firestoreTienda
     .collection("proveedores")
     .limit(1)
     .get();
@@ -410,7 +411,7 @@ async function seedProductos() {
   ];
 
   const promises = productos.map((producto) =>
-    firestore.collection("productos").add(producto)
+    firestoreTienda.collection("productos").add(producto)
   );
 
   await Promise.all(promises);
@@ -434,7 +435,7 @@ async function seedConfiguracion() {
     actualizadoAt: admin.firestore.Timestamp.now(),
   };
 
-  await firestore.collection("configuracion").doc("puntos").set(configPuntos);
+  await firestoreTienda.collection("configuracion").doc("puntos").set(configPuntos);
 
   // Configuración de la tienda
   const configTienda = {
@@ -450,7 +451,7 @@ async function seedConfiguracion() {
     activo: true,
   };
 
-  await firestore.collection("configuracion").doc("tienda").set(configTienda);
+  await firestoreTienda.collection("configuracion").doc("tienda").set(configTienda);
 
   log.success("Configuración del sistema creada");
 }
