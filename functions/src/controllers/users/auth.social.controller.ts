@@ -5,23 +5,20 @@ import { admin } from "../../config/firebase.admin";
 
 export const socialLogin = async (req: Request, res: Response) => {
     try {
-        const { idToken, provider } = req.body;
+        // 1️⃣ Solo recibimos el token
+        const { idToken } = req.body;
 
-        if (!idToken || !provider) {
+        if (!idToken) {
             return res.status(400).json({
                 success: false,
-                message: "idToken y provider son requeridos",
+                message: "idToken es requerido",
             });
         }
 
-        // 🔐 Verificar token Firebase
+        // 2️⃣ Verificar token Firebase
         const decoded = await admin.auth().verifyIdToken(idToken);
 
-        const {
-            uid,
-            email,
-            name,
-        } = decoded;
+        const { uid, email, name } = decoded;
 
         if (!email) {
             return res.status(400).json({
@@ -30,7 +27,37 @@ export const socialLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 🔎 Buscar usuario por UID
+        // 3️⃣ Detectar provider desde Firebase
+        const firebaseProvider =
+            decoded.firebase?.sign_in_provider ??
+            (decoded.firebase?.identities
+                ? Object.keys(decoded.firebase.identities)[0]
+                : null);
+
+        if (!firebaseProvider) {
+            return res.status(400).json({
+                success: false,
+                message: "No se pudo detectar el provider",
+            });
+        }
+
+        // 4️⃣ NORMALIZAR provider (🔥 AQUÍ VA LO QUE PREGUNTAS 🔥)
+        const providerMap: Record<string, "google" | "apple" | "email"> = {
+            "password": "email",
+            "google.com": "google",
+            "apple.com": "apple",
+        };
+
+        const provider = providerMap[firebaseProvider];
+
+        if (!provider) {
+            return res.status(400).json({
+                success: false,
+                message: `Provider no soportado: ${firebaseProvider}`,
+            });
+        }
+
+        // 5️⃣ Buscar usuario por UID
         const snapshot = await firestoreApp
             .collection("usuariosApp")
             .where("uid", "==", uid)
@@ -39,7 +66,7 @@ export const socialLogin = async (req: Request, res: Response) => {
 
         let usuario;
 
-        // 👤 Crear usuario si no existe
+        // 6️⃣ Crear usuario si no existe
         if (snapshot.empty) {
             const now = admin.firestore.Timestamp.now();
 
@@ -66,7 +93,7 @@ export const socialLogin = async (req: Request, res: Response) => {
             usuario = { id: doc.id, ...doc.data() };
         }
 
-        // 🎟️ (Opcional) JWT propio
+        // 7️⃣ Token propio (opcional)
         const token = "JWT_TUYO_AQUI";
 
         return res.status(200).json({
@@ -82,6 +109,7 @@ export const socialLogin = async (req: Request, res: Response) => {
         });
     }
 };
+
 
 export const emailLogin = async (req: Request, res: Response) => {
     try {
