@@ -243,7 +243,7 @@ export class UserAppService {
                 fechaNacimiento: usuarioData.fechaNacimiento,
                 puntosActuales: 0,
                 nivel: "Bronce",
-                perfilCompleto: false,
+                perfilCompleto: true,
                 activo: true,
                 createdAt: now,
                 updatedAt: now,
