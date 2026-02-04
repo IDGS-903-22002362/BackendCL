@@ -14,6 +14,7 @@ import { Router } from "express";
 import productsRoutes from "./products.routes";
 import linesRoutes from "./lines.routes";
 import categoriesRoutes from "./categories.routes";
+import providersRoutes from "./providers.routes";
 import usersRoutes from "./users.routes";
 import authRoutes from "./auth.routes";
 
@@ -26,6 +27,7 @@ const router = Router();
 router.use("/productos", productsRoutes);
 router.use("/lineas", linesRoutes);
 router.use("/categorias", categoriesRoutes);
+router.use("/proveedores", providersRoutes);
 router.use("/usuarios", usersRoutes);
 router.use("/auth", authRoutes);
 
