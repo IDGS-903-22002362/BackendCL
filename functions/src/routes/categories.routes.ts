@@ -28,6 +28,12 @@ router.get("/", queryController.getAll);
 router.get("/buscar/:termino", queryController.search);
 
 /**
+ * GET /api/categorias/linea/:lineaId
+ * Obtiene categorías por línea
+ */
+router.get("/linea/:lineaId", queryController.getByLine);
+
+/**
  * GET /api/categorias/:id
  * Obtiene una categoría específica por ID
  */
