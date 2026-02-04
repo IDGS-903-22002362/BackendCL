@@ -13,7 +13,8 @@
 import { Router } from "express";
 import productsRoutes from "./products.routes";
 import linesRoutes from "./lines.routes";
-import usersRoutes from "./users.routes"
+import categoriesRoutes from "./categories.routes";
+import usersRoutes from "./users.routes";
 import authRoutes from "./auth.routes";
 
 const router = Router();
@@ -24,9 +25,9 @@ const router = Router();
 
 router.use("/productos", productsRoutes);
 router.use("/lineas", linesRoutes);
-router.use("/usuarios", usersRoutes)
+router.use("/categorias", categoriesRoutes);
+router.use("/usuarios", usersRoutes);
 router.use("/auth", authRoutes);
-
 
 // Futuros módulos:
 // router.use('/usuarios', usersRoutes);
