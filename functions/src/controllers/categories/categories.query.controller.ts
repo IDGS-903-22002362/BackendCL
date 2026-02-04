@@ -88,3 +88,30 @@ export const search = async (req: Request, res: Response) => {
     });
   }
 };
+
+/**
+ * Obtiene categorías por línea
+ * GET /api/categorias/linea/:lineaId
+ */
+export const getByLine = async (req: Request, res: Response) => {
+  try {
+    const { lineaId } = req.params;
+    const categorias = await categoryService.getCategoriesByLineId(lineaId);
+
+    return res.status(200).json({
+      success: true,
+      count: categorias.length,
+      data: categorias,
+    });
+  } catch (error) {
+    console.error(
+      `Error en GET /api/categorias/linea/${req.params.lineaId}:`,
+      error,
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener categorías por línea",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};

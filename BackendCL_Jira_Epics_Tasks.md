@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 32 tareas (implementadas en código)
-- 🔲 **TODO:** 50 tareas (pendientes de implementar)
+- ✅ **DONE:** 33 tareas (implementadas en código)
+- 🔲 **TODO:** 49 tareas (pendientes de implementar)
 
 ---
 
@@ -422,13 +422,19 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-020: Filtrar categorías por línea
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint GET /api/categorias/linea/:lineaId para obtener categorías asociadas a una línea específica.  
 **Criterios de Aceptación:**
 
 - Filtra categorías por lineaId
 - Solo retorna categorías activas
 - Maneja errores correctamente
+
+**Archivos de Código:**
+
+- `functions/src/routes/categories.routes.ts` (línea 36-40)
+- `functions/src/controllers/categories/categories.query.controller.ts` (función `getByLine`)
+- `functions/src/services/category.service.ts` (función `getCategoriesByLineId`)
 
 ---
 
@@ -1461,16 +1467,16 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (32 tareas)
+### ✅ DONE (33 tareas)
 
 - **Infraestructura Base:** 7 tareas
 - **Módulo Productos:** 11 tareas
 - **Módulo Líneas:** 7 tareas
-- **Módulo Categorías:** 1 tarea
+- **Módulo Categorías:** 2 tareas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (50 tareas)
+### 🔲 TODO (49 tareas)
 
 - **Catálogos Auxiliares** (Proveedores, Tallas): 3 tareas
 - **Infraestructura adicional:** 5 tareas
