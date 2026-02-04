@@ -443,7 +443,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-021: Implementar CRUD completo de Proveedores
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Implementar módulo completo de proveedores con endpoints CRUD.  
 **Criterios de Aceptación:**
 
@@ -457,6 +457,15 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Validar campos requeridos: nombre
 
 **Nota:** El modelo ya existe en `functions/src/models/catalogo.model.ts` (interface `Proveedor`)
+
+**Archivos de Código:**
+
+- `functions/src/services/provider.service.ts` (servicio completo con 6 métodos y validaciones)
+- `functions/src/controllers/providers/providers.query.controller.ts` (getAll, getById, search)
+- `functions/src/controllers/providers/providers.command.controller.ts` (create, update, remove)
+- `functions/src/controllers/providers/providers.debug.controller.ts` (debugFirestore)
+- `functions/src/routes/providers.routes.ts` (7 rutas montadas)
+- `functions/src/routes/index.ts` (integración en router principal)
 
 ---
 
