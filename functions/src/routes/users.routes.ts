@@ -8,6 +8,7 @@ import { Router } from "express";
 import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
+import { authMiddleware } from "../utils/middlewares";
 
 
 const router = Router();
@@ -20,7 +21,7 @@ const router = Router();
  * GET /api/usuarios/debug
  * Endpoint de diagnóstico para verificar conexión a Firestore
  */
-router.get("/debug", debugController.debugFirestore);
+router.get("/debug", authMiddleware, debugController.debugFirestore);
 
 // ==========================================
 // QUERIES (Lectura - Safe & Cacheable)
@@ -30,13 +31,13 @@ router.get("/debug", debugController.debugFirestore);
  * GET /api/usuarios
  * Obtiene todos los usuarios activos
  */
-router.get("/", queryController.getAll);
+router.get("/", authMiddleware, queryController.getAll);
 
 /**
  * GET /api/usuarios/:id
  * Obtiene un usuario específico por ID
  */
-router.get("/:id", queryController.getById);
+router.get("/:id", authMiddleware, queryController.getById);
 
 /**
  * GET /api/usuarios/categoria/:categoriaId
@@ -56,7 +57,7 @@ router.get("/linea/:lineaId", queryController.getByLine);
  * GET /api/usuarios/buscar/:termino
  * Busca usuarios por término
  */
-router.get("/buscar/:termino", queryController.search);
+router.get("/buscar/:termino", authMiddleware, queryController.search);
 
 // ==========================================
 // COMMANDS (Escritura - Transactional & Secure)
@@ -70,6 +71,10 @@ router.post("/", commandController.create);
 
 
 router.get("/exists/email", commandController.checkEmail);
+/**
+ * Update /api/usuarios/completar
+ */
+router.put("/completar-perfil", authMiddleware, commandController.completarPerfil);
 
 /**
  * PUT /api/usuarios/:id
@@ -82,6 +87,9 @@ router.put("/:id", commandController.update);
  * Elimina un usuario (soft delete)
  */
 router.delete("/:id", commandController.remove);
+
+
+
 
 /**
  * POST /api/usuarios/:id/imagenes

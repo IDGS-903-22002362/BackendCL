@@ -66,6 +66,33 @@ export class UserAppService {
             throw new Error("Error al obtener usuarios de la base de datos");
         }
     }
+    async updateByUid(uid: string, data: any) {
+
+        const snapshot = await firestoreApp
+            .collection(USUARIOSAPP_COLLECTION)
+            .where("uid", "==", uid)
+            .limit(1)
+            .get();
+
+        if (snapshot.empty) {
+            throw new Error("Usuario no encontrado");
+        }
+
+        const doc = snapshot.docs[0];
+
+        await doc.ref.update({
+            ...data,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const updated = await doc.ref.get();
+
+        return {
+            id: updated.id,
+            ...updated.data()
+        };
+    }
+
 
     /**
      * Obtiene un producto por su ID
@@ -235,7 +262,7 @@ export class UserAppService {
             const now = admin.firestore.Timestamp.now();
 
             const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
-                uid: `email_${usuarioData.email}`, // UID interno
+                uid: usuarioData.uid, // UID interno
                 provider: "email",
                 nombre: usuarioData.nombre,
                 email: usuarioData.email.toLowerCase(),
