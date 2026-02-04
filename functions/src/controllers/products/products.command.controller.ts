@@ -9,34 +9,8 @@ import storageService from "../../services/storage.service";
 
 export const create = async (req: Request, res: Response) => {
   try {
+    // Body ya validado por middleware de Zod
     const productoData = req.body;
-    const camposRequeridos = [
-      "clave",
-      "descripcion",
-      "lineaId",
-      "categoriaId",
-      "precioPublico",
-      "precioCompra",
-      "existencias",
-      "proveedorId",
-    ];
-
-    const camposFaltantes = camposRequeridos.filter(
-      (campo) => !productoData[campo] && productoData[campo] !== 0
-    );
-
-    if (camposFaltantes.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Faltan campos requeridos",
-        camposFaltantes,
-      });
-    }
-
-    productoData.tallaIds = productoData.tallaIds || [];
-    productoData.imagenes = productoData.imagenes || [];
-    productoData.activo =
-      productoData.activo !== undefined ? productoData.activo : true;
 
     const nuevoProducto = await productService.createProduct(productoData);
 
@@ -61,7 +35,7 @@ export const update = async (req: Request, res: Response) => {
     const updateData = req.body;
     const productoActualizado = await productService.updateProduct(
       id,
-      updateData
+      updateData,
     );
 
     return res.status(200).json({
@@ -118,12 +92,10 @@ export const uploadImages = async (req: Request, res: Response) => {
 
     const producto = await productService.getProductById(id);
     if (!producto) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: `Producto con ID ${id} no encontrado`,
-        });
+      return res.status(404).json({
+        success: false,
+        message: `Producto con ID ${id} no encontrado`,
+      });
     }
 
     const imagenesData = files.map((file) => ({
@@ -133,7 +105,7 @@ export const uploadImages = async (req: Request, res: Response) => {
 
     const urls = await storageService.uploadMultipleFiles(
       imagenesData,
-      "productos"
+      "productos",
     );
     const imagenesActuales = producto.imagenes || [];
     const imagenesActualizadas = [...imagenesActuales, ...urls];
@@ -161,32 +133,26 @@ export const deleteImage = async (req: Request, res: Response) => {
     const { imageUrl } = req.body;
 
     if (!imageUrl) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Se requiere la URL de la imagen a eliminar",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Se requiere la URL de la imagen a eliminar",
+      });
     }
 
     const producto = await productService.getProductById(id);
     if (!producto) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: `Producto con ID ${id} no encontrado`,
-        });
+      return res.status(404).json({
+        success: false,
+        message: `Producto con ID ${id} no encontrado`,
+      });
     }
 
     const imagenes = producto.imagenes || [];
     if (!imagenes.includes(imageUrl)) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "La imagen no existe en este producto",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "La imagen no existe en este producto",
+      });
     }
 
     await storageService.deleteFile(imageUrl);

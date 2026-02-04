@@ -7,6 +7,15 @@ import { Router } from "express";
 import * as queryController from "../controllers/sizes/sizes.query.controller";
 import * as commandController from "../controllers/sizes/sizes.command.controller";
 import * as debugController from "../controllers/sizes/sizes.debug.controller";
+import {
+  validateBody,
+  validateParams,
+} from "../middleware/validation.middleware";
+import {
+  createSizeSchema,
+  updateSizeSchema,
+} from "../middleware/validators/size.validator";
+import { idParamSchema } from "../middleware/validators/common.validator";
 
 const router = Router();
 
@@ -35,7 +44,7 @@ router.get("/", queryController.getAll);
  * GET /api/tallas/:id
  * Obtener una talla específica por su ID
  */
-router.get("/:id", queryController.getById);
+router.get("/:id", validateParams(idParamSchema), queryController.getById);
 
 // ============================================
 // RUTAS DE ESCRITURA (COMMANDS)
@@ -46,19 +55,24 @@ router.get("/:id", queryController.getById);
  * Crear una nueva talla
  * Body: { codigo: string, descripcion: string, orden?: number }
  */
-router.post("/", commandController.create);
+router.post("/", validateBody(createSizeSchema), commandController.create);
 
 /**
  * PUT /api/tallas/:id
  * Actualizar una talla existente
  * Body: { codigo?: string, descripcion?: string, orden?: number }
  */
-router.put("/:id", commandController.update);
+router.put(
+  "/:id",
+  validateParams(idParamSchema),
+  validateBody(updateSizeSchema),
+  commandController.update,
+);
 
 /**
  * DELETE /api/tallas/:id
  * Eliminar una talla (eliminación física)
  */
-router.delete("/:id", commandController.remove);
+router.delete("/:id", validateParams(idParamSchema), commandController.remove);
 
 export default router;

@@ -7,35 +7,10 @@ import categoryService from "../../services/category.service";
  */
 export const create = async (req: Request, res: Response) => {
   try {
+    // Body ya validado por middleware de Zod
     const categoriaData = req.body;
 
-    // Validar campos requeridos
-    const camposRequeridos = ["nombre"];
-    const camposFaltantes = camposRequeridos.filter(
-      (campo) => !categoriaData[campo],
-    );
-
-    if (camposFaltantes.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Faltan campos requeridos",
-        camposFaltantes,
-      });
-    }
-
-    // Validar que nombre no esté vacío
-    if (categoriaData.nombre.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "El nombre de la categoría no puede estar vacío",
-      });
-    }
-
-    const nuevaCategoria = await categoryService.createCategory({
-      nombre: categoriaData.nombre.trim(),
-      lineaId: categoriaData.lineaId,
-      orden: categoriaData.orden,
-    });
+    const nuevaCategoria = await categoryService.createCategory(categoriaData);
 
     return res.status(201).json({
       success: true,
@@ -70,43 +45,13 @@ export const create = async (req: Request, res: Response) => {
  */
 export const update = async (req: Request, res: Response) => {
   try {
+    // Params e ID ya validados por middleware de Zod
     const { id } = req.params;
     const updateData = req.body;
 
-    // Validar que haya al menos un campo para actualizar
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No se proporcionaron campos para actualizar",
-      });
-    }
-
-    // Validar que nombre no esté vacío si se proporciona
-    if (
-      updateData.nombre !== undefined &&
-      updateData.nombre.trim().length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "El nombre de la categoría no puede estar vacío",
-      });
-    }
-
-    // Preparar datos a actualizar
-    const dataToUpdate: any = {};
-    if (updateData.nombre !== undefined) {
-      dataToUpdate.nombre = updateData.nombre.trim();
-    }
-    if (updateData.lineaId !== undefined) {
-      dataToUpdate.lineaId = updateData.lineaId;
-    }
-    if (updateData.orden !== undefined) {
-      dataToUpdate.orden = updateData.orden;
-    }
-
     const categoriaActualizada = await categoryService.updateCategory(
       id,
-      dataToUpdate,
+      updateData,
     );
 
     return res.status(200).json({
