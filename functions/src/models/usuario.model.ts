@@ -25,6 +25,7 @@ export interface UsuarioApp {
   updatedAt: Timestamp; // Última actualización
 }
 export interface CrearUsuarioAppDTO {
+  uid: string;
   nombre: string;
   email: string;
   telefono?: string;

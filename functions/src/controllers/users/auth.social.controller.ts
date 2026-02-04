@@ -3,6 +3,105 @@ import { firestoreApp } from "../../config/app.firebase";
 
 import { admin } from "../../config/firebase.admin";
 
+
+export const registerOrLogin = async (req: Request, res: Response) => {
+    try {
+        const { idToken, nombre, telefono, fechaNacimiento } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({
+                success: false,
+                message: "idToken es requerido",
+            });
+        }
+
+        // 1️⃣ Verificar token Firebase
+        const decoded = await admin.auth().verifyIdToken(idToken);
+
+        const { uid, email, name } = decoded;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                message: "El usuario no tiene email",
+            });
+        }
+
+        // 2️⃣ Detectar provider
+        const firebaseProvider =
+            decoded.firebase?.sign_in_provider ?? "password";
+
+        const providerMap: Record<string, "google" | "email" | "apple"> = {
+            "google.com": "google",
+            "password": "email",
+            "apple.com": "apple",
+        };
+
+        const provider = providerMap[firebaseProvider];
+
+        if (!provider) {
+            return res.status(400).json({
+                success: false,
+                message: `Provider no soportado: ${firebaseProvider}`,
+            });
+        }
+
+        // 3️⃣ Buscar usuario por UID
+        const snapshot = await firestoreApp
+            .collection("usuariosApp")
+            .where("uid", "==", uid)
+            .limit(1)
+            .get();
+
+        let usuario;
+        const perfilCompleto =
+            provider === "email" &&
+            !!nombre &&
+            !!telefono &&
+            !!fechaNacimiento;
+
+        // 4️⃣ Crear usuario si no existe
+        if (snapshot.empty) {
+            const now = admin.firestore.Timestamp.now();
+
+            const nuevoUsuario = {
+                uid,
+                provider,
+                nombre: nombre ?? name ?? "",
+                email: email.toLowerCase(),
+                telefono: telefono ?? null,
+                fechaNacimiento: fechaNacimiento ?? null,
+                puntosActuales: 0,
+                nivel: "Bronce",
+                perfilCompleto,
+                activo: true,
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            const docRef = await firestoreApp
+                .collection("usuariosApp")
+                .add(nuevoUsuario);
+
+            usuario = { id: docRef.id, ...nuevoUsuario };
+        } else {
+            const doc = snapshot.docs[0];
+            usuario = { id: doc.id, ...doc.data() };
+        }
+
+        return res.status(200).json({
+            success: true,
+            usuario,
+        });
+    } catch (error) {
+        console.error("❌ Error en auth:", error);
+        return res.status(401).json({
+            success: false,
+            message: "Token inválido o expirado",
+        });
+    }
+};
+
 export const socialLogin = async (req: Request, res: Response) => {
     try {
         // 1️⃣ Solo recibimos el token
@@ -93,12 +192,9 @@ export const socialLogin = async (req: Request, res: Response) => {
             usuario = { id: doc.id, ...doc.data() };
         }
 
-        // 7️⃣ Token propio (opcional)
-        const token = "JWT_TUYO_AQUI";
 
         return res.status(200).json({
             success: true,
-            token,
             usuario,
         });
     } catch (error) {
@@ -109,6 +205,7 @@ export const socialLogin = async (req: Request, res: Response) => {
         });
     }
 };
+
 
 
 export const emailLogin = async (req: Request, res: Response) => {
