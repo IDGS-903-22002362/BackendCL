@@ -17,21 +17,8 @@ import { CrearTallaDTO } from "../../models/catalogo.model";
  */
 export async function create(req: Request, res: Response): Promise<void> {
   try {
+    // Body ya validado por middleware de Zod
     const data: CrearTallaDTO = req.body;
-
-    // Validar que se envíen los campos requeridos
-    if (!data.codigo || !data.descripcion) {
-      const camposFaltantes = [];
-      if (!data.codigo) camposFaltantes.push("codigo");
-      if (!data.descripcion) camposFaltantes.push("descripcion");
-
-      res.status(400).json({
-        success: false,
-        message: "Faltan campos requeridos",
-        camposFaltantes,
-      });
-      return;
-    }
 
     const result = await createSize(data);
 
