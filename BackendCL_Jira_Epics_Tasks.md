@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 33 tareas (implementadas en código)
-- 🔲 **TODO:** 49 tareas (pendientes de implementar)
+- ✅ **DONE:** 34 tareas (implementadas en código)
+- 🔲 **TODO:** 48 tareas (pendientes de implementar)
 
 ---
 
@@ -474,7 +474,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-022: Implementar CRUD completo de Tallas
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Implementar módulo completo de tallas con endpoints CRUD.  
 **Criterios de Aceptación:**
 
@@ -488,6 +488,15 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Ordenar por campo `orden` si existe
 
 **Nota:** El modelo ya existe en `functions/src/models/catalogo.model.ts` (interface `Talla`)
+
+**Archivos de Código:**
+
+- `functions/src/services/size.service.ts` (servicio completo con 5 métodos y validaciones)
+- `functions/src/controllers/sizes/sizes.query.controller.ts` (getAll, getById)
+- `functions/src/controllers/sizes/sizes.command.controller.ts` (create, update, remove)
+- `functions/src/controllers/sizes/sizes.debug.controller.ts` (debugFirestore)
+- `functions/src/routes/sizes.routes.ts` (6 rutas montadas)
+- `functions/src/routes/index.ts` (integración en router principal)
 
 ---
 
@@ -1476,18 +1485,20 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (33 tareas)
+### ✅ DONE (34 tareas)
 
 - **Infraestructura Base:** 7 tareas
 - **Módulo Productos:** 11 tareas
 - **Módulo Líneas:** 7 tareas
 - **Módulo Categorías:** 2 tareas
+- **Módulo Proveedores:** 1 tarea
+- **Módulo Tallas:** 1 tarea
 - **Servicio Storage:** 1 tarea
-- **Otros:** 5 tareas
+- **Otros:** 4 tareas
 
-### 🔲 TODO (49 tareas)
+### 🔲 TODO (48 tareas)
 
-- **Catálogos Auxiliares** (Proveedores, Tallas): 3 tareas
+- **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 5 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 7 tareas
@@ -1506,7 +1517,6 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 1. **Tareas marcadas como DONE** están completamente implementadas en el código y funcionando.
 2. **Tareas marcadas como TODO** requieren implementación completa.
-3. Algunos modelos de datos ya existen (Categorías, Proveedores, Tallas) pero no tienen endpoints implementados.
-4. El sistema usa patrón CQRS (Command Query Responsibility Segregation) separando queries y commands.
-5. Todos los endpoints de eliminación implementan soft delete (marcan como inactivo).
-6. El sistema está preparado para Firebase Cloud Functions pero también puede ejecutarse localmente.
+3. El sistema usa patrón CQRS (Command Query Responsibility Segregation) separando queries y commands.
+4. Todos los endpoints de eliminación implementan soft delete cuando el modelo tiene campo 'activo', excepto Tallas que usa eliminación física.
+5. El sistema está preparado para Firebase Cloud Functions pero también puede ejecutarse localmente.
