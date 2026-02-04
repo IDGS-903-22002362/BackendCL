@@ -107,6 +107,31 @@ export const update = async (req: Request, res: Response) => {
         });
     }
 };
+export const completarPerfil = async (req: Request, res: Response) => {
+    try {
+
+        const uid = (req as any).user.uid; // viene del middleware auth
+        const data = req.body;
+
+        const usuario = await userAppService.updateByUid(uid, {
+            telefono: data.telefono,
+            fechaNacimiento: data.fechaNacimiento,
+            perfilCompleto: true
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: usuario
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Error completando perfil"
+        });
+    }
+};
+
 
 export const remove = async (req: Request, res: Response) => {
     try {
@@ -129,111 +154,3 @@ export const remove = async (req: Request, res: Response) => {
         });
     }
 };
-
-
-/**
-export const uploadImages = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const files = req.files as Express.Multer.File[];
-
-        if (!files || files.length === 0) {
-            return res
-                .status(400)
-                .json({ success: false, message: "No se enviaron archivos" });
-        }
-
-        const producto = await productService.getProductById(id);
-        if (!producto) {
-            return res
-                .status(404)
-                .json({
-                    success: false,
-                    message: `Producto con ID ${id} no encontrado`,
-                });
-        }
-
-        const imagenesData = files.map((file) => ({
-            buffer: file.buffer,
-            originalName: file.originalname,
-        }));
-
-        const urls = await storageService.uploadMultipleFiles(
-            imagenesData,
-            "productos"
-        );
-        const imagenesActuales = producto.imagenes || [];
-        const imagenesActualizadas = [...imagenesActuales, ...urls];
-
-        await productService.updateProduct(id, { imagenes: imagenesActualizadas });
-
-        return res.status(200).json({
-            success: true,
-            message: `${urls.length} imagen(es) subida(s) exitosamente`,
-            data: { urls, totalImagenes: imagenesActualizadas.length },
-        });
-    } catch (error) {
-        console.error("Error en POST /api/productos/:id/imagenes:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Error al subir las imágenes",
-            error: error instanceof Error ? error.message : "Error desconocido",
-        });
-    }
-};
-
-
-
-export const deleteImage = async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const { imageUrl } = req.body;
-
-        if (!imageUrl) {
-            return res
-                .status(400)
-                .json({
-                    success: false,
-                    message: "Se requiere la URL de la imagen a eliminar",
-                });
-        }
-
-        const producto = await productService.getProductById(id);
-        if (!producto) {
-            return res
-                .status(404)
-                .json({
-                    success: false,
-                    message: `Producto con ID ${id} no encontrado`,
-                });
-        }
-
-        const imagenes = producto.imagenes || [];
-        if (!imagenes.includes(imageUrl)) {
-            return res
-                .status(404)
-                .json({
-                    success: false,
-                    message: "La imagen no existe en este producto",
-                });
-        }
-
-        await storageService.deleteFile(imageUrl);
-        const imagenesActualizadas = imagenes.filter((url) => url !== imageUrl);
-        await productService.updateProduct(id, { imagenes: imagenesActualizadas });
-
-        return res.status(200).json({
-            success: true,
-            message: "Imagen eliminada exitosamente",
-            data: { imagenesRestantes: imagenesActualizadas.length },
-        });
-    } catch (error) {
-        console.error("Error en DELETE /api/productos/:id/imagenes:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Error al eliminar la imagen",
-            error: error instanceof Error ? error.message : "Error desconocido",
-        });
-    }
-};
- */
