@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 34 tareas (implementadas en código)
-- 🔲 **TODO:** 48 tareas (pendientes de implementar)
+- ✅ **DONE:** 35 tareas (implementadas en código)
+- 🔲 **TODO:** 47 tareas (pendientes de implementar)
 
 ---
 
@@ -663,16 +663,38 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-031: Implementar validación de datos de entrada
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Implementar middleware de validación para validar datos de entrada en todos los endpoints.  
 **Criterios de Aceptación:**
 
-- Usar librería de validación (ej: express-validator, joi, zod)
-- Validar tipos de datos
-- Validar campos requeridos
-- Validar formatos (emails, URLs, etc.)
-- Retornar errores de validación estructurados
-- Aplicar a todos los endpoints POST y PUT
+- ✅ Usar librería de validación (Zod 3.22.4)
+- ✅ Validar tipos de datos
+- ✅ Validar campos requeridos
+- ✅ Validar formatos (emails, URLs, etc.)
+- ✅ Retornar errores de validación estructurados
+- ✅ Aplicar a todos los endpoints POST y PUT
+
+**Archivos de Código:**
+
+- `functions/src/middleware/validation.middleware.ts` (middleware centralizado)
+- `functions/src/middleware/validators/common.validator.ts` (schemas comunes)
+- `functions/src/middleware/validators/product.validator.ts` (validación de productos)
+- `functions/src/middleware/validators/category.validator.ts` (validación de categorías)
+- `functions/src/middleware/validators/line.validator.ts` (validación de líneas)
+- `functions/src/middleware/validators/provider.validator.ts` (validación de proveedores)
+- `functions/src/middleware/validators/size.validator.ts` (validación de tallas)
+- Todas las rutas actualizadas para usar middleware de validación
+- Controllers refactorizados (eliminada validación manual)
+
+**Mejoras de Seguridad Implementadas:**
+
+- Prevención de mass assignment con `.strict()` en todos los schemas
+- Validación de tipos en runtime (no solo compile-time)
+- Validación de formatos (email, URL)
+- Validación de rangos numéricos (positive, nonnegative)
+- Validación de longitud de strings
+- Rechazo automático de campos extra no definidos
+- Mensajes de error estructurados y claros
 
 ---
 
@@ -1485,9 +1507,9 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (34 tareas)
+### ✅ DONE (35 tareas)
 
-- **Infraestructura Base:** 7 tareas
+- **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas
 - **Módulo Líneas:** 7 tareas
 - **Módulo Categorías:** 2 tareas
@@ -1496,10 +1518,10 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 4 tareas
 
-### 🔲 TODO (48 tareas)
+### 🔲 TODO (47 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
-- **Infraestructura adicional:** 5 tareas
+- **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 7 tareas
 - **Carrito de Compras:** 7 tareas

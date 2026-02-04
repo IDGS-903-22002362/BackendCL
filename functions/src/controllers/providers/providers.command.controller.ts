@@ -7,40 +7,10 @@ import providerService from "../../services/provider.service";
  */
 export const create = async (req: Request, res: Response) => {
   try {
+    // Body ya validado por middleware de Zod
     const proveedorData = req.body;
 
-    // Validar campos requeridos
-    const camposRequeridos = ["nombre"];
-    const camposFaltantes = camposRequeridos.filter(
-      (campo) => !proveedorData[campo],
-    );
-
-    if (camposFaltantes.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Faltan campos requeridos",
-        camposFaltantes,
-      });
-    }
-
-    // Validar que el nombre no esté vacío
-    if (proveedorData.nombre.trim().length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "El nombre del proveedor no puede estar vacío",
-      });
-    }
-
-    // Crear proveedor
-    const nuevoProveedor = await providerService.createProvider({
-      nombre: proveedorData.nombre.trim(),
-      contacto: proveedorData.contacto?.trim(),
-      telefono: proveedorData.telefono?.trim(),
-      email: proveedorData.email?.trim(),
-      direccion: proveedorData.direccion?.trim(),
-      activo: proveedorData.activo ?? true,
-      notas: proveedorData.notas?.trim(),
-    });
+    const nuevoProveedor = await providerService.createProvider(proveedorData);
 
     return res.status(201).json({
       success: true,
