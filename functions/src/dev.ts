@@ -7,7 +7,7 @@ import app from "./app";
 // Verificar el entorno
 if (process.env.IS_LOCAL !== "true") {
   console.warn(
-    "⚠️  ADVERTENCIA: Estás ejecutando el servidor de desarrollo sin IS_LOCAL=true"
+    "⚠️  ADVERTENCIA: Estás ejecutando el servidor de desarrollo sin IS_LOCAL=true",
   );
 }
 
@@ -20,7 +20,7 @@ app.listen(PORT, () => {
   │   🚀 Servidor de Desarrollo Local Club León Activo     │
   │                                                        │
   │   📡 API URL:   http://localhost:${PORT}/api              │
-  │   📝 Swagger:   (Pendiente de configurar)              │
+  │   📝 Swagger:   http://localhost:${PORT}/api-docs      │
   │   👤 Admin SDK: Inicializado                           │
   │                                                        │
   ╰────────────────────────────────────────────────────────╯
