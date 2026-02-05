@@ -10,7 +10,6 @@ import * as commandController from "../controllers/users/users.command.controlle
 import * as debugController from "../controllers/users/users.debug.controller";
 import { authMiddleware } from "../utils/middlewares";
 
-
 const router = Router();
 
 // ==========================================
@@ -18,8 +17,22 @@ const router = Router();
 // ==========================================
 
 /**
- * GET /api/usuarios/debug
- * Endpoint de diagnóstico para verificar conexión a Firestore
+ * @swagger
+ * /api/usuarios/debug:
+ *   get:
+ *     summary: Diagnóstico de Firestore para usuarios
+ *     description: Endpoint de diagnóstico protegido para verificar conexión a Firestore
+ *     tags: [Debug]
+ *     deprecated: true
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Diagnóstico completado
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/debug", authMiddleware, debugController.debugFirestore);
 
@@ -28,14 +41,70 @@ router.get("/debug", authMiddleware, debugController.debugFirestore);
 // ==========================================
 
 /**
- * GET /api/usuarios
- * Obtiene todos los usuarios activos
+ * @swagger
+ * /api/usuarios:
+ *   get:
+ *     summary: Listar todos los usuarios activos
+ *     description: Obtiene la lista de usuarios activos. Requiere autenticación.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lista de usuarios obtenida exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/", authMiddleware, queryController.getAll);
 
 /**
- * GET /api/usuarios/:id
- * Obtiene un usuario específico por ID
+ * @swagger
+ * /api/usuarios/{id}:
+ *   get:
+ *     summary: Obtener usuario por ID
+ *     description: Retorna un usuario específico. Requiere autenticación.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Usuario encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/User'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/:id", authMiddleware, queryController.getById);
 
@@ -54,8 +123,42 @@ router.get("/categoria/:categoriaId", queryController.getByCategory);
 router.get("/linea/:lineaId", queryController.getByLine);
 */
 /**
- * GET /api/usuarios/buscar/:termino
- * Busca usuarios por término
+ * @swagger
+ * /api/usuarios/buscar/{termino}:
+ *   get:
+ *     summary: Buscar usuarios por término
+ *     description: Busca usuarios por nombre o email. Requiere autenticación.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: termino
+ *         required: true
+ *         schema:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 100
+ *     responses:
+ *       200:
+ *         description: Resultados de búsqueda
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/User'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/buscar/:termino", authMiddleware, queryController.search);
 
@@ -64,32 +167,163 @@ router.get("/buscar/:termino", authMiddleware, queryController.search);
 // ==========================================
 
 /**
- * POST /api/usuarios
- * Crea un nuevo usuario
+ * @swagger
+ * /api/usuarios/exists/email:
+ *   get:
+ *     summary: Verificar si un email existe
+ *     description: Verifica si un email ya está registrado en el sistema
+ *     tags: [Users]
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: email
+ *     responses:
+ *       200:
+ *         description: Respuesta de verificación
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 exists:
+ *                   type: boolean
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ */
+router.get("/exists/email", commandController.checkEmail);
+
+/**
+ * @swagger
+ * /api/usuarios:
+ *   post:
+ *     summary: Crear nuevo usuario
+ *     description: Crea un nuevo usuario en el sistema
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - uid
+ *               - provider
+ *               - nombre
+ *               - email
+ *             properties:
+ *               uid:
+ *                 type: string
+ *               provider:
+ *                 type: string
+ *                 enum: [google, apple, email]
+ *               nombre:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               telefono:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Usuario creado exitosamente
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/", commandController.create);
 
-
-router.get("/exists/email", commandController.checkEmail);
 /**
- * Update /api/usuarios/completar
+ * @swagger
+ * /api/usuarios/completar-perfil:
+ *   put:
+ *     summary: Completar perfil de usuario
+ *     description: Permite al usuario completar su información de perfil. Requiere autenticación.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               telefono:
+ *                 type: string
+ *               fechaNacimiento:
+ *                 type: string
+ *                 format: date
+ *     responses:
+ *       200:
+ *         description: Perfil actualizado exitosamente
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
-router.put("/completar-perfil", authMiddleware, commandController.completarPerfil);
+router.put(
+  "/completar-perfil",
+  authMiddleware,
+  commandController.completarPerfil,
+);
 
 /**
- * PUT /api/usuarios/:id
- * Actualiza un usuario existente
+ * @swagger
+ * /api/usuarios/{id}:
+ *   put:
+ *     summary: Actualizar usuario existente
+ *     description: Actualiza los datos de un usuario
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *     responses:
+ *       200:
+ *         description: Usuario actualizado exitosamente
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.put("/:id", commandController.update);
 
 /**
- * DELETE /api/usuarios/:id
- * Elimina un usuario (soft delete)
+ * @swagger
+ * /api/usuarios/{id}:
+ *   delete:
+ *     summary: Eliminar usuario (soft delete)
+ *     description: Marca un usuario como inactivo
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Usuario eliminado exitosamente
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.delete("/:id", commandController.remove);
-
-
-
 
 /**
  * POST /api/usuarios/:id/imagenes
