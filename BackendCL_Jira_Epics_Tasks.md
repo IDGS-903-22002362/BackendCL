@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 36 tareas (implementadas en código)
-- 🔲 **TODO:** 46 tareas (pendientes de implementar)
+- ✅ **DONE:** 37 tareas (implementadas en código)
+- 🔲 **TODO:** 45 tareas (pendientes de implementar)
 
 ---
 
@@ -904,13 +904,21 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-044: Modelo de datos de Orden
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Crear modelo de datos para órdenes de compra.  
 **Criterios de Aceptación:**
 
 - Interface de Orden con campos: id, usuarioId, items, subtotal, impuestos, total, estado, direccionEnvio, metodoPago, createdAt, updatedAt
 - Estados: pendiente, confirmada, en_proceso, enviada, entregada, cancelada
 - Items con: productoId, cantidad, precioUnitario, subtotal
+
+**Archivos de Código:**
+
+- `functions/src/models/orden.model.ts` (interfaces completas con JSDoc)
+- `functions/src/middleware/validators/orden.validator.ts` (schemas Zod con validación estricta)
+- `functions/src/config/swagger.config.ts` (schemas registrados para documentación API)
+
+**Nota:** Modelo completo implementado con tipos TypeScript estrictos, enums para estados y métodos de pago, DTOs para create/update, validación Zod con .strict() para prevenir mass assignment, y estructura completa de dirección de envío. No usa soft delete (órdenes canceladas mantienen estado CANCELADA). Listo para implementación de servicios y controladores.
 
 ---
 
@@ -1516,7 +1524,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (35 tareas)
+### ✅ DONE (37 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas
@@ -1524,15 +1532,16 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Categorías:** 2 tareas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
+- **Módulo Órdenes:** 1 tarea
 - **Servicio Storage:** 1 tarea
-- **Otros:** 4 tareas
+- **Otros:** 5 tareas
 
-### 🔲 TODO (47 tareas)
+### 🔲 TODO (45 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
-- **Órdenes y Pedidos:** 7 tareas
+- **Órdenes y Pedidos:** 6 tareas
 - **Carrito de Compras:** 7 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
