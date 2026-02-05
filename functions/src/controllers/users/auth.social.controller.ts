@@ -104,7 +104,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
 
 export const socialLogin = async (req: Request, res: Response) => {
     try {
-        // 1️⃣ Solo recibimos el token
+        //Solo recibimos el token
         const { idToken } = req.body;
 
         if (!idToken) {
@@ -114,7 +114,7 @@ export const socialLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 2️⃣ Verificar token Firebase
+        //Verificar token Firebase
         const decoded = await admin.auth().verifyIdToken(idToken);
 
         const { uid, email, name } = decoded;
@@ -126,7 +126,7 @@ export const socialLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 3️⃣ Detectar provider desde Firebase
+        //Detectar provider desde Firebase
         const firebaseProvider =
             decoded.firebase?.sign_in_provider ??
             (decoded.firebase?.identities
@@ -140,7 +140,7 @@ export const socialLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 4️⃣ NORMALIZAR provider (🔥 AQUÍ VA LO QUE PREGUNTAS 🔥)
+        //NORMALIZAR provider (🔥 AQUÍ VA LO QUE PREGUNTAS 🔥)
         const providerMap: Record<string, "google" | "apple" | "email"> = {
             "password": "email",
             "google.com": "google",
@@ -156,7 +156,7 @@ export const socialLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 5️⃣ Buscar usuario por UID
+        //Buscar usuario por UID
         const snapshot = await firestoreApp
             .collection("usuariosApp")
             .where("uid", "==", uid)
@@ -165,7 +165,7 @@ export const socialLogin = async (req: Request, res: Response) => {
 
         let usuario;
 
-        // 6️⃣ Crear usuario si no existe
+        //Crear usuario si no existe
         if (snapshot.empty) {
             const now = admin.firestore.Timestamp.now();
 
@@ -239,10 +239,6 @@ export const emailLogin = async (req: Request, res: Response) => {
         const doc = snapshot.docs[0];
         const usuario = { id: doc.id, ...doc.data() };
 
-        // ⚠️ IMPORTANTE: Verificar contraseña
-        // Esto depende de cómo almacenes las contraseñas
-        // Si usas Firebase Auth, deberías usar signInWithEmailAndPassword en el frontend
-        // y enviar el token al backend
 
         // Generar token JWT o usar Firebase token
         const token = "GENERA_TU_TOKEN_AQUI";
