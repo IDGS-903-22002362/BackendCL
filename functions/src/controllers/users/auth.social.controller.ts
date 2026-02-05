@@ -3,7 +3,7 @@ import { firestoreApp } from "../../config/app.firebase";
 
 import { admin } from "../../config/firebase.admin";
 
-
+//auth funcionando
 export const registerOrLogin = async (req: Request, res: Response) => {
     try {
         const { idToken, nombre, telefono, fechaNacimiento } = req.body;
@@ -15,7 +15,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 1️⃣ Verificar token Firebase
+        //Verificar token Firebase
         const decoded = await admin.auth().verifyIdToken(idToken);
 
         const { uid, email, name } = decoded;
@@ -27,7 +27,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 2️⃣ Detectar provider
+        // Detectar provider
         const firebaseProvider =
             decoded.firebase?.sign_in_provider ?? "password";
 
@@ -46,7 +46,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
             });
         }
 
-        // 3️⃣ Buscar usuario por UID
+        // Buscar usuario por UID
         const snapshot = await firestoreApp
             .collection("usuariosApp")
             .where("uid", "==", uid)
@@ -60,7 +60,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
             !!telefono &&
             !!fechaNacimiento;
 
-        // 4️⃣ Crear usuario si no existe
+        //Crear usuario si no existe
         if (snapshot.empty) {
             const now = admin.firestore.Timestamp.now();
 
