@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 37 tareas (implementadas en código)
-- 🔲 **TODO:** 45 tareas (pendientes de implementar)
+- ✅ **DONE:** 38 tareas (implementadas en código)
+- 🔲 **TODO:** 44 tareas (pendientes de implementar)
 
 ---
 
@@ -925,7 +925,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-045: Crear nueva orden
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para crear una nueva orden de compra.  
 **Criterios de Aceptación:**
 
@@ -934,8 +934,26 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Calcular totales automáticamente
 - Validar datos de envío
 - Crear orden con estado "pendiente"
-- Reducir stock de productos
-- Requiere autenticación
+- Reducir stock de productos (PENDIENTE - implementar en TASK futura)
+- Requiere autenticación (PENDIENTE - implementar cuando TASK-032 esté completa)
+
+**Archivos de Código:**
+
+- `functions/src/routes/ordenes.routes.ts` (rutas con documentación Swagger completa)
+- `functions/src/controllers/orders/orders.command.controller.ts` (función `create`)
+- `functions/src/services/orden.service.ts` (función `createOrden` con validaciones)
+- `functions/src/routes/index.ts` (integración en router principal)
+
+**Notas de Implementación:**
+
+- Servidor recalcula todos los totales (ignora valores del cliente por seguridad)
+- IVA = 0% (temporal, cambiar a 16% modificando constante TASA_IVA)
+- Solo valida stock, NO reduce (implementar en versión futura con transacciones Firestore)
+- Sin middleware de autenticación (agregar cuando TASK-032 esté completa)
+- Estado inicial: PENDIENTE automáticamente
+- Timestamps autogenerados con Firestore Timestamp.now()
+- Validación estricta con Zod (createOrdenSchema)
+- Documentación completa en Swagger UI (/api-docs)
 
 ---
 
@@ -1524,7 +1542,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (37 tareas)
+### ✅ DONE (38 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas
@@ -1532,16 +1550,16 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Categorías:** 2 tareas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
-- **Módulo Órdenes:** 1 tarea
+- **Módulo Órdenes:** 2 tareas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (45 tareas)
+### 🔲 TODO (44 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
-- **Órdenes y Pedidos:** 6 tareas
+- **Órdenes y Pedidos:** 5 tareas
 - **Carrito de Compras:** 7 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas

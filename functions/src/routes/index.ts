@@ -18,6 +18,7 @@ import providersRoutes from "./providers.routes";
 import sizesRoutes from "./sizes.routes";
 import usersRoutes from "./users.routes";
 import authRoutes from "./auth.routes";
+import ordenesRoutes from "./ordenes.routes";
 
 const router = Router();
 
@@ -32,8 +33,10 @@ router.use("/proveedores", providersRoutes);
 router.use("/tallas", sizesRoutes);
 router.use("/usuarios", usersRoutes);
 router.use("/auth", authRoutes);
+router.use("/ordenes", ordenesRoutes);
 
 // Futuros módulos:
-// router.use('/ordenes', ordersRoutes);
+// router.use('/carrito', carritoRoutes);
+// router.use('/pagos', pagosRoutes);
 
 export default router;
