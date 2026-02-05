@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 35 tareas (implementadas en código)
-- 🔲 **TODO:** 47 tareas (pendientes de implementar)
+- ✅ **DONE:** 36 tareas (implementadas en código)
+- 🔲 **TODO:** 46 tareas (pendientes de implementar)
 
 ---
 
@@ -746,7 +746,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-035: Documentación de API (Swagger/OpenAPI)
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Implementar documentación de API usando Swagger/OpenAPI.  
 **Criterios de Aceptación:**
 
@@ -755,6 +755,15 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Documentar modelos de datos
 - Documentar códigos de respuesta
 - Endpoint /api-docs para acceso a documentación
+
+**Notas de Implementación:**
+
+- Implementado con swagger-jsdoc + swagger-ui-express
+- Documentados 50+ endpoints usando JSDoc annotations
+- Integración automática con schemas Zod usando zod-to-json-schema
+- Configuración BearerAuth para endpoints protegidos
+- Documentación de usuario disponible en functions/SWAGGER.md
+- Acceso: http://localhost:3000/api-docs (desarrollo)
 
 ---
 

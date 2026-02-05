@@ -24,9 +24,18 @@ const router = Router();
 // ============================================
 
 /**
- * GET /api/tallas/debug
- * Endpoint de diagnóstico para verificar conexión a Firestore
- * y consultar estructura de datos de tallas
+ * @swagger
+ * /api/tallas/debug:
+ *   get:
+ *     summary: Diagnóstico de Firestore para tallas
+ *     description: Endpoint de diagnóstico para verificar conexión a Firestore y estructura de datos
+ *     tags: [Debug]
+ *     deprecated: true
+ *     responses:
+ *       200:
+ *         description: Diagnóstico completado
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/debug", debugController.debugFirestore);
 
@@ -35,14 +44,66 @@ router.get("/debug", debugController.debugFirestore);
 // ============================================
 
 /**
- * GET /api/tallas
- * Obtener todas las tallas ordenadas por 'orden'
+ * @swagger
+ * /api/tallas:
+ *   get:
+ *     summary: Listar todas las tallas
+ *     description: Obtiene todas las tallas ordenadas por el campo 'orden'
+ *     tags: [Sizes]
+ *     responses:
+ *       200:
+ *         description: Lista de tallas obtenida exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: integer
+ *                   example: 6
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Size'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/", queryController.getAll);
 
 /**
- * GET /api/tallas/:id
- * Obtener una talla específica por su ID
+ * @swagger
+ * /api/tallas/{id}:
+ *   get:
+ *     summary: Obtener talla por ID
+ *     description: Retorna una talla específica por su ID
+ *     tags: [Sizes]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID de la talla
+ *         schema:
+ *           type: string
+ *           example: "m"
+ *     responses:
+ *       200:
+ *         description: Talla encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/Size'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/:id", validateParams(idParamSchema), queryController.getById);
 
@@ -51,16 +112,71 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
 // ============================================
 
 /**
- * POST /api/tallas
- * Crear una nueva talla
- * Body: { codigo: string, descripcion: string, orden?: number }
+ * @swagger
+ * /api/tallas:
+ *   post:
+ *     summary: Crear nueva talla
+ *     description: Crea una nueva talla en el sistema
+ *     tags: [Sizes]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateSize'
+ *           example:
+ *             codigo: "XL"
+ *             descripcion: "Extra Grande"
+ *             orden: 5
+ *     responses:
+ *       201:
+ *         description: Talla creada exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/Size'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/", validateBody(createSizeSchema), commandController.create);
 
 /**
- * PUT /api/tallas/:id
- * Actualizar una talla existente
- * Body: { codigo?: string, descripcion?: string, orden?: number }
+ * @swagger
+ * /api/tallas/{id}:
+ *   put:
+ *     summary: Actualizar talla existente
+ *     description: Actualiza los campos de una talla
+ *     tags: [Sizes]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateSize'
+ *     responses:
+ *       200:
+ *         description: Talla actualizada exitosamente
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.put(
   "/:id",
@@ -70,8 +186,25 @@ router.put(
 );
 
 /**
- * DELETE /api/tallas/:id
- * Eliminar una talla (eliminación física)
+ * @swagger
+ * /api/tallas/{id}:
+ *   delete:
+ *     summary: Eliminar talla (eliminación física)
+ *     description: Elimina permanentemente una talla del sistema. NOTA - A diferencia de otros recursos, las tallas usan eliminación física, no soft delete.
+ *     tags: [Sizes]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Talla eliminada exitosamente
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.delete("/:id", validateParams(idParamSchema), commandController.remove);
 
