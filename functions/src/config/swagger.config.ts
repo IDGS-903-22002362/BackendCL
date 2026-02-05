@@ -21,6 +21,10 @@ import {
   createSizeSchema,
   updateSizeSchema,
 } from "../middleware/validators/size.validator";
+import {
+  createOrdenSchema,
+  updateOrdenSchema,
+} from "../middleware/validators/orden.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -86,6 +90,10 @@ const swaggerDefinition = {
     {
       name: "Users",
       description: "Gestión de usuarios de la aplicación",
+    },
+    {
+      name: "Orders",
+      description: "Gestión de órdenes de compra",
     },
     {
       name: "Authentication",
@@ -206,6 +214,9 @@ const swaggerDefinition = {
       CreateSize: zodToJsonSchema(createSizeSchema),
       UpdateSize: zodToJsonSchema(updateSizeSchema),
 
+      CreateOrden: zodToJsonSchema(createOrdenSchema),
+      UpdateOrden: zodToJsonSchema(updateOrdenSchema),
+
       // Modelos completos de entidades
       Product: {
         type: "object",
@@ -311,6 +322,86 @@ const swaggerDefinition = {
           activo: { type: "boolean", example: true },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      Orden: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "orden_12345" },
+          usuarioId: { type: "string", example: "firebase_uid_xyz" },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                productoId: { type: "string", example: "prod_001" },
+                cantidad: { type: "integer", example: 2 },
+                precioUnitario: { type: "number", example: 1299.99 },
+                subtotal: { type: "number", example: 2599.98 },
+                tallaId: { type: "string", example: "m" },
+              },
+            },
+          },
+          subtotal: { type: "number", example: 2599.98 },
+          impuestos: { type: "number", example: 415.99 },
+          total: { type: "number", example: 3015.97 },
+          estado: {
+            type: "string",
+            enum: [
+              "PENDIENTE",
+              "CONFIRMADA",
+              "EN_PROCESO",
+              "ENVIADA",
+              "ENTREGADA",
+              "CANCELADA",
+            ],
+            example: "PENDIENTE",
+          },
+          direccionEnvio: {
+            type: "object",
+            properties: {
+              nombre: { type: "string", example: "Juan Pérez" },
+              telefono: { type: "string", example: "4771234567" },
+              calle: { type: "string", example: "Blvd. Adolfo López Mateos" },
+              numero: { type: "string", example: "2771" },
+              numeroInterior: { type: "string", example: "A" },
+              colonia: { type: "string", example: "Jardines del Moral" },
+              ciudad: { type: "string", example: "León" },
+              estado: { type: "string", example: "Guanajuato" },
+              codigoPostal: { type: "string", example: "37160" },
+              referencias: {
+                type: "string",
+                example: "Entre calle X y calle Y",
+              },
+            },
+          },
+          metodoPago: {
+            type: "string",
+            enum: [
+              "TARJETA",
+              "TRANSFERENCIA",
+              "EFECTIVO",
+              "PAYPAL",
+              "MERCADOPAGO",
+            ],
+            example: "TARJETA",
+          },
+          transaccionId: { type: "string", example: "tx_abc123" },
+          referenciaPago: { type: "string", example: "REF-2024-001" },
+          numeroGuia: { type: "string", example: "FEDEX-123456789" },
+          transportista: { type: "string", example: "FedEx" },
+          costoEnvio: { type: "number", example: 150.0 },
+          notas: { type: "string", example: "Entregar en horario laboral" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-15T10:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-20T14:20:00Z",
+          },
         },
       },
     },
