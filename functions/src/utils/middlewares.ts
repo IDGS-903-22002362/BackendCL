@@ -2,6 +2,8 @@ import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import { Request, Response, NextFunction } from "express";
 
+
+//Middleware de autenticacion
 export const authMiddleware = async (
     req: Request,
     res: Response,
