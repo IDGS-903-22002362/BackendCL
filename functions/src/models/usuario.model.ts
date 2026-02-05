@@ -1,13 +1,13 @@
 /**
  * Modelos para gestión de usuarios y sistema de puntos
- * Sistema de lealtad para clientes del Club León
+ * Sistema para clientes del Club León
  */
 
 import { Timestamp } from "firebase-admin/firestore";
 
 /**
  * Interface para Usuario de la App
- * Representa a los clientes registrados en el sistema de lealtad
+ * Representa a los clientes registrados en el sistema de club leon
  */
 export interface UsuarioApp {
   id?: string; // Documento ID en Firestore
