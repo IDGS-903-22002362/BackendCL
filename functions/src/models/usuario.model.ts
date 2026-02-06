@@ -6,6 +6,16 @@
 import { Timestamp } from "firebase-admin/firestore";
 
 /**
+ * Enum para roles de usuario
+ * Define los niveles de acceso en el sistema
+ */
+export enum RolUsuario {
+  ADMIN = "ADMIN", // Administrador con acceso total
+  EMPLEADO = "EMPLEADO", // Empleado con permisos de gestión
+  CLIENTE = "CLIENTE", // Cliente regular del sistema
+}
+
+/**
  * Interface para Usuario de la App
  * Representa a los clientes registrados en el sistema de club leon
  */
@@ -15,6 +25,7 @@ export interface UsuarioApp {
   provider: "google" | "apple" | "email";
   nombre: string; // Nombre completo del usuario
   email: string; // Correo electrónico
+  rol: RolUsuario; // Rol del usuario en el sistema (default: CLIENTE)
   telefono?: string; // Teléfono de contacto (opcional)
   puntosActuales: number; // Saldo actual de puntos
   nivel?: string; // Nivel de lealtad (ej: "Bronce", "Plata", "Oro", "Platino")
@@ -28,6 +39,7 @@ export interface CrearUsuarioAppDTO {
   uid: string;
   nombre: string;
   email: string;
+  rol?: RolUsuario; // Opcional, por defecto CLIENTE
   telefono?: string;
   fechaNacimiento?: Date;
 }
@@ -78,9 +90,9 @@ export type OrigenPuntos =
  * DTOs para gestión de usuarios
  */
 
-
 export interface ActualizarUsuarioAppDTO {
   nombre?: string;
+  rol?: RolUsuario; // Permite cambiar rol del usuario
   telefono?: string;
   fechaNacimiento?: Date;
   nivel?: string;

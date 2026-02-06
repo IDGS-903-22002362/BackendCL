@@ -247,3 +247,20 @@ export const updateOrdenSchema = z
       .optional(),
   })
   .strict();
+
+/**
+ * Schema para actualizar estado de orden
+ * Solo permite cambiar el estado (endpoint específico PUT /api/ordenes/:id/estado)
+ * Usa .strict() para prevenir mass assignment
+ */
+export const updateEstadoOrdenSchema = z
+  .object({
+    estado: z.nativeEnum(EstadoOrden, {
+      required_error: "El estado es requerido",
+      invalid_type_error: "El estado debe ser válido",
+      errorMap: () => ({
+        message: `El estado debe ser uno de: ${Object.values(EstadoOrden).join(", ")}`,
+      }),
+    }),
+  })
+  .strict();

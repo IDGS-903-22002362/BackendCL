@@ -18,6 +18,7 @@ import {
   ItemOrden,
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
+import { RolUsuario } from "../models/usuario.model";
 
 /**
  * Colección de órdenes en Firestore
@@ -172,11 +173,101 @@ export class OrdenService {
   }
 
   /**
+   * Actualiza el estado de una orden existente
+   * REGLAS DE NEGOCIO:
+   * - Solo propietarios o admins pueden actualizar el estado
+   * - Valida que la orden exista
+   * - Valida ownership (BOLA prevention según AGENTS.MD)
+   * - Admins/empleados pueden actualizar cualquier orden
+   * - Clientes solo pueden actualizar sus propias órdenes
+   * - Actualiza timestamp automáticamente
+   * - Todas las transiciones de estado son permitidas (flexibilidad operativa)
+   *
+   * @param ordenId - ID de la orden a actualizar
+   * @param nuevoEstado - Nuevo estado de la orden
+   * @param usuarioActual - Usuario actual con uid y rol
+   * @returns Promise con la orden actualizada
+   * @throws Error si:
+   *   - La orden no existe (404)
+   *   - El usuario no tiene permisos (403 - BOLA prevention)
+   *   - Error al actualizar en Firestore
+   */
+  async updateEstadoOrden(
+    ordenId: string,
+    nuevoEstado: EstadoOrden,
+    usuarioActual: { uid: string; rol: RolUsuario },
+  ): Promise<Orden> {
+    try {
+      console.log(
+        `🔄 Actualizando estado de orden ${ordenId} a ${nuevoEstado} por usuario ${usuarioActual.uid}`,
+      );
+
+      // PASO 1: Obtener orden de Firestore
+      const ordenDoc = await firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(ordenId)
+        .get();
+
+      // PASO 2: Validar que la orden existe
+      if (!ordenDoc.exists) {
+        throw new Error(`La orden con ID "${ordenId}" no existe`);
+      }
+
+      const orden = ordenDoc.data() as Orden;
+
+      // PASO 3: Validar OWNERSHIP (BOLA prevention)
+      const esAdmin =
+        usuarioActual.rol === RolUsuario.ADMIN ||
+        usuarioActual.rol === RolUsuario.EMPLEADO;
+      const esPropietario = orden.usuarioId === usuarioActual.uid;
+
+      if (!esAdmin && !esPropietario) {
+        throw new Error(
+          "No tienes permisos para actualizar el estado de esta orden",
+        );
+      }
+
+      console.log(
+        `  ✓ Permisos validados: ${esAdmin ? "Admin" : "Propietario"}`,
+      );
+
+      // PASO 4: Actualizar estado en Firestore
+      const now = admin.firestore.Timestamp.now();
+      await firestoreTienda.collection(ORDENES_COLLECTION).doc(ordenId).update({
+        estado: nuevoEstado,
+        updatedAt: now,
+      });
+
+      // PASO 5: Retornar orden actualizada
+      const ordenActualizada: Orden = {
+        ...orden,
+        id: ordenId,
+        estado: nuevoEstado,
+        updatedAt: now,
+      };
+
+      console.log(
+        `✅ Estado de orden ${ordenId} actualizado exitosamente a ${nuevoEstado}`,
+      );
+
+      // TODO: Enviar notificación al usuario según nuevo estado (ÉPICA 11 - TASK-078 a 082)
+
+      return ordenActualizada;
+    } catch (error) {
+      console.error("❌ Error al actualizar estado de orden:", error);
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar el estado de la orden",
+      );
+    }
+  }
+
+  /**
    * TODO: Métodos futuros a implementar
    *
    * - getAllOrdenes(): Listar todas las órdenes con filtros
    * - getOrdenById(): Obtener orden por ID
-   * - updateEstadoOrden(): Actualizar estado de orden
    * - cancelarOrden(): Cancelar orden y restaurar stock
    * - getOrdenesByUsuario(): Historial de órdenes de un usuario
    */
