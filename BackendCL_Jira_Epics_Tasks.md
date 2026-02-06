@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 39 tareas (implementadas en código)
-- 🔲 **TODO:** 43 tareas (pendientes de implementar)
+- ✅ **DONE:** 41 tareas (implementadas en código)
+- 🔲 **TODO:** 41 tareas (pendientes de implementar)
 
 ---
 
@@ -960,7 +960,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-046: Listar órdenes
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para listar órdenes con filtros.  
 **Criterios de Aceptación:**
 
@@ -971,20 +971,63 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Paginación
 - Ordenar por fecha descendente
 
+**Archivos de Código:**
+
+- `functions/src/controllers/orders/orders.query.controller.ts` (getAll, getById)
+- `functions/src/services/orden.service.ts` (getAllOrdenes, getOrdenById)
+- `functions/src/middleware/validators/orden.validator.ts` (listOrdenesQuerySchema)
+- `functions/src/routes/ordenes.routes.ts` (GET / y GET /:id con documentación Swagger)
+- `functions/src/config/swagger.config.ts` (ListOrdenesQuery schema registrado)
+- `firestore.indexes.json` (4 índices compuestos para órdenes)
+
+**Notas de Implementación:**
+
+- **Sin paginación**: Mantiene consistencia con otros endpoints (productos, categorías)
+- **Autorización BOLA Prevention**: Clientes forzados a ver solo sus órdenes, admins ven todas
+- **Filtros implementados**:
+  - `estado`: Múltiples estados via CSV (`?estado=PENDIENTE,CONFIRMADA`)
+  - `usuarioId`: Solo para admins (ignorado para clientes)
+  - `fechaDesde`/`fechaHasta`: ISO 8601 datetime completo
+- **Ordenamiento**: Siempre por `createdAt` descendente
+- **Validación**: Schema Zod sin `.strict()` en query params
+- **Firestore indexes**: 4 índices compuestos agregados para soportar queries
+  - `usuarioId + createdAt desc`
+  - `usuarioId + estado + createdAt desc`
+  - `estado + createdAt desc`
+  - `createdAt desc`
+- **Documentación**: Swagger completa con ejemplos para cliente, admin y filtros
+- Respuestas: 200 (éxito con count), 401 (no autenticado), 403 (sin ownership en getById), 404 (no encontrada en getById), 500 (error)
+
 ---
 
 #### TASK-047: Obtener orden por ID
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
-**Descripción:** Endpoint para obtener detalles de una orden específica.  
+**Estado:** ✅ DONE  
+**Descripción:** Endpoint para obtener detalles de una orden específica con información populada.  
 **Criterios de Aceptación:**
 
 - GET /api/ordenes/:id
-- Incluir información de productos (populate)
-- Incluir información de usuario
-- Clientes solo pueden ver sus propias órdenes
-- Administradores pueden ver todas
+- Incluir información de productos (populate) ✅
+- Incluir información de usuario ✅
+- Clientes solo pueden ver sus propias órdenes ✅
+- Administradores pueden ver todas ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/ordenes.routes.ts` (GET /:id con documentación Swagger completa)
+- `functions/src/controllers/orders/orders.query.controller.ts` (función `getById` actualizada)
+- `functions/src/services/orden.service.ts` (función `getOrdenByIdConPopulate` agregada)
+
+**Notas de Implementación:**
+
+- **Populate automático** de productos: clave, descripción, imágenes
+- **Populate automático** de usuario: nombre, email, telefono
+- **BOLA Prevention**: Validación de ownership implementada
+- Si un producto fue eliminado, muestra "Producto no disponible"
+- Si el usuario no existe, muestra valores por defecto
+- Documentación Swagger completa con ejemplos de respuestas populadas
+- Respuestas: 200 (éxito con populate), 401 (no autenticado), 403 (sin ownership), 404 (no encontrada), 500 (error)
 
 ---
 
@@ -1562,7 +1605,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (39 tareas)
+### ✅ DONE (41 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas
@@ -1570,16 +1613,16 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Categorías:** 2 tareas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
-- **Módulo Órdenes:** 3 tareas
+- **Módulo Órdenes:** 5 tareas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (43 tareas)
+### 🔲 TODO (41 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
-- **Órdenes y Pedidos:** 4 tareas
+- **Órdenes y Pedidos:** 2 tareas
 - **Carrito de Compras:** 7 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
