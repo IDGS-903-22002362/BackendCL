@@ -6,8 +6,16 @@
 
 import { Router } from "express";
 import * as commandController from "../controllers/orders/orders.command.controller";
-import { validateBody } from "../middleware/validation.middleware";
-import { createOrdenSchema } from "../middleware/validators/orden.validator";
+import {
+  validateBody,
+  validateParams,
+} from "../middleware/validation.middleware";
+import {
+  createOrdenSchema,
+  updateEstadoOrdenSchema,
+} from "../middleware/validators/orden.validator";
+import { idParamSchema } from "../middleware/validators/common.validator";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -225,6 +233,132 @@ const router = Router();
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/", validateBody(createOrdenSchema), commandController.create);
+
+/**
+ * @swagger
+ * /api/ordenes/{id}/estado:
+ *   put:
+ *     summary: Actualizar estado de una orden
+ *     description: |
+ *       Actualiza el estado de una orden existente. Solo administradores y empleados pueden realizar esta operación.
+ *
+ *       **IMPORTANTE:**
+ *       - Requiere autenticación con Bearer token
+ *       - Solo usuarios con rol ADMIN o EMPLEADO pueden cambiar estados
+ *       - Valida ownership: los usuarios solo pueden actualizar sus propias órdenes (admins pueden actualizar cualquiera)
+ *       - Todas las transiciones de estado son permitidas (flexibilidad operativa)
+ *       - Actualiza timestamp updatedAt automáticamente
+ *       - Estados disponibles: PENDIENTE, CONFIRMADA, EN_PROCESO, ENVIADA, ENTREGADA, CANCELADA
+ *     tags: [Orders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID único de la orden a actualizar
+ *         schema:
+ *           type: string
+ *           example: "orden_abc123"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateEstadoOrden'
+ *           example:
+ *             estado: "CONFIRMADA"
+ *     responses:
+ *       200:
+ *         description: Estado actualizado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Estado de la orden actualizado a CONFIRMADA"
+ *                 data:
+ *                   type: object
+ *                   description: Orden actualizada con nuevo estado
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "orden_abc123"
+ *                     estado:
+ *                       type: string
+ *                       example: "CONFIRMADA"
+ *                       enum: [PENDIENTE, CONFIRMADA, EN_PROCESO, ENVIADA, ENTREGADA, CANCELADA]
+ *                     updatedAt:
+ *                       type: object
+ *                       description: Timestamp de Firestore actualizado
+ *       400:
+ *         description: Error de validación (estado inválido)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Validación fallida"
+ *                 errors:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       campo:
+ *                         type: string
+ *                         example: "estado"
+ *                       mensaje:
+ *                         type: string
+ *                         example: "El estado debe ser uno de: PENDIENTE, CONFIRMADA, EN_PROCESO, ENVIADA, ENTREGADA, CANCELADA"
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         description: Sin permisos (no es admin/empleado o no es propietario de la orden)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No tienes permisos para actualizar esta orden"
+ *       404:
+ *         description: Orden no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Orden no encontrada"
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/:id/estado",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  validateBody(updateEstadoOrdenSchema),
+  commandController.updateEstado,
+);
 
 // ==========================================
 // QUERIES (Lectura - Consulta de datos)
