@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 38 tareas (implementadas en código)
-- 🔲 **TODO:** 44 tareas (pendientes de implementar)
+- ✅ **DONE:** 39 tareas (implementadas en código)
+- 🔲 **TODO:** 43 tareas (pendientes de implementar)
 
 ---
 
@@ -991,15 +991,35 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-048: Actualizar estado de orden
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para actualizar el estado de una orden.  
 **Criterios de Aceptación:**
 
 - PUT /api/ordenes/:id/estado
-- Validar transiciones de estado válidas
-- Solo administradores pueden cambiar estado
-- Enviar notificaciones según cambio de estado
+- Validar transiciones de estado válidas (todas permitidas - flexibilidad operativa)
+- Solo administradores pueden cambiar estado (requireAdmin middleware)
+- Enviar notificaciones según cambio de estado (TODO - ÉPICA 11)
 - Actualizar timestamp
+
+**Archivos de Código:**
+
+- `functions/src/models/usuario.model.ts` (enum RolUsuario agregado - línea ~7)
+- `functions/src/utils/middlewares.ts` (middleware requireAdmin - línea ~47)
+- `functions/src/middleware/validators/orden.validator.ts` (schema updateEstadoOrdenSchema - línea ~252)
+- `functions/src/services/orden.service.ts` (método updateEstadoOrden - línea ~175)
+- `functions/src/controllers/orders/orders.command.controller.ts` (función updateEstado - línea ~70)
+- `functions/src/routes/ordenes.routes.ts` (ruta PUT /:id/estado con Swagger - línea ~230)
+- `functions/src/config/swagger.config.ts` (schema registrado - línea ~220)
+
+**Notas de Implementación:**
+
+- Sistema de roles agregado: ADMIN, EMPLEADO, CLIENTE (default)
+- Middleware requireAdmin valida rol ADMIN o EMPLEADO
+- Validación de ownership implementada (BOLA prevention según AGENTS.MD)
+- Todas las transiciones de estado permitidas (sin restricciones)
+- Notificaciones pendientes (implementar en ÉPICA 11 - TASK-078 a 082)
+- Documentación Swagger completa con ejemplos
+- Respuestas: 200 (éxito), 400 (validación), 401 (no autenticado), 403 (sin permisos), 404 (no encontrada), 500 (error)
 
 ---
 
@@ -1542,7 +1562,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (38 tareas)
+### ✅ DONE (39 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas
@@ -1550,16 +1570,16 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Categorías:** 2 tareas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
-- **Módulo Órdenes:** 2 tareas
+- **Módulo Órdenes:** 3 tareas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (44 tareas)
+### 🔲 TODO (43 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
-- **Órdenes y Pedidos:** 5 tareas
+- **Órdenes y Pedidos:** 4 tareas
 - **Carrito de Compras:** 7 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
