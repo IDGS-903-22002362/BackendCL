@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 41 tareas (implementadas en código)
-- 🔲 **TODO:** 41 tareas (pendientes de implementar)
+- ✅ **DONE:** 42 tareas (implementadas en código)
+- 🔲 **TODO:** 40 tareas (pendientes de implementar)
 
 ---
 
@@ -934,26 +934,29 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Calcular totales automáticamente
 - Validar datos de envío
 - Crear orden con estado "pendiente"
-- Reducir stock de productos (PENDIENTE - implementar en TASK futura)
+- Reducir stock de productos ✅ **IMPLEMENTADO con transacciones Firestore**
 - Requiere autenticación (PENDIENTE - implementar cuando TASK-032 esté completa)
 
 **Archivos de Código:**
 
 - `functions/src/routes/ordenes.routes.ts` (rutas con documentación Swagger completa)
 - `functions/src/controllers/orders/orders.command.controller.ts` (función `create`)
-- `functions/src/services/orden.service.ts` (función `createOrden` con validaciones)
+- `functions/src/services/orden.service.ts` (función `createOrden` con validaciones y reducción de stock)
+- `functions/src/services/product.service.ts` (métodos `decrementStock`, `incrementStock`, `restoreStockFromOrder`)
 - `functions/src/routes/index.ts` (integración en router principal)
 
 **Notas de Implementación:**
 
 - Servidor recalcula todos los totales (ignora valores del cliente por seguridad)
 - IVA = 0% (temporal, cambiar a 16% modificando constante TASA_IVA)
-- Solo valida stock, NO reduce (implementar en versión futura con transacciones Firestore)
+- ✅ **REDUCE STOCK automáticamente** usando transacciones Firestore (atomicidad garantizada)
+- Rollback automático si falla la reducción de stock (orden no se crea)
 - Sin middleware de autenticación (agregar cuando TASK-032 esté completa)
 - Estado inicial: PENDIENTE automáticamente
 - Timestamps autogenerados con Firestore Timestamp.now()
 - Validación estricta con Zod (createOrdenSchema)
 - Documentación completa en Swagger UI (/api-docs)
+- Cumple con AGENTS.MD sección 9: usa transacciones para decrementos de stock
 
 ---
 
@@ -1069,15 +1072,36 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-049: Cancelar orden
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para cancelar una orden.  
 **Criterios de Aceptación:**
 
 - PUT /api/ordenes/:id/cancelar
-- Solo se puede cancelar si está en estado "pendiente" o "confirmada"
-- Restaurar stock de productos
-- Cambiar estado a "cancelada"
-- Enviar notificación al usuario
+- Solo se puede cancelar si está en estado "pendiente" o "confirmada" ✅
+- Restaurar stock de productos ✅
+- Cambiar estado a "cancelada" ✅
+- Enviar notificación al usuario (TODO - ÉPICA 11)
+
+**Archivos de Código:**
+
+- `functions/src/routes/ordenes.routes.ts` (línea ~368 - ruta PUT /:id/cancelar con documentación Swagger completa)
+- `functions/src/controllers/orders/orders.command.controller.ts` (función `cancel` - línea ~170)
+- `functions/src/services/orden.service.ts` (método `cancelarOrden` - línea ~620)
+- `functions/src/services/product.service.ts` (métodos de stock: `decrementStock`, `incrementStock`, `restoreStockFromOrder` - línea ~350)
+
+**Notas de Implementación:**
+
+- ✅ **Validación estricta de estado:** Solo permite cancelar órdenes PENDIENTE o CONFIRMADA (error 400 si no cumple)
+- ✅ **Autorización BOLA prevention:** Admins/empleados pueden cancelar cualquier orden, clientes solo sus propias órdenes
+- ✅ **Restauración de stock automática:** Usa transacciones Firestore para atomicidad (cumple AGENTS.MD sección 9)
+- ✅ **Cambio de estado a CANCELADA:** Permanente y no reversible (audit trail)
+- ✅ **Rollback inteligente:** Si falla la restauración de stock, loggea error pero completa la cancelación (evita bloqueos)
+- Requiere autenticación: `authMiddleware` (Bearer token)
+- Validación de params: `idParamSchema` con Zod
+- Documentación Swagger completa con ejemplos para cliente, admin y casos de error
+- Respuestas: 200 (éxito), 400 (estado inválido), 401 (no autenticado), 403 (sin ownership), 404 (no encontrada), 500 (error)
+- TODO: Notificaciones al usuario (pendiente - implementar en ÉPICA 11 TASK-080)
+- Logs detallados para auditoría y debugging
 
 ---
 
@@ -1605,24 +1629,24 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (41 tareas)
+### ✅ DONE (42 tareas)
 
 - **Infraestructura Base:** 8 tareas
-- **Módulo Productos:** 11 tareas
+- **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
 - **Módulo Líneas:** 7 tareas
 - **Módulo Categorías:** 2 tareas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
-- **Módulo Órdenes:** 5 tareas
+- **Módulo Órdenes:** 6 tareas (TASK-044 a TASK-049 completas)
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (41 tareas)
+### 🔲 TODO (40 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
-- **Órdenes y Pedidos:** 2 tareas
+- **Órdenes y Pedidos:** 1 tarea (TASK-050)
 - **Carrito de Compras:** 7 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
@@ -1641,3 +1665,4 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 3. El sistema usa patrón CQRS (Command Query Responsibility Segregation) separando queries y commands.
 4. Todos los endpoints de eliminación implementan soft delete cuando el modelo tiene campo 'activo', excepto Tallas que usa eliminación física.
 5. El sistema está preparado para Firebase Cloud Functions pero también puede ejecutarse localmente.
+6. **Gestión de stock:** Implementada con transacciones Firestore para atomicidad (TASK-045, TASK-049). Cumple con AGENTS.MD sección 9.

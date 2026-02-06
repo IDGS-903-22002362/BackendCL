@@ -158,8 +158,110 @@ export const updateEstado = async (req: Request, res: Response) => {
 };
 
 /**
+ * PUT /api/ordenes/:id/cancelar
+ * Cancela una orden existente y restaura el stock de productos
+ *
+ * LÓGICA DE NEGOCIO (TASK-049):
+ * - Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA
+ * - Admins/empleados pueden cancelar cualquier orden
+ * - Clientes pueden cancelar sus propias órdenes (ownership validation)
+ * - Cambia el estado a CANCELADA automáticamente
+ * - Restaura stock de todos los productos (transacciones atómicas)
+ * - Actualiza timestamp automáticamente
+ *
+ * SEGURIDAD (BOLA prevention - AGENTS.MD):
+ * - Requiere autenticación (authMiddleware)
+ * - Valida ownership en capa de servicio
+ * - Solo propietario o admin puede cancelar
+ *
+ * @param req.params.id - ID de la orden a cancelar
+ * @param req.user - Usuario autenticado (agregado por authMiddleware)
+ * @returns 200 - Orden cancelada exitosamente
+ * @returns 400 - Estado no permite cancelación (no es PENDIENTE/CONFIRMADA)
+ * @returns 401 - No autenticado (token inválido o ausente)
+ * @returns 403 - Sin permisos (no es propietario ni admin)
+ * @returns 404 - Orden no encontrada
+ * @returns 500 - Error del servidor
+ */
+export const cancel = async (req: Request, res: Response) => {
+  try {
+    const ordenId = req.params.id;
+
+    // Validar autenticación (debería estar garantizado por authMiddleware)
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "No autenticado",
+        error: "Se requiere autenticación para cancelar una orden",
+      });
+    }
+
+    // Construir objeto de usuario actual
+    const usuarioActual = {
+      uid: req.user.uid,
+      rol: req.user.rol as RolUsuario,
+    };
+
+    console.log(
+      `🚫 PUT /api/ordenes/${ordenId}/cancelar - Usuario: ${usuarioActual.uid} (${usuarioActual.rol})`,
+    );
+
+    // Llamar al servicio (valida ownership, estado, restaura stock)
+    const ordenCancelada = await ordenService.cancelarOrden(
+      ordenId,
+      usuarioActual,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Orden cancelada exitosamente",
+      data: ordenCancelada,
+    });
+  } catch (error) {
+    console.error(`Error en PUT /api/ordenes/:id/cancelar:`, error);
+
+    // Determinar código de estado según tipo de error
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+
+      // 404: Orden no existe
+      if (errorMessage.includes("no existe")) {
+        statusCode = 404;
+      }
+      // 403: Sin permisos (BOLA)
+      else if (
+        errorMessage.includes("no tienes permisos") ||
+        errorMessage.includes("solo puedes")
+      ) {
+        statusCode = 403;
+      }
+      // 400: Estado no permite cancelación
+      else if (
+        errorMessage.includes("no se puede cancelar") ||
+        errorMessage.includes("solo se pueden cancelar")
+      ) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Orden no encontrada"
+          : statusCode === 403
+            ? "Sin permisos para cancelar esta orden"
+            : statusCode === 400
+              ? "No se puede cancelar la orden en su estado actual"
+              : "Error al cancelar la orden",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+/**
  * TODO: Métodos futuros a implementar
  *
  * export const update = async (req: Request, res: Response) => { ... }
- * export const cancel = async (req: Request, res: Response) => { ... }
  */
