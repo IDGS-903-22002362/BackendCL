@@ -256,8 +256,6 @@ export const updateOrdenSchema = z
 export const updateEstadoOrdenSchema = z
   .object({
     estado: z.nativeEnum(EstadoOrden, {
-      required_error: "El estado es requerido",
-      invalid_type_error: "El estado debe ser válido",
       errorMap: () => ({
         message: `El estado debe ser uno de: ${Object.values(EstadoOrden).join(", ")}`,
       }),
