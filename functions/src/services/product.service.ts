@@ -123,10 +123,10 @@ export class ProductService {
 
       const productos: Producto[] = snapshot.docs.map(
         (doc) =>
-        ({
-          id: doc.id,
-          ...doc.data(),
-        } as Producto)
+          ({
+            id: doc.id,
+            ...doc.data(),
+          }) as Producto,
       );
 
       // Ordenar alfabéticamente en memoria
@@ -154,10 +154,10 @@ export class ProductService {
 
       const productos: Producto[] = snapshot.docs.map(
         (doc) =>
-        ({
-          id: doc.id,
-          ...doc.data(),
-        } as Producto)
+          ({
+            id: doc.id,
+            ...doc.data(),
+          }) as Producto,
       );
 
       // Ordenar alfabéticamente en memoria
@@ -191,15 +191,15 @@ export class ProductService {
       const productos: Producto[] = snapshot.docs
         .map(
           (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          } as Producto)
+            ({
+              id: doc.id,
+              ...doc.data(),
+            }) as Producto,
         )
         .filter(
           (producto) =>
             producto.descripcion.toLowerCase().includes(searchTermLower) ||
-            producto.clave.toLowerCase().includes(searchTermLower)
+            producto.clave.toLowerCase().includes(searchTermLower),
         );
 
       return productos;
@@ -215,7 +215,7 @@ export class ProductService {
    * @returns Promise con el producto creado incluyendo su ID
    */
   async createProduct(
-    productoData: Omit<Producto, "id" | "createdAt" | "updatedAt">
+    productoData: Omit<Producto, "id" | "createdAt" | "updatedAt">,
   ): Promise<Producto> {
     try {
       const now = admin.firestore.Timestamp.now();
@@ -229,16 +229,18 @@ export class ProductService {
 
       if (!existingProduct.empty) {
         throw new Error(
-          `Ya existe un producto con la clave: ${productoData.clave}`
+          `Ya existe un producto con la clave: ${productoData.clave}`,
         );
       }
 
       // Crear el documento con timestamps
-      const docRef = await firestoreTienda.collection(PRODUCTOS_COLLECTION).add({
-        ...productoData,
-        createdAt: now,
-        updatedAt: now,
-      });
+      const docRef = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .add({
+          ...productoData,
+          createdAt: now,
+          updatedAt: now,
+        });
 
       // Obtener el documento creado
       const docSnapshot = await docRef.get();
@@ -250,13 +252,13 @@ export class ProductService {
       } as Producto;
 
       console.log(
-        `Producto creado: ${nuevoProducto.descripcion} (ID: ${nuevoProducto.id})`
+        `Producto creado: ${nuevoProducto.descripcion} (ID: ${nuevoProducto.id})`,
       );
       return nuevoProducto;
     } catch (error) {
       console.error("❌ Error al crear producto:", error);
       throw new Error(
-        error instanceof Error ? error.message : "Error al crear el producto"
+        error instanceof Error ? error.message : "Error al crear el producto",
       );
     }
   }
@@ -269,7 +271,7 @@ export class ProductService {
    */
   async updateProduct(
     id: string,
-    updateData: Partial<Omit<Producto, "id" | "createdAt" | "updatedAt">>
+    updateData: Partial<Omit<Producto, "id" | "createdAt" | "updatedAt">>,
   ): Promise<Producto> {
     try {
       const docRef = firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(id);
@@ -289,7 +291,7 @@ export class ProductService {
 
         if (!existingProduct.empty && existingProduct.docs[0].id !== id) {
           throw new Error(
-            `Ya existe otro producto con la clave: ${updateData.clave}`
+            `Ya existe otro producto con la clave: ${updateData.clave}`,
           );
         }
       }
@@ -315,7 +317,7 @@ export class ProductService {
       throw new Error(
         error instanceof Error
           ? error.message
-          : "Error al actualizar el producto"
+          : "Error al actualizar el producto",
       );
     }
   }
@@ -345,8 +347,161 @@ export class ProductService {
     } catch (error) {
       console.error("Error al eliminar producto:", error);
       throw new Error(
-        error instanceof Error ? error.message : "Error al eliminar el producto"
+        error instanceof Error
+          ? error.message
+          : "Error al eliminar el producto",
       );
+    }
+  }
+
+  /**
+   * Reduce el stock de un producto de manera atómica usando transacciones Firestore
+   * REGLAS DE NEGOCIO (AGENTS.MD sección 9):
+   * - Usa transacciones para atomicidad (evita race conditions)
+   * - Valida que el producto exista
+   * - Valida que haya stock suficiente
+   * - Actualiza existencias y timestamp
+   *
+   * @param productoId - ID del producto
+   * @param cantidad - Cantidad a reducir
+   * @throws Error si:
+   *   - El producto no existe
+   *   - No hay stock suficiente
+   *   - Error en la transacción
+   */
+  async decrementStock(productoId: string, cantidad: number): Promise<void> {
+    const docRef = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .doc(productoId);
+
+    try {
+      await firestoreTienda.runTransaction(async (transaction) => {
+        const doc = await transaction.get(docRef);
+
+        if (!doc.exists) {
+          throw new Error(
+            `Producto con ID "${productoId}" no encontrado al reducir stock`,
+          );
+        }
+
+        const producto = doc.data() as Producto;
+        const existenciasActuales = producto.existencias || 0;
+
+        if (existenciasActuales < cantidad) {
+          throw new Error(
+            `Stock insuficiente para el producto "${producto.descripcion}". ` +
+              `Disponible: ${existenciasActuales}, Solicitado: ${cantidad}`,
+          );
+        }
+
+        const nuevasExistencias = existenciasActuales - cantidad;
+
+        transaction.update(docRef, {
+          existencias: nuevasExistencias,
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+
+        console.log(
+          `✅ Stock reducido: ${producto.descripcion} | ${existenciasActuales} → ${nuevasExistencias}`,
+        );
+      });
+    } catch (error) {
+      console.error(
+        `❌ Error al reducir stock de producto ${productoId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Incrementa el stock de un producto de manera atómica usando transacciones Firestore
+   * Usado para restaurar stock al cancelar órdenes
+   * REGLAS DE NEGOCIO (AGENTS.MD sección 9):
+   * - Usa transacciones para atomicidad
+   * - Valida que el producto exista
+   * - Actualiza existencias y timestamp
+   *
+   * @param productoId - ID del producto
+   * @param cantidad - Cantidad a incrementar
+   * @throws Error si:
+   *   - El producto no existe
+   *   - Error en la transacción
+   */
+  async incrementStock(productoId: string, cantidad: number): Promise<void> {
+    const docRef = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .doc(productoId);
+
+    try {
+      await firestoreTienda.runTransaction(async (transaction) => {
+        const doc = await transaction.get(docRef);
+
+        if (!doc.exists) {
+          throw new Error(
+            `Producto con ID "${productoId}" no encontrado al incrementar stock`,
+          );
+        }
+
+        const producto = doc.data() as Producto;
+        const existenciasActuales = producto.existencias || 0;
+        const nuevasExistencias = existenciasActuales + cantidad;
+
+        transaction.update(docRef, {
+          existencias: nuevasExistencias,
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+
+        console.log(
+          `✅ Stock restaurado: ${producto.descripcion} | ${existenciasActuales} → ${nuevasExistencias}`,
+        );
+      });
+    } catch (error) {
+      console.error(
+        `❌ Error al incrementar stock de producto ${productoId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Restaura el stock de múltiples productos a partir de items de una orden
+   * Usado al cancelar órdenes para devolver productos al inventario
+   * REGLAS DE NEGOCIO:
+   * - Procesa items secuencialmente (Firestore no soporta transacciones paralelas)
+   * - Si un producto falla, intenta restaurar los demás
+   * - Loggea errores pero no detiene el proceso
+   *
+   * @param items - Array de items de la orden con productoId y cantidad
+   * @returns Promise<void>
+   */
+  async restoreStockFromOrder(
+    items: Array<{ productoId: string; cantidad: number }>,
+  ): Promise<void> {
+    console.log(`🔄 Restaurando stock para ${items.length} productos...`);
+
+    const errores: string[] = [];
+
+    for (const item of items) {
+      try {
+        await this.incrementStock(item.productoId, item.cantidad);
+      } catch (error) {
+        const mensaje = `Error al restaurar stock de ${item.productoId}: ${error instanceof Error ? error.message : "Error desconocido"}`;
+        console.error(`⚠️ ${mensaje}`);
+        errores.push(mensaje);
+        // Continuar con los siguientes productos aunque uno falle
+      }
+    }
+
+    if (errores.length > 0) {
+      console.warn(
+        `⚠️ Restauración de stock completada con ${errores.length} errores`,
+      );
+      // No lanzar error para evitar bloquear la cancelación
+      // Los errores se loggean para auditoría
+    } else {
+      console.log(`✅ Stock restaurado exitosamente para todos los productos`);
     }
   }
 }

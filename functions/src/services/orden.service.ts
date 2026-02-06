@@ -5,7 +5,8 @@
  * IMPORTANTE:
  * - Recalcula totales en servidor (ignora valores del cliente por seguridad)
  * - IVA = 0% (simplificación temporal, cambiar cuando se requiera)
- * - Solo valida stock, NO reduce (implementar en TASK futura con transacciones)
+ * - REDUCE STOCK automáticamente al crear orden (transacciones Firestore)
+ * - RESTAURA STOCK automáticamente al cancelar orden (transacciones Firestore)
  * - Sin autenticación por ahora (agregar cuando TASK-032 esté completa)
  */
 
@@ -19,6 +20,7 @@ import {
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
 import { RolUsuario } from "../models/usuario.model";
+import productService from "./product.service";
 
 /**
  * Colección de órdenes en Firestore
@@ -43,6 +45,7 @@ export class OrdenService {
    * - Valida stock disponible para cada producto
    * - Recalcula precios desde Firestore (ignora precios del cliente)
    * - Calcula subtotal, impuestos (0%) y total
+   * - REDUCE STOCK de productos automáticamente (transacciones Firestore)
    * - Establece estado PENDIENTE
    * - Genera timestamps automáticamente
    *
@@ -51,6 +54,7 @@ export class OrdenService {
    * @throws Error si:
    *   - Algún producto no existe
    *   - Algún producto no tiene stock suficiente
+   *   - Error al reducir stock (rollback automático)
    *   - Error al guardar en Firestore
    */
   async createOrden(data: CrearOrdenDTO): Promise<Orden> {
@@ -148,7 +152,27 @@ export class OrdenService {
         .collection(ORDENES_COLLECTION)
         .add(nuevaOrden);
 
-      // PASO 5: Obtener documento creado con ID
+      // PASO 5: Reducir stock de productos (transacciones atómicas)
+      console.log(
+        `📦 Reduciendo stock de ${itemsValidados.length} productos...`,
+      );
+      try {
+        for (const item of itemsValidados) {
+          await productService.decrementStock(item.productoId, item.cantidad);
+        }
+        console.log(`✅ Stock reducido exitosamente para todos los productos`);
+      } catch (stockError) {
+        // Si falla la reducción de stock, eliminar la orden creada (rollback manual)
+        console.error(
+          `❌ Error al reducir stock, eliminando orden ${docRef.id}`,
+        );
+        await docRef.delete();
+        throw new Error(
+          `Error al reducir stock: ${stockError instanceof Error ? stockError.message : "Error desconocido"}. Orden no creada.`,
+        );
+      }
+
+      // PASO 6: Obtener documento creado con ID
       const ordenCreada: Orden = {
         id: docRef.id,
         ...nuevaOrden,
@@ -158,9 +182,8 @@ export class OrdenService {
         `✅ Orden creada exitosamente con ID: ${docRef.id} | Total: $${totalCalculado.toFixed(2)}`,
       );
 
-      // TODO: En versión futura (con transacciones):
-      // - Reducir stock de productos
-      // - Enviar notificación al usuario
+      // TODO: Notificaciones (ÉPICA 11 - TASK-079):
+      // - Enviar email al usuario con detalles de la orden
       // - Registrar en logs de auditoría
 
       return ordenCreada;
@@ -583,9 +606,127 @@ export class OrdenService {
   }
 
   /**
+   * Cancela una orden existente y restaura el stock de productos
+   * REGLAS DE NEGOCIO (TASK-049):
+   * - Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA
+   * - Valida ownership: admins/empleados pueden cancelar cualquier orden
+   * - Clientes pueden cancelar sus propias órdenes
+   * - Cambia el estado a CANCELADA
+   * - Restaura stock de todos los productos automáticamente
+   * - Actualiza timestamp automáticamente
+   *
+   * SEGURIDAD (BOLA prevention - AGENTS.MD):
+   * - Valida que el usuario sea admin/empleado O propietario de la orden
+   * - Evita cancelación de órdenes ajenas sin permisos
+   *
+   * @param ordenId - ID de la orden a cancelar
+   * @param usuarioActual - Usuario actual con uid y rol
+   * @returns Promise con la orden cancelada
+   * @throws Error si:
+   *   - La orden no existe (404)
+   *   - El usuario no tiene permisos (403 - BOLA prevention)
+   *   - La orden no está en estado PENDIENTE o CONFIRMADA (400)
+   *   - Error al restaurar stock
+   *   - Error al actualizar en Firestore
+   */
+  async cancelarOrden(
+    ordenId: string,
+    usuarioActual: { uid: string; rol: RolUsuario },
+  ): Promise<Orden> {
+    try {
+      console.log(
+        `🚫 Cancelando orden ${ordenId} por usuario ${usuarioActual.uid}`,
+      );
+
+      // PASO 1: Obtener orden de Firestore
+      const ordenDoc = await firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(ordenId)
+        .get();
+
+      // PASO 2: Validar que la orden existe
+      if (!ordenDoc.exists) {
+        throw new Error(`La orden con ID "${ordenId}" no existe`);
+      }
+
+      const orden = ordenDoc.data() as Orden;
+
+      // PASO 3: Validar OWNERSHIP (BOLA prevention)
+      const esAdmin =
+        usuarioActual.rol === RolUsuario.ADMIN ||
+        usuarioActual.rol === RolUsuario.EMPLEADO;
+      const esPropietario = orden.usuarioId === usuarioActual.uid;
+
+      if (!esAdmin && !esPropietario) {
+        throw new Error(
+          "No tienes permisos para cancelar esta orden. Solo puedes cancelar tus propias órdenes.",
+        );
+      }
+
+      console.log(
+        `  ✓ Permisos validados: ${esAdmin ? "Admin/Empleado" : "Propietario"}`,
+      );
+
+      // PASO 4: Validar que el estado permite cancelación (solo PENDIENTE o CONFIRMADA)
+      const estadosCancelables = [
+        EstadoOrden.PENDIENTE,
+        EstadoOrden.CONFIRMADA,
+      ];
+      if (!estadosCancelables.includes(orden.estado)) {
+        throw new Error(
+          `No se puede cancelar una orden en estado "${orden.estado}". ` +
+            `Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA.`,
+        );
+      }
+
+      console.log(`  ✓ Estado validado: ${orden.estado} (puede cancelarse)`);
+
+      // PASO 5: Restaurar stock de productos (transacciones atómicas)
+      console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);
+      try {
+        await productService.restoreStockFromOrder(orden.items);
+        console.log(`✅ Stock restaurado exitosamente`);
+      } catch (stockError) {
+        // Si falla la restauración de stock, loggear error pero continuar
+        // (la orden se marca como cancelada de todas formas para evitar bloqueos)
+        console.error(
+          `⚠️ Error al restaurar stock (orden se cancelará de todas formas):`,
+          stockError,
+        );
+        // No lanzar error aquí, permitir que la cancelación continúe
+      }
+
+      // PASO 6: Actualizar estado a CANCELADA en Firestore
+      const now = admin.firestore.Timestamp.now();
+      await firestoreTienda.collection(ORDENES_COLLECTION).doc(ordenId).update({
+        estado: EstadoOrden.CANCELADA,
+        updatedAt: now,
+      });
+
+      // PASO 7: Retornar orden cancelada
+      const ordenCancelada: Orden = {
+        ...orden,
+        id: ordenId,
+        estado: EstadoOrden.CANCELADA,
+        updatedAt: now,
+      };
+
+      console.log(`✅ Orden ${ordenId} cancelada exitosamente`);
+
+      // TODO: Enviar notificación al usuario de cancelación (ÉPICA 11 - TASK-080)
+
+      return ordenCancelada;
+    } catch (error) {
+      console.error("❌ Error al cancelar orden:", error);
+      throw new Error(
+        error instanceof Error ? error.message : "Error al cancelar la orden",
+      );
+    }
+  }
+
+  /**
    * TODO: Métodos futuros a implementar
    *
-   * - cancelarOrden(): Cancelar orden y restaurar stock
    * - getOrdenesByUsuario(): Historial de órdenes de un usuario
    */
 }

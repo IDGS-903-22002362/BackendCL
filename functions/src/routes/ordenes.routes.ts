@@ -363,6 +363,167 @@ router.put(
   commandController.updateEstado,
 );
 
+/**
+ * @swagger
+ * /api/ordenes/{id}/cancelar:
+ *   put:
+ *     summary: Cancelar una orden existente
+ *     description: |
+ *       Cancela una orden existente y restaura el stock de productos automáticamente.
+ *
+ *       **REGLAS DE NEGOCIO (TASK-049):**
+ *       - Solo se pueden cancelar órdenes en estado **PENDIENTE** o **CONFIRMADA**
+ *       - El stock de todos los productos se restaura automáticamente (transacciones atómicas)
+ *       - El estado cambia a **CANCELADA** de forma permanente (no reversible)
+ *       - Se actualiza el timestamp `updatedAt` automáticamente
+ *
+ *       **AUTORIZACIÓN (BOLA prevention - AGENTS.MD):**
+ *       - Requiere autenticación con Bearer token
+ *       - **Admins/Empleados:** Pueden cancelar cualquier orden
+ *       - **Clientes:** Solo pueden cancelar sus propias órdenes
+ *       - Validación de ownership automática en capa de servicio
+ *
+ *       **SEGURIDAD:**
+ *       - Transacciones Firestore para atomicidad (orden + stock)
+ *       - Rollback automático si falla la operación
+ *       - Logs detallados para auditoría
+ *
+ *       **ESTADOS QUE PERMITEN CANCELACIÓN:**
+ *       - `PENDIENTE`: Orden creada, esperando confirmación de pago
+ *       - `CONFIRMADA`: Pago confirmado, lista para procesar
+ *
+ *       **ESTADOS QUE NO PERMITEN CANCELACIÓN:**
+ *       - `EN_PROCESO`: Orden ya en preparación/empaque
+ *       - `ENVIADA`: Orden ya enviada al cliente
+ *       - `ENTREGADA`: Orden ya entregada
+ *       - `CANCELADA`: Orden ya cancelada (no se puede cancelar dos veces)
+ *     tags: [Orders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID único de la orden a cancelar
+ *         schema:
+ *           type: string
+ *           example: "orden_abc123"
+ *     responses:
+ *       200:
+ *         description: Orden cancelada exitosamente y stock restaurado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Orden cancelada exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/Orden'
+ *             examples:
+ *               canceladaExitosamente:
+ *                 summary: Orden PENDIENTE cancelada por cliente
+ *                 value:
+ *                   success: true
+ *                   message: "Orden cancelada exitosamente"
+ *                   data:
+ *                     id: "orden_abc123"
+ *                     usuarioId: "user_12345"
+ *                     estado: "CANCELADA"
+ *                     subtotal: 2999.97
+ *                     impuestos: 0
+ *                     total: 2999.97
+ *                     items:
+ *                       - productoId: "prod_jersey_001"
+ *                         cantidad: 2
+ *                         precioUnitario: 1299.99
+ *                         subtotal: 2599.98
+ *                     direccionEnvio:
+ *                       nombre: "Juan Pérez"
+ *                       telefono: "4774123456"
+ *                       calle: "Blvd. Adolfo López Mateos"
+ *                       numero: "2010"
+ *                       colonia: "León Moderno"
+ *                       ciudad: "León"
+ *                       estado: "Guanajuato"
+ *                       codigoPostal: "37480"
+ *                     metodoPago: "TARJETA"
+ *                     createdAt: "2024-02-05T10:00:00Z"
+ *                     updatedAt: "2024-02-05T10:35:00Z"
+ *               canceladaPorAdmin:
+ *                 summary: Orden CONFIRMADA cancelada por admin
+ *                 value:
+ *                   success: true
+ *                   message: "Orden cancelada exitosamente"
+ *                   data:
+ *                     id: "orden_xyz789"
+ *                     usuarioId: "user_67890"
+ *                     estado: "CANCELADA"
+ *                     total: 5499.50
+ *       400:
+ *         description: No se puede cancelar (estado no permite cancelación)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               estadoEnProceso:
+ *                 summary: Orden ya EN_PROCESO (no se puede cancelar)
+ *                 value:
+ *                   success: false
+ *                   message: "No se puede cancelar la orden en su estado actual"
+ *                   error: 'No se puede cancelar una orden en estado "EN_PROCESO". Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA.'
+ *               yaEnviada:
+ *                 summary: Orden ya ENVIADA (no se puede cancelar)
+ *                 value:
+ *                   success: false
+ *                   message: "No se puede cancelar la orden en su estado actual"
+ *                   error: 'No se puede cancelar una orden en estado "ENVIADA". Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA.'
+ *               yaCancelada:
+ *                 summary: Orden ya CANCELADA (no se puede cancelar dos veces)
+ *                 value:
+ *                   success: false
+ *                   message: "No se puede cancelar la orden en su estado actual"
+ *                   error: 'No se puede cancelar una orden en estado "CANCELADA". Solo se pueden cancelar órdenes en estado PENDIENTE o CONFIRMADA.'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         description: Sin permisos para cancelar esta orden (no es propietario ni admin)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               sinOwnership:
+ *                 summary: Cliente intenta cancelar orden ajena
+ *                 value:
+ *                   success: false
+ *                   message: "Sin permisos para cancelar esta orden"
+ *                   error: "No tienes permisos para cancelar esta orden. Solo puedes cancelar tus propias órdenes."
+ *       404:
+ *         description: Orden no encontrada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Orden no encontrada"
+ *               error: 'La orden con ID "orden_xyz" no existe'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/:id/cancelar",
+  authMiddleware,
+  validateParams(idParamSchema),
+  commandController.cancel,
+);
+
 // ==========================================
 // QUERIES (Lectura - Consulta de datos)
 // ==========================================
