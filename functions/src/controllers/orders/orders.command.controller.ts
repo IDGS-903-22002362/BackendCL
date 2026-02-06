@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import ordenService from "../../services/orden.service";
+import { EstadoOrden } from "../../models/orden.model";
+import { RolUsuario } from "../../models/usuario.model";
 
 /**
  * Controller: Orders Command (Escritura)
@@ -73,9 +75,91 @@ export const create = async (req: Request, res: Response) => {
 };
 
 /**
+ * PUT /api/ordenes/:id/estado
+ * Actualiza el estado de una orden existente
+ *
+ * LÓGICA DE NEGOCIO:
+ * - Solo admins/empleados pueden cambiar el estado (requireAdmin middleware)
+ * - Valida ownership: usuarios solo pueden actualizar sus órdenes
+ * - Admins pueden actualizar cualquier orden (BOLA prevention)
+ * - Todas las transiciones de estado son permitidas (flexibilidad operativa)
+ * - Actualiza timestamp automáticamente
+ *
+ * @param req.params.id - ID de la orden
+ * @param req.body.estado - Nuevo estado (validado por Zod middleware)
+ * @param req.user - Usuario autenticado (agregado por authMiddleware)
+ * @returns 200 - Estado actualizado exitosamente
+ * @returns 400 - Error de validación
+ * @returns 403 - Sin permisos (BOLA)
+ * @returns 404 - Orden no encontrada
+ * @returns 500 - Error del servidor
+ */
+export const updateEstado = async (req: Request, res: Response) => {
+  try {
+    const ordenId = req.params.id;
+    const { estado } = req.body as { estado: EstadoOrden };
+
+    // Validar que el usuario existe (agregado por authMiddleware)
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario no autenticado",
+      });
+    }
+
+    const usuarioActual = {
+      uid: req.user.uid,
+      rol: req.user.rol as RolUsuario,
+    };
+
+    console.log(
+      `📦 PUT /api/ordenes/${ordenId}/estado - Usuario: ${usuarioActual.uid}, Nuevo estado: ${estado}`,
+    );
+
+    // Llamar al servicio (valida ownership internamente)
+    const ordenActualizada = await ordenService.updateEstadoOrden(
+      ordenId,
+      estado,
+      usuarioActual,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Estado de la orden actualizado a ${estado}`,
+      data: ordenActualizada,
+    });
+  } catch (error) {
+    console.error("Error en PUT /api/ordenes/:id/estado:", error);
+
+    // Determinar código de estado según tipo de error
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      if (errorMessage.includes("no existe")) {
+        statusCode = 404;
+      } else if (errorMessage.includes("no tienes permisos")) {
+        statusCode = 403;
+      } else if (errorMessage.includes("validación")) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Orden no encontrada"
+          : statusCode === 403
+            ? "No tienes permisos para actualizar esta orden"
+            : "Error al actualizar el estado de la orden",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+/**
  * TODO: Métodos futuros a implementar
  *
  * export const update = async (req: Request, res: Response) => { ... }
  * export const cancel = async (req: Request, res: Response) => { ... }
- * export const updateEstado = async (req: Request, res: Response) => { ... }
  */
