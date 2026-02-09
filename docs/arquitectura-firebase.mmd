@@ -1,0 +1,12 @@
+flowchart LR
+    App[Flutter App]
+    Auth[Firebase Auth]
+    App --> Auth
+    Backend[Node.js Backend / Cloud Functions]
+    App --> Backend
+    Firestore[(Firestore DB)]
+    Backend --> Firestore
+    App -.-> Firestore
+    Storage[Cloud Storage]
+    Backend --> Storage
+    App --> Storage

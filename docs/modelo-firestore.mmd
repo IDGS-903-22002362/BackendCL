@@ -1,0 +1,76 @@
+classDiagram
+    class Categorias {
+        path: "categorias"
+        -- Fields --
+        string id
+        string nombre
+        string lineaId
+        number orden
+    }
+    class Lineas {
+        path: "lineas"
+        -- Fields --
+        string id
+        number codigo
+        string nombre
+        boolean activo
+        Timestamp createdAt
+        Timestamp updatedAt
+    }
+    class Productos {
+        path: "productos"
+        -- Fields --
+        string id
+        string clave
+        string descripcion
+        string lineaId
+        string categoriaId
+        number precioPublico
+        number precioCompra
+        number existencias
+        string proveedorId
+        string[] tallaIds
+        string[] imagenes
+        boolean activo
+        Timestamp createdAt
+        Timestamp updatedAt
+    }
+    class Proveedores {
+        path: "proveedores"
+    }
+    class Tallas {
+        path: "tallas"
+        -- Fields --
+        string id
+        string codigo
+        string descripcion
+        number orden
+    }
+    class UsuariosApp {
+        path: "usuariosApp"
+    }
+    class _test {
+        path: "_test"
+    }
+    class Conexion {
+        path: "conexion"
+    }
+    class Ubicaciones {
+        path: "ubicaciones"
+    }
+    class Configuracion {
+        path: "configuracion"
+    }
+    class Puntos {
+        path: "puntos"
+    }
+    class Tienda {
+        path: "tienda"
+    }
+    class Usuarios {
+        path: "usuarios"
+    }
+    Lineas "1" --> "*" Categorias : lineaId
+    Lineas "1" --> "*" Productos : lineaId
+    Categorias "1" --> "*" Productos : categoriaId
+    Proveedores "1" --> "*" Productos : proveedorId
