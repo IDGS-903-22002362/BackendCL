@@ -12,7 +12,8 @@
     "prebuild": "npm run clean",
     "watch": "tsc --watch",
     "seed": "ts-node-dev src/scripts/seed.ts",
-    "diagnostico": "ts-node-dev src/scripts/diagnostico.ts"
+    "diagnostico": "ts-node-dev src/scripts/diagnostico.ts",
+    "docs:firebase": "npx -y tsx tools/firebase-uml.ts"
   },
   "keywords": [
     "club-leon",
