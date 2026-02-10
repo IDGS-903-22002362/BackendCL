@@ -1285,13 +1285,30 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-056: Vaciar carrito
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para vaciar completamente el carrito.  
 **Criterios de Aceptación:**
 
-- DELETE /api/carrito
-- Eliminar todos los items
-- Retornar carrito vacío
+- DELETE /api/carrito ✅
+- Eliminar todos los items ✅
+- Retornar carrito vacío ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/carrito.routes.ts` (línea 327-371 — ruta DELETE / con Swagger completo)
+- `functions/src/controllers/carrito/carrito.command.controller.ts` (función `clearCart` línea 251-285)
+- `functions/src/services/carrito.service.ts` (método `clearCart` línea 580-618)
+
+**Notas de Implementación:**
+
+- **Vaciado completo**: Establece `items: [], subtotal: 0, total: 0` en Firestore
+- **Carrito persiste**: El documento del carrito no se elimina, solo se vacían los items
+- **Dual-mode auth**: `optionalAuthMiddleware` soporta Bearer token y `x-session-id` para anónimos
+- **Validación de existencia**: Si el carrito no existe, lo crea vacío automáticamente via `getOrCreateCart()`
+- **Timestamp actualizado**: `updatedAt` se actualiza con `Timestamp.now()`
+- **Errores mapeados**: Sin identificación → 400, carrito no encontrado → 500, servidor → 500
+- Documentación Swagger completa con ejemplos y respuestas de error
+- Respuestas: 200 (éxito), 400 (sin identificación), 500 (error)
 
 ---
 
