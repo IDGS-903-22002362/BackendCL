@@ -20,6 +20,7 @@ import usersRoutes from "./users.routes";
 import authRoutes from "./auth.routes";
 import ordenesRoutes from "./ordenes.routes";
 import newsRoutes from "./news.routes";
+import carritoRoutes from "./carrito.routes";
 
 const router = Router();
 
@@ -33,12 +34,12 @@ router.use("/categorias", categoriesRoutes);
 router.use("/proveedores", providersRoutes);
 router.use("/tallas", sizesRoutes);
 router.use("/usuarios", usersRoutes);
-router.use("/noticias", newsRoutes)
+router.use("/noticias", newsRoutes);
 router.use("/auth", authRoutes);
 router.use("/ordenes", ordenesRoutes);
+router.use("/carrito", carritoRoutes);
 
 // Futuros módulos:
-// router.use('/carrito', carritoRoutes);
 // router.use('/pagos', pagosRoutes);
 
 export default router;
