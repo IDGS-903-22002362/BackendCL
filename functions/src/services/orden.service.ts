@@ -725,10 +725,149 @@ export class OrdenService {
   }
 
   /**
-   * TODO: Métodos futuros a implementar
+   * Obtiene el historial de órdenes de un usuario específico con paginación cursor-based
    *
-   * - getOrdenesByUsuario(): Historial de órdenes de un usuario
+   * FILTROS DISPONIBLES:
+   * - estados: array de EstadoOrden (filtro 'in', max 10 valores)
+   * - fechaDesde: string ISO 8601
+   * - fechaHasta: string ISO 8601
+   *
+   * PAGINACIÓN:
+   * - limit: cantidad de resultados por página (default 10)
+   * - cursor: ID del último documento de la página anterior (Firestore startAfter)
+   *
+   * ORDENAMIENTO:
+   * - Siempre por createdAt descendente (más recientes primero)
+   *
+   * @param usuarioId - UID del usuario (Firebase Auth UID)
+   * @param filtros - Objeto con filtros opcionales (estados, fechaDesde, fechaHasta)
+   * @param paginacion - Objeto con limit y cursor opcional
+   * @returns Promise con objeto { ordenes, nextCursor }
    */
+  async getOrdenesByUsuario(
+    usuarioId: string,
+    filtros: {
+      estados?: string[];
+      fechaDesde?: string;
+      fechaHasta?: string;
+    },
+    paginacion: { limit: number; cursor?: string },
+  ): Promise<{ ordenes: Orden[]; nextCursor: string | null }> {
+    try {
+      console.log(
+        `📋 Obteniendo historial de órdenes para usuario: ${usuarioId}`,
+      );
+
+      // Construir query base: siempre filtrar por usuario
+      let query: FirebaseFirestore.Query = firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .where("usuarioId", "==", usuarioId);
+
+      // FILTRO: Por múltiples estados (usando 'in' operator)
+      if (filtros.estados && filtros.estados.length > 0) {
+        if (filtros.estados.length <= 10) {
+          query = query.where("estado", "in", filtros.estados);
+        } else {
+          console.warn(
+            "⚠️ Firestore 'in' query limitado a 10 valores. Ignorando filtro de estados.",
+          );
+        }
+      }
+
+      // FILTRO: Por rango de fechas
+      if (filtros.fechaDesde) {
+        const fechaDesdeDate = new Date(filtros.fechaDesde);
+        const timestampDesde =
+          admin.firestore.Timestamp.fromDate(fechaDesdeDate);
+        query = query.where("createdAt", ">=", timestampDesde);
+      }
+
+      if (filtros.fechaHasta) {
+        const fechaHastaDate = new Date(filtros.fechaHasta);
+        const timestampHasta =
+          admin.firestore.Timestamp.fromDate(fechaHastaDate);
+        query = query.where("createdAt", "<=", timestampHasta);
+      }
+
+      // ORDENAMIENTO: Siempre por fecha descendente
+      query = query.orderBy("createdAt", "desc");
+
+      // PAGINACIÓN: Cursor-based con startAfter
+      if (paginacion.cursor) {
+        const cursorDoc = await firestoreTienda
+          .collection(ORDENES_COLLECTION)
+          .doc(paginacion.cursor)
+          .get();
+
+        if (!cursorDoc.exists) {
+          throw new Error(
+            `Cursor inválido: la orden con ID "${paginacion.cursor}" no existe`,
+          );
+        }
+
+        query = query.startAfter(cursorDoc);
+      }
+
+      // Pedir limit + 1 para saber si hay más páginas
+      query = query.limit(paginacion.limit + 1);
+
+      // Ejecutar query
+      const snapshot = await query.get();
+
+      // Determinar si hay siguiente página
+      const hasNextPage = snapshot.docs.length > paginacion.limit;
+      const docs = hasNextPage
+        ? snapshot.docs.slice(0, paginacion.limit)
+        : snapshot.docs;
+
+      // Mapear documentos a objetos Orden
+      const ordenes: Orden[] = docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          usuarioId: data.usuarioId,
+          items: data.items,
+          subtotal: data.subtotal,
+          impuestos: data.impuestos,
+          total: data.total,
+          estado: data.estado as EstadoOrden,
+          direccionEnvio: data.direccionEnvio,
+          metodoPago: data.metodoPago,
+          transaccionId: data.transaccionId,
+          referenciaPago: data.referenciaPago,
+          numeroGuia: data.numeroGuia,
+          transportista: data.transportista,
+          costoEnvio: data.costoEnvio,
+          notas: data.notas,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        };
+      });
+
+      // Calcular nextCursor (ID del último documento de esta página)
+      const nextCursor = hasNextPage ? docs[docs.length - 1].id : null;
+
+      console.log(
+        `✅ Se encontraron ${ordenes.length} órdenes para usuario ${usuarioId} (hasNextPage: ${hasNextPage})`,
+      );
+
+      return { ordenes, nextCursor };
+    } catch (error) {
+      console.error("❌ Error al obtener historial de órdenes:", error);
+
+      if (error instanceof Error && error.message.includes("index")) {
+        console.error(
+          "⚠️ ÍNDICE DE FIRESTORE FALTANTE. Ejecutar: firebase deploy --only firestore:indexes",
+        );
+      }
+
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Error al obtener el historial de órdenes",
+      );
+    }
+  }
 }
 
 // Exportar instancia singleton
