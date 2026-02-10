@@ -24,6 +24,14 @@ import {
   AgregarItemCarritoDTO,
   MAX_CANTIDAD_POR_ITEM,
 } from "../models/carrito.model";
+import {
+  Orden,
+  CrearOrdenDTO,
+  ItemOrden,
+  DireccionEnvio,
+  MetodoPago,
+} from "../models/orden.model";
+import ordenService from "./orden.service";
 
 /**
  * Nombre de la colección en Firestore
@@ -165,11 +173,14 @@ export class CarritoService {
         carrito.subtotal !== totals.subtotal || carrito.total !== totals.total;
 
       if (needsTotalsSync) {
-        await firestoreTienda.collection(CARRITOS_COLLECTION).doc(cartId).update({
-          subtotal: totals.subtotal,
-          total: totals.total,
-          updatedAt: Timestamp.now(),
-        });
+        await firestoreTienda
+          .collection(CARRITOS_COLLECTION)
+          .doc(cartId)
+          .update({
+            subtotal: totals.subtotal,
+            total: totals.total,
+            updatedAt: Timestamp.now(),
+          });
 
         carrito.subtotal = totals.subtotal;
         carrito.total = totals.total;
@@ -754,6 +765,107 @@ export class CarritoService {
       console.error("❌ Error en mergeCarts:", error);
       throw new Error("Error al fusionar los carritos");
     }
+  }
+
+  // ===================================
+  // Checkout
+  // ===================================
+
+  /**
+   * Convierte el carrito del usuario en una orden de compra
+   *
+   * FLUJO:
+   * 1. Obtiene el carrito del usuario autenticado
+   * 2. Valida que el carrito tenga items (no vacío)
+   * 3. Mapea ItemCarrito[] → ItemOrden[] (agrega subtotal por item)
+   * 4. Construye CrearOrdenDTO con datos del carrito + checkout data
+   * 5. Delega a OrdenService.createOrden() para:
+   *    - Validar existencia y stock de cada producto
+   *    - Recalcular precios desde el servidor (seguridad)
+   *    - Crear la orden en Firestore
+   *    - Decrementar stock con transacciones atómicas
+   * 6. Vacía el carrito tras crear la orden exitosamente
+   * 7. Si falla la creación, el carrito queda intacto (rollback)
+   *
+   * @param usuarioId - UID de Firebase Auth del usuario
+   * @param checkoutData - Datos de checkout: direccionEnvio, metodoPago, costoEnvio?, notas?
+   * @returns Promise con la orden creada
+   * @throws Error si el carrito está vacío
+   * @throws Error si algún producto no tiene stock (propagado desde OrdenService)
+   * @throws Error si falla la creación de la orden
+   */
+  async checkout(
+    usuarioId: string,
+    checkoutData: {
+      direccionEnvio: DireccionEnvio;
+      metodoPago: MetodoPago;
+      costoEnvio?: number;
+      notas?: string;
+    },
+  ): Promise<Orden> {
+    console.log(`🛒 Iniciando checkout para usuario: ${usuarioId}`);
+
+    // PASO 1: Obtener carrito del usuario
+    const carrito = await this.getOrCreateCart(usuarioId);
+
+    // PASO 2: Validar que el carrito tenga items
+    if (!carrito.items || carrito.items.length === 0) {
+      throw new Error(
+        "El carrito está vacío. Agrega productos antes de hacer checkout",
+      );
+    }
+
+    console.log(
+      `📦 Carrito tiene ${carrito.items.length} items. Preparando orden...`,
+    );
+
+    // PASO 3: Mapear ItemCarrito[] → ItemOrden[]
+    // Se agregan campos requeridos por la orden (subtotal por item)
+    // Los precios se recalcularán en OrdenService.createOrden() desde Firestore
+    const itemsOrden: ItemOrden[] = carrito.items.map((item) => ({
+      productoId: item.productoId,
+      cantidad: item.cantidad,
+      precioUnitario: item.precioUnitario,
+      subtotal: Math.round(item.precioUnitario * item.cantidad * 100) / 100,
+      ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+    }));
+
+    // PASO 4: Construir CrearOrdenDTO
+    // subtotal, impuestos y total son placeholders — OrdenService los recalcula
+    const crearOrdenDTO: CrearOrdenDTO = {
+      usuarioId,
+      items: itemsOrden,
+      subtotal: carrito.subtotal,
+      impuestos: 0,
+      total: carrito.total,
+      direccionEnvio: checkoutData.direccionEnvio,
+      metodoPago: checkoutData.metodoPago,
+      costoEnvio: checkoutData.costoEnvio,
+      notas: checkoutData.notas,
+    };
+
+    // PASO 5: Crear orden (valida stock, recalcula precios, decrementa stock)
+    // Si falla aquí, el carrito queda intacto (rollback natural)
+    const orden = await ordenService.createOrden(crearOrdenDTO);
+
+    console.log(
+      `✅ Orden ${orden.id} creada exitosamente desde carrito ${carrito.id}`,
+    );
+
+    // PASO 6: Vaciar carrito tras orden exitosa
+    try {
+      await this.clearCart(carrito.id!);
+      console.log(`🧹 Carrito ${carrito.id} vaciado después del checkout`);
+    } catch (clearError) {
+      // Si falla el vaciado del carrito, loggear pero NO fallar el checkout
+      // La orden ya fue creada y el stock ya fue decrementado
+      console.error(
+        `⚠️ Error al vaciar carrito ${carrito.id} después del checkout:`,
+        clearError,
+      );
+    }
+
+    return orden;
   }
 
   // ===================================

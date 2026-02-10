@@ -11,6 +11,8 @@
 
 import { z } from "zod";
 import { MAX_CANTIDAD_POR_ITEM } from "../../models/carrito.model";
+import { direccionEnvioSchema } from "./orden.validator";
+import { MetodoPago } from "../../models/orden.model";
 
 /**
  * Schema para agregar un item al carrito
@@ -100,5 +102,36 @@ export const mergeCarritoSchema = z
       .trim()
       .min(1, "El sessionId no puede estar vacío")
       .max(128, "El sessionId es demasiado largo"),
+  })
+  .strict();
+
+/**
+ * Schema para checkout del carrito (convertir carrito en orden)
+ * POST /api/carrito/checkout
+ *
+ * NOTA: Los items, precios y totales se obtienen del carrito del servidor.
+ * El cliente solo envía dirección de envío y método de pago.
+ * El usuarioId se extrae del token de autenticación (authMiddleware).
+ */
+export const checkoutCarritoSchema = z
+  .object({
+    direccionEnvio: direccionEnvioSchema,
+
+    metodoPago: z.nativeEnum(MetodoPago, {
+      errorMap: () => ({
+        message: `El método de pago debe ser uno de: ${Object.values(MetodoPago).join(", ")}`,
+      }),
+    }),
+
+    costoEnvio: z
+      .number()
+      .nonnegative("El costo de envío no puede ser negativo")
+      .optional(),
+
+    notas: z
+      .string()
+      .trim()
+      .max(1000, "Las notas no pueden exceder 1000 caracteres")
+      .optional(),
   })
   .strict();
