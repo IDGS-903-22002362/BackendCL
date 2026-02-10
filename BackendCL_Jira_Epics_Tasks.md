@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 42 tareas (implementadas en código)
-- 🔲 **TODO:** 40 tareas (pendientes de implementar)
+- ✅ **DONE:** 43 tareas (implementadas en código)
+- 🔲 **TODO:** 39 tareas (pendientes de implementar)
 
 ---
 
@@ -1178,16 +1178,39 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-053: Agregar producto al carrito
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para agregar un producto al carrito.  
 **Criterios de Aceptación:**
 
-- POST /api/carrito/items
-- Validar que producto exista y tenga stock
-- Validar cantidad disponible
-- Si producto ya está en carrito, incrementar cantidad
-- Actualizar totales
-- Retornar carrito actualizado
+- POST /api/carrito/items ✅
+- Validar que producto exista y tenga stock ✅
+- Validar cantidad disponible ✅
+- Si producto ya está en carrito, incrementar cantidad ✅
+- Actualizar totales ✅
+- Retornar carrito actualizado ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/carrito.routes.ts` (línea 161-167 — ruta POST /items con Swagger completo)
+- `functions/src/controllers/carrito/carrito.command.controller.ts` (función `addItem` línea 55-100)
+- `functions/src/services/carrito.service.ts` (método `addItem` línea 269-393)
+- `functions/src/middleware/validators/carrito.validator.ts` (schema `addItemCarritoSchema` línea 23-50)
+- `functions/src/models/carrito.model.ts` (DTO `AgregarItemCarritoDTO` línea 83-87)
+- `functions/src/config/swagger.config.ts` (schema `AddItemCarrito` registrado)
+
+**Notas de Implementación:**
+
+- **Validación Zod estricta**: `addItemCarritoSchema` con `.strict()` — valida `productoId` (string, trimmed), `cantidad` (int, 1-10), `tallaId?` (opcional)
+- **Precio del servidor**: `precioUnitario` se obtiene de `precioPublico` del producto, nunca del cliente (seguridad)
+- **Duplicados inteligentes**: Si el producto+talla ya existe en carrito, suma cantidades en vez de duplicar
+- **Validación de stock**: Verifica `existencias >= cantidadTotal` (cantidad existente + nueva)
+- **Límite por item**: `MAX_CANTIDAD_POR_ITEM = 10` validado en schema y servicio
+- **Dual-mode auth**: `optionalAuthMiddleware` soporta Bearer token y `x-session-id` para anónimos
+- **Respuesta populada**: Retorna carrito con `itemsDetallados` (datos completos de productos)
+- **Recalculación automática**: `recalculateTotals()` recalcula subtotal/total tras cada mutación
+- **Errores mapeados**: Producto no existe → 400, sin stock → 400, cantidad máxima → 400, servidor → 500
+- Documentación Swagger completa con ejemplos y respuestas de error
+- Cumple AGENTS.MD: validación Zod, patrón CQRS, respuestas consistentes, sin `any`
 
 ---
 
@@ -1649,7 +1672,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (42 tareas)
+### ✅ DONE (43 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
@@ -1658,16 +1681,17 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
 - **Módulo Órdenes:** 6 tareas (TASK-044 a TASK-049 completas)
+- **Módulo Carrito:** 1 tarea (TASK-053)
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (40 tareas)
+### 🔲 TODO (39 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 1 tarea (TASK-050)
-- **Carrito de Compras:** 7 tareas
+- **Carrito de Compras:** 6 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
 - **Sistema de Envíos:** 5 tareas
