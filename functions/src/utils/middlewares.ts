@@ -44,6 +44,50 @@ export const authMiddleware = async (
 };
 
 /**
+ * Middleware de autenticación opcional
+ * Intenta autenticar al usuario, pero si falla o no hay token,
+ * continúa sin req.user (para endpoints que soportan ambos modos).
+ * Ideal para carrito de compras que funciona para autenticados y anónimos.
+ */
+export const optionalAuthMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const token = req.headers.authorization?.split("Bearer ")[1];
+
+  if (!token) {
+    // Sin token → continuar como anónimo
+    next();
+    return;
+  }
+
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
+
+    const snapshot = await firestoreApp
+      .collection("usuariosApp")
+      .where("uid", "==", decoded.uid)
+      .limit(1)
+      .get();
+
+    if (!snapshot.empty) {
+      req.user = {
+        ...decoded,
+        ...snapshot.docs[0].data(),
+      };
+    }
+
+    next();
+    return;
+  } catch {
+    // Token inválido → continuar como anónimo (no bloquear)
+    next();
+    return;
+  }
+};
+
+/**
  * Middleware de autorización para administradores
  * Verifica que el usuario autenticado tenga rol de ADMIN o EMPLEADO
  * IMPORTANTE: Debe usarse DESPUÉS de authMiddleware
