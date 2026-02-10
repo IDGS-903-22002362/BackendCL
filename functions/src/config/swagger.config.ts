@@ -28,6 +28,11 @@ import {
   listOrdenesQuerySchema,
   historialOrdenesQuerySchema,
 } from "../middleware/validators/orden.validator";
+import {
+  addItemCarritoSchema,
+  updateItemCarritoSchema,
+  mergeCarritoSchema,
+} from "../middleware/validators/carrito.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -97,6 +102,10 @@ const swaggerDefinition = {
     {
       name: "Orders",
       description: "Gestión de órdenes de compra",
+    },
+    {
+      name: "Cart",
+      description: "Carrito de compras (usuarios autenticados y anónimos)",
     },
     {
       name: "Authentication",
@@ -216,6 +225,10 @@ const swaggerDefinition = {
 
       CreateSize: zodToJsonSchema(createSizeSchema),
       UpdateSize: zodToJsonSchema(updateSizeSchema),
+
+      AddItemCarrito: zodToJsonSchema(addItemCarritoSchema),
+      UpdateItemCarrito: zodToJsonSchema(updateItemCarritoSchema),
+      MergeCarrito: zodToJsonSchema(mergeCarritoSchema),
 
       CreateOrden: zodToJsonSchema(createOrdenSchema),
       UpdateOrden: zodToJsonSchema(updateOrdenSchema),
@@ -398,6 +411,78 @@ const swaggerDefinition = {
           transportista: { type: "string", example: "FedEx" },
           costoEnvio: { type: "number", example: 150.0 },
           notas: { type: "string", example: "Entregar en horario laboral" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-15T10:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-20T14:20:00Z",
+          },
+        },
+      },
+      Carrito: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "cart_abc123" },
+          usuarioId: {
+            type: "string",
+            example: "firebase_uid_xyz",
+            description: "UID de Firebase Auth (solo usuarios autenticados)",
+          },
+          sessionId: {
+            type: "string",
+            example: "550e8400-e29b-41d4-a716-446655440000",
+            description:
+              "UUID de sesión anónima (solo usuarios no autenticados)",
+          },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                productoId: { type: "string", example: "prod_001" },
+                cantidad: { type: "integer", example: 2 },
+                precioUnitario: { type: "number", example: 1299.99 },
+                tallaId: { type: "string", example: "m" },
+              },
+            },
+          },
+          subtotal: { type: "number", example: 2599.98 },
+          total: { type: "number", example: 2599.98 },
+          itemsDetallados: {
+            type: "array",
+            description:
+              "Items con información populada de productos (solo en respuestas GET)",
+            items: {
+              type: "object",
+              properties: {
+                productoId: { type: "string", example: "prod_001" },
+                cantidad: { type: "integer", example: 2 },
+                precioUnitario: { type: "number", example: 1299.99 },
+                tallaId: { type: "string", example: "m" },
+                producto: {
+                  type: "object",
+                  properties: {
+                    clave: { type: "string", example: "JER-001" },
+                    descripcion: {
+                      type: "string",
+                      example: "Jersey Oficial Local 2024",
+                    },
+                    imagenes: {
+                      type: "array",
+                      items: { type: "string", format: "uri" },
+                    },
+                    existencias: { type: "integer", example: 50 },
+                    precioPublico: { type: "number", example: 1299.99 },
+                    activo: { type: "boolean", example: true },
+                  },
+                },
+              },
+            },
+          },
           createdAt: {
             type: "string",
             format: "date-time",
