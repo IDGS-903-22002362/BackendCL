@@ -5,7 +5,7 @@
  *
  * AUTENTICACIÓN:
  * - optionalAuthMiddleware: permite acceso autenticado y anónimo (x-session-id)
- * - authMiddleware: requiere autenticación (solo para merge)
+ * - authMiddleware: requiere autenticación (merge, checkout)
  */
 
 import { Router } from "express";
@@ -20,6 +20,7 @@ import {
   updateItemCarritoSchema,
   productoIdParamSchema,
   mergeCarritoSchema,
+  checkoutCarritoSchema,
 } from "../middleware/validators/carrito.validator";
 import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
 
@@ -368,6 +369,140 @@ router.delete(
  *         $ref: '#/components/responses/500ServerError'
  */
 router.delete("/", optionalAuthMiddleware, commandController.clearCart);
+
+// ==========================================
+// CHECKOUT (Convertir carrito en orden)
+// ==========================================
+
+/**
+ * @swagger
+ * /api/carrito/checkout:
+ *   post:
+ *     summary: Convertir carrito en orden de compra
+ *     description: |
+ *       Convierte el carrito del usuario autenticado en una orden de compra.
+ *       Los items, precios y totales se obtienen del carrito del servidor.
+ *       El cliente solo envía la dirección de envío y el método de pago.
+ *
+ *       **Flujo del checkout:**
+ *       1. Obtiene el carrito del usuario autenticado
+ *       2. Valida que el carrito tenga items (no esté vacío)
+ *       3. Valida existencia y stock de cada producto
+ *       4. Recalcula precios desde Firestore (seguridad — ignora precios del carrito)
+ *       5. Crea la orden con estado PENDIENTE
+ *       6. Decrementa stock de productos (transacciones Firestore atómicas)
+ *       7. Vacía el carrito después de crear la orden exitosamente
+ *
+ *       **Seguridad:**
+ *       - Precios siempre se recalculan desde el servidor (nunca del cliente)
+ *       - Items se toman del carrito del servidor (no se envían en el body)
+ *       - usuarioId se extrae del token Bearer (no se envía en el body)
+ *       - Si falla la creación de la orden, el carrito queda intacto (rollback)
+ *
+ *       **Requiere autenticación** (Bearer token obligatorio)
+ *     tags: [Cart]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CheckoutCarrito'
+ *           example:
+ *             direccionEnvio:
+ *               nombre: "Juan Pérez"
+ *               telefono: "4771234567"
+ *               calle: "Blvd. Adolfo López Mateos"
+ *               numero: "1234"
+ *               numeroInterior: "4B"
+ *               colonia: "Centro"
+ *               ciudad: "León"
+ *               estado: "Guanajuato"
+ *               codigoPostal: "37000"
+ *               referencias: "Frente al Estadio León"
+ *             metodoPago: "TARJETA"
+ *             costoEnvio: 99.00
+ *             notas: "Envolver para regalo por favor"
+ *     responses:
+ *       201:
+ *         description: Orden creada exitosamente desde el carrito
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Orden creada exitosamente desde el carrito"
+ *                 data:
+ *                   $ref: '#/components/schemas/Orden'
+ *             example:
+ *               success: true
+ *               message: "Orden creada exitosamente desde el carrito"
+ *               data:
+ *                 id: "orden_abc123"
+ *                 usuarioId: "user_uid_123"
+ *                 items:
+ *                   - productoId: "prod_001"
+ *                     cantidad: 2
+ *                     precioUnitario: 1299.99
+ *                     subtotal: 2599.98
+ *                   - productoId: "prod_002"
+ *                     cantidad: 1
+ *                     precioUnitario: 499.00
+ *                     subtotal: 499.00
+ *                 subtotal: 3098.98
+ *                 impuestos: 0
+ *                 total: 3098.98
+ *                 estado: "PENDIENTE"
+ *                 direccionEnvio:
+ *                   nombre: "Juan Pérez"
+ *                   telefono: "4771234567"
+ *                   calle: "Blvd. Adolfo López Mateos"
+ *                   numero: "1234"
+ *                   colonia: "Centro"
+ *                   ciudad: "León"
+ *                   estado: "Guanajuato"
+ *                   codigoPostal: "37000"
+ *                 metodoPago: "TARJETA"
+ *                 costoEnvio: 99.00
+ *       400:
+ *         description: Error de validación (carrito vacío, stock insuficiente, datos inválidos)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               carritoVacio:
+ *                 summary: Carrito vacío
+ *                 value:
+ *                   success: false
+ *                   message: "El carrito está vacío. Agrega productos antes de hacer checkout"
+ *               stockInsuficiente:
+ *                 summary: Stock insuficiente
+ *                 value:
+ *                   success: false
+ *                   message: "Stock insuficiente para \"Jersey Oficial Local 2024\". Disponible: 2, Solicitado: 5"
+ *               productoNoDisponible:
+ *                 summary: Producto no disponible
+ *                 value:
+ *                   success: false
+ *                   message: "El producto \"Gorra Edición Especial\" no está disponible"
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/checkout",
+  authMiddleware,
+  validateBody(checkoutCarritoSchema),
+  commandController.checkout,
+);
 
 /**
  * @swagger
