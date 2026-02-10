@@ -160,6 +160,20 @@ export class CarritoService {
       }
 
       const carrito = { id: doc.id, ...doc.data() } as Carrito;
+      const totals = this.recalculateTotals(carrito.items || []);
+      const needsTotalsSync =
+        carrito.subtotal !== totals.subtotal || carrito.total !== totals.total;
+
+      if (needsTotalsSync) {
+        await firestoreTienda.collection(CARRITOS_COLLECTION).doc(cartId).update({
+          subtotal: totals.subtotal,
+          total: totals.total,
+          updatedAt: Timestamp.now(),
+        });
+
+        carrito.subtotal = totals.subtotal;
+        carrito.total = totals.total;
+      }
 
       // Si el carrito está vacío, retornar sin populate
       if (!carrito.items || carrito.items.length === 0) {
