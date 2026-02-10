@@ -26,6 +26,7 @@ import {
   updateOrdenSchema,
   updateEstadoOrdenSchema,
   listOrdenesQuerySchema,
+  historialOrdenesQuerySchema,
 } from "../middleware/validators/orden.validator";
 
 /**
@@ -220,6 +221,7 @@ const swaggerDefinition = {
       UpdateOrden: zodToJsonSchema(updateOrdenSchema),
       UpdateEstadoOrden: zodToJsonSchema(updateEstadoOrdenSchema),
       ListOrdenesQuery: zodToJsonSchema(listOrdenesQuerySchema),
+      HistorialOrdenesQuery: zodToJsonSchema(historialOrdenesQuerySchema),
 
       // Modelos completos de entidades
       Product: {
