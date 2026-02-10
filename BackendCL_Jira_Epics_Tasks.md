@@ -1254,14 +1254,31 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-055: Eliminar item del carrito
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para eliminar un item del carrito.  
 **Criterios de Aceptación:**
 
-- DELETE /api/carrito/items/:productoId
-- Validar que item exista en carrito
-- Actualizar totales
-- Retornar carrito actualizado
+- DELETE /api/carrito/items/:productoId ✅
+- Validar que item exista en carrito ✅
+- Actualizar totales ✅
+- Retornar carrito actualizado ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/carrito.routes.ts` (línea 319-324 — ruta DELETE /items/:productoId con Swagger completo líneas 265-318)
+- `functions/src/controllers/carrito/carrito.command.controller.ts` (función `removeItem` línea 195-233)
+- `functions/src/services/carrito.service.ts` (método `removeItem` línea 507-569)
+- `functions/src/middleware/validators/carrito.validator.ts` (schema `productoIdParamSchema` línea 75-83)
+
+**Notas de Implementación:**
+
+- **Validación de existencia**: Busca item por `productoId` + `tallaId` opcional, lanza error si no existe
+- **Eliminación limpia**: Usa `splice()` para remover item del array
+- **Recalculación automática**: `recalculateTotals()` recalcula subtotal/total tras eliminar
+- **Dual-mode auth**: `optionalAuthMiddleware` soporta Bearer token y `x-session-id`
+- **Respuesta populada**: Retorna carrito completo con `itemsDetallados`
+- **Errores mapeados**: Item no encontrado → 404, servidor → 500
+- Documentación Swagger completa con ejemplos y respuestas de error
 
 ---
 
@@ -1694,7 +1711,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (44 tareas)
+### ✅ DONE (45 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
@@ -1703,17 +1720,17 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
 - **Módulo Órdenes:** 6 tareas (TASK-044 a TASK-049 completas)
-- **Módulo Carrito:** 2 tareas (TASK-053, TASK-054)
+- **Módulo Carrito:** 3 tareas (TASK-053, TASK-054, TASK-055)
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (38 tareas)
+### 🔲 TODO (37 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 1 tarea (TASK-050)
-- **Carrito de Compras:** 5 tareas
+- **Carrito de Compras:** 4 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
 - **Sistema de Envíos:** 5 tareas
