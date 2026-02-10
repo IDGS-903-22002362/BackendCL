@@ -50,9 +50,11 @@ export class NewService {
                     imagenes: data.imagenes || [],
                     likes: data.likes || 0,
                     enlaceExterno: data.enlaceExterno,
+                    origen: data.origen,
+                    ia: data.ia,
                     estatus: data.estatus,
-                    createdAt: data.createdAt,
-                    updatedAt: data.updatedAt,
+                    createdAt: data.createdAt.toDate().toISOString(),
+                    updatedAt: data.updatedAt.toDate().toISOString(),
                 } as Noticia;
             });
 
@@ -95,9 +97,11 @@ export class NewService {
                 imagenes: data.imagenes || [],
                 likes: data.likes || 0,
                 enlaceExterno: data.enlaceExterno,
+                origen: data.origen,
+                ia: data.ia,
                 estatus: data.estatus,
-                createdAt: data.createdAt,
-                updatedAt: data.updatedAt,
+                createdAt: data.createdAt.toDate().toISOString(),
+                updatedAt: data.updatedAt.toDate().toISOString(),
             } as Noticia;
         } catch (error) {
             console.error(`❌ Error al obtener noticia ${id}:`, error);
