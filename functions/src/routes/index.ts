@@ -18,6 +18,7 @@ import providersRoutes from "./providers.routes";
 import sizesRoutes from "./sizes.routes";
 import usersRoutes from "./users.routes";
 import authRoutes from "./auth.routes";
+import newsRoutes from "./news.routes";
 
 const router = Router();
 
@@ -31,6 +32,7 @@ router.use("/categorias", categoriesRoutes);
 router.use("/proveedores", providersRoutes);
 router.use("/tallas", sizesRoutes);
 router.use("/usuarios", usersRoutes);
+router.use("/noticias", newsRoutes)
 router.use("/auth", authRoutes);
 
 // Futuros módulos:
