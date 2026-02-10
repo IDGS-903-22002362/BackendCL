@@ -247,3 +247,88 @@ export const updateOrdenSchema = z
       .optional(),
   })
   .strict();
+
+/**
+ * Schema para actualizar estado de orden
+ * Solo permite cambiar el estado (endpoint específico PUT /api/ordenes/:id/estado)
+ * Usa .strict() para prevenir mass assignment
+ */
+export const updateEstadoOrdenSchema = z
+  .object({
+    estado: z.nativeEnum(EstadoOrden, {
+      errorMap: () => ({
+        message: `El estado debe ser uno de: ${Object.values(EstadoOrden).join(", ")}`,
+      }),
+    }),
+  })
+  .strict();
+
+/**
+ * Schema para query params de listado de órdenes (GET /api/ordenes)
+ * Filtros opcionales para buscar órdenes
+ *
+ * NOTAS IMPORTANTES:
+ * - NO usa .strict() porque los query params pueden tener parámetros adicionales del framework
+ * - Todos los filtros son opcionales
+ * - estado: puede ser múltiples valores separados por coma (ej: "PENDIENTE,CONFIRMADA")
+ * - fechaDesde/fechaHasta: deben ser ISO 8601 datetime (ej: "2024-01-01T00:00:00Z")
+ * - usuarioId: solo para admins (clientes siempre ven sus órdenes)
+ */
+export const listOrdenesQuerySchema = z.object({
+  /**
+   * Filtrar por estado(s) de orden
+   * Múltiples valores separados por coma: "PENDIENTE,CONFIRMADA,EN_PROCESO"
+   * Ejemplo: ?estado=PENDIENTE
+   * Ejemplo: ?estado=PENDIENTE,CONFIRMADA
+   */
+  estado: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        if (!val) return true; // Si es undefined/vacío, es válido
+        // Validar que cada estado en el CSV sea válido
+        const estados = val.split(",").map((e) => e.trim());
+        return estados.every((e) =>
+          Object.values(EstadoOrden).includes(e as EstadoOrden),
+        );
+      },
+      {
+        message: `Los estados deben ser válidos: ${Object.values(EstadoOrden).join(", ")}`,
+      },
+    ),
+
+  /**
+   * Filtrar por usuario específico
+   * Solo para admins/empleados (clientes siempre ven sus órdenes)
+   * Ejemplo: ?usuarioId=abc123xyz
+   */
+  usuarioId: z.string().trim().optional(),
+
+  /**
+   * Filtrar por fecha desde (inclusive)
+   * Formato: ISO 8601 datetime con zona horaria
+   * Ejemplo: ?fechaDesde=2024-01-01T00:00:00Z
+   * Ejemplo: ?fechaDesde=2024-01-01T00:00:00-06:00
+   */
+  fechaDesde: z
+    .string()
+    .datetime({
+      message:
+        "fechaDesde debe ser una fecha válida en formato ISO 8601 (ej: 2024-01-01T00:00:00Z)",
+    })
+    .optional(),
+
+  /**
+   * Filtrar por fecha hasta (inclusive)
+   * Formato: ISO 8601 datetime con zona horaria
+   * Ejemplo: ?fechaHasta=2024-12-31T23:59:59Z
+   */
+  fechaHasta: z
+    .string()
+    .datetime({
+      message:
+        "fechaHasta debe ser una fecha válida en formato ISO 8601 (ej: 2024-12-31T23:59:59Z)",
+    })
+    .optional(),
+});

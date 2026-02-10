@@ -1,0 +1,240 @@
+{
+  "collections": {
+    "categorias": {
+      "name": "categorias",
+      "subcollections": [],
+      "files": [
+        "controllers\\categories\\categories.debug.controller.ts",
+        "scripts\\seed.ts"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "nombre",
+          "type": "string"
+        },
+        {
+          "name": "lineaId",
+          "type": "string"
+        },
+        {
+          "name": "orden",
+          "type": "number"
+        }
+      ]
+    },
+    "lineas": {
+      "name": "lineas",
+      "subcollections": [],
+      "files": [
+        "controllers\\lines\\lines.debug.controller.ts",
+        "scripts\\seed.ts"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "codigo",
+          "type": "number"
+        },
+        {
+          "name": "nombre",
+          "type": "string"
+        },
+        {
+          "name": "activo",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "Timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "Timestamp"
+        }
+      ]
+    },
+    "productos": {
+      "name": "productos",
+      "subcollections": [],
+      "files": [
+        "controllers\\products\\products.debug.controller.ts",
+        "scripts\\seed.ts"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "clave",
+          "type": "string"
+        },
+        {
+          "name": "descripcion",
+          "type": "string"
+        },
+        {
+          "name": "lineaId",
+          "type": "string"
+        },
+        {
+          "name": "categoriaId",
+          "type": "string"
+        },
+        {
+          "name": "precioPublico",
+          "type": "number"
+        },
+        {
+          "name": "precioCompra",
+          "type": "number"
+        },
+        {
+          "name": "existencias",
+          "type": "number"
+        },
+        {
+          "name": "proveedorId",
+          "type": "string"
+        },
+        {
+          "name": "tallaIds",
+          "type": "string[]"
+        },
+        {
+          "name": "imagenes",
+          "type": "string[]"
+        },
+        {
+          "name": "activo",
+          "type": "boolean"
+        },
+        {
+          "name": "createdAt",
+          "type": "Timestamp"
+        },
+        {
+          "name": "updatedAt",
+          "type": "Timestamp"
+        }
+      ]
+    },
+    "proveedores": {
+      "name": "proveedores",
+      "subcollections": [],
+      "files": [
+        "controllers\\providers\\providers.debug.controller.ts",
+        "scripts\\seed.ts"
+      ],
+      "fields": []
+    },
+    "tallas": {
+      "name": "tallas",
+      "subcollections": [],
+      "files": [
+        "controllers\\sizes\\sizes.debug.controller.ts",
+        "scripts\\seed.ts"
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "type": "string"
+        },
+        {
+          "name": "codigo",
+          "type": "string"
+        },
+        {
+          "name": "descripcion",
+          "type": "string"
+        },
+        {
+          "name": "orden",
+          "type": "number"
+        }
+      ]
+    },
+    "usuariosApp": {
+      "name": "usuariosApp",
+      "subcollections": [],
+      "files": [
+        "controllers\\users\\auth.social.controller.ts",
+        "controllers\\users\\users.debug.controller.ts",
+        "utils\\middlewares.ts"
+      ],
+      "fields": []
+    },
+    "_test": {
+      "name": "_test",
+      "subcollections": [],
+      "files": [
+        "scripts\\diagnostico.ts"
+      ],
+      "fields": []
+    },
+    "conexion": {
+      "name": "conexion",
+      "subcollections": [],
+      "files": [
+        "scripts\\diagnostico.ts"
+      ],
+      "fields": []
+    },
+    "ubicaciones": {
+      "name": "ubicaciones",
+      "subcollections": [],
+      "files": [
+        "scripts\\seed.ts"
+      ],
+      "fields": []
+    },
+    "configuracion": {
+      "name": "configuracion",
+      "subcollections": [],
+      "files": [
+        "scripts\\seed.ts"
+      ],
+      "fields": []
+    },
+    "puntos": {
+      "name": "puntos",
+      "subcollections": [],
+      "files": [
+        "scripts\\seed.ts"
+      ],
+      "fields": []
+    },
+    "tienda": {
+      "name": "tienda",
+      "subcollections": [],
+      "files": [
+        "scripts\\seed.ts"
+      ],
+      "fields": []
+    },
+    "usuarios": {
+      "name": "usuarios",
+      "subcollections": [],
+      "files": [
+        "services\\orden.service.ts"
+      ],
+      "fields": []
+    }
+  },
+  "services": {
+    "firestore": true,
+    "auth": true,
+    "functions": true,
+    "storage": true,
+    "fcm": false
+  },
+  "relationships": [],
+  "findings": []
+}
