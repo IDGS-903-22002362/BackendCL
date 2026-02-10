@@ -332,3 +332,83 @@ export const listOrdenesQuerySchema = z.object({
     })
     .optional(),
 });
+
+/**
+ * Schema para query params de historial de órdenes por usuario (GET /api/usuarios/:id/ordenes)
+ * Filtros opcionales + paginación cursor-based
+ *
+ * NOTAS IMPORTANTES:
+ * - NO usa .strict() porque los query params pueden tener parámetros adicionales del framework
+ * - Todos los filtros son opcionales
+ * - estado: puede ser múltiples valores separados por coma (ej: "PENDIENTE,CONFIRMADA")
+ * - fechaDesde/fechaHasta: deben ser ISO 8601 datetime
+ * - limit: cantidad de resultados por página (default 10, max 50)
+ * - cursor: ID del último documento de la página anterior (para paginación cursor-based)
+ */
+export const historialOrdenesQuerySchema = z.object({
+  /**
+   * Filtrar por estado(s) de orden
+   * Múltiples valores separados por coma: "PENDIENTE,CONFIRMADA"
+   */
+  estado: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        if (!val) return true;
+        const estados = val.split(",").map((e) => e.trim());
+        return estados.every((e) =>
+          Object.values(EstadoOrden).includes(e as EstadoOrden),
+        );
+      },
+      {
+        message: `Los estados deben ser válidos: ${Object.values(EstadoOrden).join(", ")}`,
+      },
+    ),
+
+  /**
+   * Filtrar por fecha desde (inclusive)
+   * Formato: ISO 8601 datetime con zona horaria
+   */
+  fechaDesde: z
+    .string()
+    .datetime({
+      message:
+        "fechaDesde debe ser una fecha válida en formato ISO 8601 (ej: 2024-01-01T00:00:00Z)",
+    })
+    .optional(),
+
+  /**
+   * Filtrar por fecha hasta (inclusive)
+   * Formato: ISO 8601 datetime con zona horaria
+   */
+  fechaHasta: z
+    .string()
+    .datetime({
+      message:
+        "fechaHasta debe ser una fecha válida en formato ISO 8601 (ej: 2024-12-31T23:59:59Z)",
+    })
+    .optional(),
+
+  /**
+   * Cantidad de resultados por página
+   * Default: 10, Mínimo: 1, Máximo: 50
+   */
+  limit: z.coerce
+    .number()
+    .int("El límite debe ser un número entero")
+    .min(1, "El límite debe ser al menos 1")
+    .max(50, "El límite no puede exceder 50")
+    .default(10),
+
+  /**
+   * Cursor para paginación (ID del último documento de la página anterior)
+   * Si se omite, retorna la primera página
+   */
+  cursor: z
+    .string()
+    .trim()
+    .min(1, "El cursor no puede estar vacío")
+    .max(200, "El cursor es demasiado largo")
+    .optional(),
+});
