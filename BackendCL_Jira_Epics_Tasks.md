@@ -1108,7 +1108,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-050: Historial de órdenes por usuario
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅  
 **Descripción:** Endpoint para obtener historial de órdenes de un usuario específico.  
 **Criterios de Aceptación:**
 
