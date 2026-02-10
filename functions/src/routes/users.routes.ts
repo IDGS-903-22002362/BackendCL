@@ -9,6 +9,12 @@ import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
 import { authMiddleware } from "../utils/middlewares";
+import {
+  validateParams,
+  validateQuery,
+} from "../middleware/validation.middleware";
+import { idParamSchema } from "../middleware/validators/common.validator";
+import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
 
 const router = Router();
 
@@ -71,6 +77,178 @@ router.get("/debug", authMiddleware, debugController.debugFirestore);
  *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/", authMiddleware, queryController.getAll);
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/ordenes:
+ *   get:
+ *     summary: Historial de órdenes por usuario
+ *     description: |
+ *       Obtiene el historial de órdenes de un usuario específico con paginación cursor-based.
+ *
+ *       **Autorización (BOLA Prevention):**
+ *       - Clientes solo pueden ver su propio historial
+ *       - Administradores/Empleados pueden ver historial de cualquier usuario
+ *
+ *       **Paginación:**
+ *       - Usa cursor-based pagination (Firestore startAfter)
+ *       - El campo `nextCursor` en la respuesta contiene el cursor para la siguiente página
+ *       - Si `nextCursor` es null, no hay más páginas
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: UID del usuario (Firebase Auth UID)
+ *         schema:
+ *           type: string
+ *           example: "abc123xyz"
+ *       - in: query
+ *         name: estado
+ *         required: false
+ *         description: "Filtrar por estado(s), separados por coma. Ej: PENDIENTE,CONFIRMADA"
+ *         schema:
+ *           type: string
+ *           example: "PENDIENTE,CONFIRMADA"
+ *       - in: query
+ *         name: fechaDesde
+ *         required: false
+ *         description: "Filtrar desde fecha (ISO 8601). Ej: 2024-01-01T00:00:00Z"
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *           example: "2024-01-01T00:00:00Z"
+ *       - in: query
+ *         name: fechaHasta
+ *         required: false
+ *         description: "Filtrar hasta fecha (ISO 8601). Ej: 2024-12-31T23:59:59Z"
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *           example: "2024-12-31T23:59:59Z"
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         description: "Cantidad de resultados por página (default: 10, max: 50)"
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 10
+ *           example: 10
+ *       - in: query
+ *         name: cursor
+ *         required: false
+ *         description: "ID de la última orden de la página anterior (para siguiente página)"
+ *         schema:
+ *           type: string
+ *           example: "orden_abc123"
+ *     responses:
+ *       200:
+ *         description: Historial de órdenes obtenido exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: integer
+ *                   description: Cantidad de órdenes en esta página
+ *                   example: 5
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Orden'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                       example: 10
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                       description: "Cursor para la siguiente página. null si no hay más páginas."
+ *                       example: "orden_xyz789"
+ *                     hasNextPage:
+ *                       type: boolean
+ *                       example: true
+ *             examples:
+ *               primeraPageConMas:
+ *                 summary: Primera página con más resultados
+ *                 value:
+ *                   success: true
+ *                   count: 10
+ *                   data:
+ *                     - id: "orden_001"
+ *                       usuarioId: "abc123xyz"
+ *                       estado: "ENTREGADA"
+ *                       total: 2599.98
+ *                       createdAt: "2024-06-15T10:30:00Z"
+ *                     - id: "orden_002"
+ *                       usuarioId: "abc123xyz"
+ *                       estado: "PENDIENTE"
+ *                       total: 1299.99
+ *                       createdAt: "2024-06-10T14:00:00Z"
+ *                   pagination:
+ *                     limit: 10
+ *                     nextCursor: "orden_002"
+ *                     hasNextPage: true
+ *               ultimaPagina:
+ *                 summary: Última página (sin más resultados)
+ *                 value:
+ *                   success: true
+ *                   count: 3
+ *                   data:
+ *                     - id: "orden_098"
+ *                       usuarioId: "abc123xyz"
+ *                       estado: "CANCELADA"
+ *                       total: 599.99
+ *                       createdAt: "2024-01-05T08:00:00Z"
+ *                   pagination:
+ *                     limit: 10
+ *                     nextCursor: null
+ *                     hasNextPage: false
+ *               historialVacio:
+ *                 summary: Usuario sin órdenes
+ *                 value:
+ *                   success: true
+ *                   count: 0
+ *                   data: []
+ *                   pagination:
+ *                     limit: 10
+ *                     nextCursor: null
+ *                     hasNextPage: false
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         description: Sin permisos para ver historial de otro usuario
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Acceso denegado. Solo puedes ver tu propio historial de órdenes."
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:id/ordenes",
+  authMiddleware,
+  validateParams(idParamSchema),
+  validateQuery(historialOrdenesQuerySchema),
+  queryController.getOrderHistory,
+);
 
 /**
  * @swagger
