@@ -1130,7 +1130,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-051: Modelo de datos de Carrito
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Crear modelo de datos para carrito de compras.  
 **Criterios de Aceptación:**
 
@@ -1143,15 +1143,35 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-052: Obtener carrito actual
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para obtener el carrito del usuario o sesión actual.  
 **Criterios de Aceptación:**
 
-- GET /api/carrito
-- Crear carrito si no existe
-- Incluir información de productos (populate)
-- Calcular totales
-- Manejar carritos de usuarios y sesiones
+- GET /api/carrito ✅
+- Crear carrito si no existe ✅
+- Incluir información de productos (populate) ✅
+- Calcular totales ✅
+- Manejar carritos de usuarios y sesiones ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/carrito.routes.ts` (GET / con documentación Swagger completa)
+- `functions/src/controllers/carrito/carrito.query.controller.ts` (función `getCart`)
+- `functions/src/services/carrito.service.ts` (funciones `getOrCreateCart`, `getCartPopulado`)
+- `functions/src/models/carrito.model.ts` (interfaces `Carrito`, `CarritoPopulado`, `ItemCarrito`)
+- `functions/src/middleware/validators/carrito.validator.ts` (schemas Zod)
+- `functions/src/routes/index.ts` (montado en `/carrito`)
+
+**Notas de Implementación:**
+
+- **Dual-mode auth**: `optionalAuthMiddleware` permite usuario autenticado (Bearer token) y anónimo (header `x-session-id`)
+- **Auto-creación**: Si no existe carrito para el usuario/sesión, crea uno vacío automáticamente
+- **Populate completo**: `getCartPopulado()` batch-read de productos con `itemsDetallados` (clave, descripción, imágenes, existencias, precioPublico, activo)
+- **Totales recalculados**: subtotal y total sincronizados en cada operación
+- **Idempotente**: llamadas repetidas retornan el mismo carrito (no duplica)
+- **Validación**: retorna 400 si no se proporciona ni auth ni x-session-id
+- Documentación Swagger completa con ejemplos
+- Respuestas: 200 (éxito), 400 (sin identificación), 500 (error)
 
 ---
 
