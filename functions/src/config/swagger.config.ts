@@ -32,6 +32,7 @@ import {
   addItemCarritoSchema,
   updateItemCarritoSchema,
   mergeCarritoSchema,
+  checkoutCarritoSchema,
 } from "../middleware/validators/carrito.validator";
 
 /**
@@ -229,6 +230,7 @@ const swaggerDefinition = {
       AddItemCarrito: zodToJsonSchema(addItemCarritoSchema),
       UpdateItemCarrito: zodToJsonSchema(updateItemCarritoSchema),
       MergeCarrito: zodToJsonSchema(mergeCarritoSchema),
+      CheckoutCarrito: zodToJsonSchema(checkoutCarritoSchema),
 
       CreateOrden: zodToJsonSchema(createOrdenSchema),
       UpdateOrden: zodToJsonSchema(updateOrdenSchema),

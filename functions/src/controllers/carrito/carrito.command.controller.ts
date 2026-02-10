@@ -284,6 +284,77 @@ export const clearCart = async (req: Request, res: Response) => {
 };
 
 /**
+ * POST /api/carrito/checkout
+ * Convierte el carrito del usuario autenticado en una orden de compra
+ * Requiere autenticación (authMiddleware)
+ *
+ * LÓGICA:
+ * - Obtiene el carrito del usuario autenticado
+ * - Valida que el carrito tenga items
+ * - Valida stock de todos los productos (delegado a OrdenService)
+ * - Crea orden con items del carrito, dirección de envío y método de pago
+ * - Vacía el carrito después de crear la orden exitosamente
+ * - Si falla la creación de la orden, el carrito queda intacto
+ *
+ * @param req.body - CheckoutCarritoDTO (direccionEnvio, metodoPago, costoEnvio?, notas?)
+ * @param req.user.uid - UID del usuario autenticado (de authMiddleware)
+ * @returns 201 - Orden creada exitosamente
+ * @returns 400 - Carrito vacío, stock insuficiente, validación
+ * @returns 401 - No autenticado
+ * @returns 500 - Error del servidor
+ */
+export const checkout = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "Se requiere autenticación para realizar el checkout",
+      });
+    }
+
+    const usuarioId = req.user.uid as string;
+
+    // Crear orden desde carrito (body ya validado por Zod middleware)
+    const orden = await carritoService.checkout(usuarioId, req.body);
+
+    return res.status(201).json({
+      success: true,
+      message: "Orden creada exitosamente desde el carrito",
+      data: orden,
+    });
+  } catch (error) {
+    console.error("Error en POST /api/carrito/checkout:", error);
+
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (
+        msg.includes("carrito está vacío") ||
+        msg.includes("no existe") ||
+        msg.includes("no está disponible") ||
+        msg.includes("stock insuficiente")
+      ) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 400
+          ? error instanceof Error
+            ? error.message
+            : "Error de validación"
+          : "Error al procesar el checkout",
+      error:
+        statusCode === 500 && error instanceof Error
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+/**
  * POST /api/carrito/merge
  * Fusiona el carrito de sesión anónima con el carrito del usuario autenticado
  * Requiere autenticación (authMiddleware)
