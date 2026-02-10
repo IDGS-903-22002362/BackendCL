@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 43 tareas (implementadas en código)
-- 🔲 **TODO:** 39 tareas (pendientes de implementar)
+- ✅ **DONE:** 44 tareas (implementadas en código)
+- 🔲 **TODO:** 38 tareas (pendientes de implementar)
 
 ---
 
@@ -1217,15 +1217,37 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-054: Actualizar cantidad de item en carrito
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para actualizar la cantidad de un item en el carrito.  
 **Criterios de Aceptación:**
 
-- PUT /api/carrito/items/:productoId
-- Validar cantidad disponible
-- Si cantidad es 0, eliminar item
-- Actualizar totales
-- Retornar carrito actualizado
+- PUT /api/carrito/items/:productoId ✅
+- Validar cantidad disponible ✅
+- Si cantidad es 0, eliminar item ✅
+- Actualizar totales ✅
+- Retornar carrito actualizado ✅
+
+**Archivos de Código:**
+
+- `functions/src/routes/carrito.routes.ts` (línea 258-264 — ruta PUT /items/:productoId con Swagger completo líneas 188-256)
+- `functions/src/controllers/carrito/carrito.command.controller.ts` (función `updateItem` línea 127-180)
+- `functions/src/services/carrito.service.ts` (método `updateItemQuantity` línea 403-498)
+- `functions/src/middleware/validators/carrito.validator.ts` (schemas `updateItemCarritoSchema` línea 60-73, `productoIdParamSchema` línea 75-83)
+- `functions/src/config/swagger.config.ts` (schema `UpdateItemCarrito` registrado)
+
+**Notas de Implementación:**
+
+- **Validación Zod estricta**: `updateItemCarritoSchema` con `.strict()` — `cantidad` (int, 0-10); `productoIdParamSchema` para params
+- **Cantidad 0 = eliminar**: Si `cantidad === 0`, delega a `removeItem()` internamente (patrón limpio)
+- **Validación de stock**: Verifica `existencias >= cantidad` solicitada contra Firestore
+- **Precio actualizado**: Actualiza `precioUnitario` al precio actual del producto en cada operación
+- **Producto eliminado**: Si el producto fue borrado de BD, actualiza cantidad sin cambiar precio (resiliencia)
+- **Dual-mode auth**: `optionalAuthMiddleware` soporta Bearer token y `x-session-id`
+- **Respuesta populada**: Retorna carrito completo con `itemsDetallados`
+- **Recalculación automática**: `recalculateTotals()` recalcula subtotal/total
+- **Errores mapeados**: Item no encontrado → 404, stock insuficiente → 400, servidor → 500
+- **Mensaje dinámico**: "Producto eliminado del carrito" si cantidad=0, "Cantidad actualizada" si no
+- Documentación Swagger completa con ejemplos y respuestas de error
 
 ---
 
@@ -1672,7 +1694,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (43 tareas)
+### ✅ DONE (44 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
@@ -1681,17 +1703,17 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Módulo Proveedores:** 1 tarea
 - **Módulo Tallas:** 1 tarea
 - **Módulo Órdenes:** 6 tareas (TASK-044 a TASK-049 completas)
-- **Módulo Carrito:** 1 tarea (TASK-053)
+- **Módulo Carrito:** 2 tareas (TASK-053, TASK-054)
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (39 tareas)
+### 🔲 TODO (38 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 1 tarea (TASK-050)
-- **Carrito de Compras:** 6 tareas
+- **Carrito de Compras:** 5 tareas
 - **Sistema de Pagos:** 5 tareas
 - **Gestión de Inventario:** 5 tareas
 - **Sistema de Envíos:** 5 tareas
