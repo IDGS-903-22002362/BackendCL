@@ -31,6 +31,21 @@ export const pagoIdParamSchema = z
   })
   .strict();
 
+/**
+ * Schema para validar parámetros de ruta con ID de orden en endpoints de pagos
+ */
+export const ordenPagoParamSchema = z
+  .object({
+    ordenId: z
+      .string({
+        required_error: "El ID de la orden es requerido",
+        invalid_type_error: "El ID de la orden debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El ID de la orden no puede estar vacío"),
+  })
+  .strict();
+
 // ─── Schemas de body ──────────────────────────────────────────────────────────
 
 /**

@@ -665,6 +665,47 @@ router.get(
 
 /**
  * @swagger
+ * /api/ordenes/{id}/pago:
+ *   get:
+ *     summary: Obtener pago asociado a una orden
+ *     description: |
+ *       Endpoint de compatibilidad para consultar el pago asociado a una orden.
+ *       Internamente delega al módulo de pagos.
+ *
+ *       **Autorización:**
+ *       - Solo propietario o ADMIN/EMPLEADO.
+ *     tags: [Orders]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID de la orden
+ *         schema:
+ *           type: string
+ *           example: "orden_abc123"
+ *     responses:
+ *       200:
+ *         description: Pago obtenido exitosamente
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:id/pago",
+  authMiddleware,
+  validateParams(idParamSchema),
+  queryController.getPagoByOrdenIdProxy,
+);
+
+/**
+ * @swagger
  * /api/ordenes/{id}:
  *   get:
  *     summary: Obtener orden específica por ID con información populada
