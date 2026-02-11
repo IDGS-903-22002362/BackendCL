@@ -1424,7 +1424,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### TASK-060: Webhook de Stripe (confirmación final)
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint webhook para recibir eventos de Stripe, verificar firma y actualizar Pago/Orden de forma idempotente.  
 **Criterios de Aceptación:**
 
