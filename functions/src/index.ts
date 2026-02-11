@@ -14,4 +14,9 @@ import * as functions from "firebase-functions";
 import app from "./app";
 
 // Exportar la API de Express como una Cloud Function HTTPS
-export const api = functions.https.onRequest(app);
+// Los secrets se inyectan automáticamente como process.env.* en runtime
+export const api = functions
+  .runWith({
+    secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+  })
+  .https.onRequest(app);

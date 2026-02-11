@@ -6,12 +6,22 @@ import swaggerUi from "swagger-ui-express";
 import routes from "./routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
+import type { Request as ExpressRequest } from "express";
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: true }));
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      const expressReq = req as ExpressRequest;
+      if (expressReq.originalUrl.startsWith("/api/pagos/webhook")) {
+        expressReq.rawBody = Buffer.from(buf);
+      }
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Morgan: Logger de peticiones HTTP (solo en desarrollo)
