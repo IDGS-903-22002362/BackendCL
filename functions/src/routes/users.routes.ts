@@ -76,7 +76,7 @@ router.get("/debug", authMiddleware, debugController.debugFirestore);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/", authMiddleware, queryController.getAll);
+router.get("/", queryController.getAll);
 
 /**
  * @swagger
@@ -338,7 +338,7 @@ router.get("/linea/:lineaId", queryController.getByLine);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/buscar/:termino", authMiddleware, queryController.search);
+router.get("/buscar/:termino", queryController.search);
 
 // ==========================================
 // COMMANDS (Escritura - Transactional & Secure)
