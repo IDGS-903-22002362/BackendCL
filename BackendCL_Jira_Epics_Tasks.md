@@ -1485,7 +1485,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### TASK-062: Procesar reembolso (Stripe)
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para procesar reembolsos en Stripe y actualizar Pago/Orden.  
 **Criterios de Aceptación:**
 

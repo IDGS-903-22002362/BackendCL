@@ -6,14 +6,11 @@ import { ApiError } from "../../utils/error-handler";
 const IDEMPOTENCY_KEY_MIN_LENGTH = 8;
 const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
 
-const getValidatedIdempotencyKey = (req: Request): string => {
+const getOptionalIdempotencyKey = (req: Request): string | undefined => {
   const rawKey = req.header("Idempotency-Key");
 
   if (!rawKey) {
-    throw new ApiError(
-      400,
-      "El header Idempotency-Key es obligatorio para iniciar pagos",
-    );
+    return undefined;
   }
 
   const idempotencyKey = rawKey.trim();
@@ -39,7 +36,7 @@ export const iniciar = async (req: Request, res: Response) => {
       });
     }
 
-    const idempotencyKey = getValidatedIdempotencyKey(req);
+    const idempotencyKey = getOptionalIdempotencyKey(req);
     const { ordenId, metodoPago } = req.body as {
       ordenId: string;
       metodoPago: MetodoPago;
@@ -118,6 +115,49 @@ export const webhook = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Error interno al procesar el webhook de Stripe",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const reembolso = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autorizado. Se requiere autenticación.",
+      });
+    }
+
+    const { id: pagoId } = req.params;
+    const { refundAmount, refundReason } = req.body as {
+      refundAmount?: number;
+      refundReason?: string;
+    };
+
+    const result = await pagoService.procesarReembolso({
+      pagoId,
+      refundAmount,
+      refundReason,
+      requestedByUid: req.user.uid,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Reembolso procesado exitosamente",
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Error interno al procesar el reembolso",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }

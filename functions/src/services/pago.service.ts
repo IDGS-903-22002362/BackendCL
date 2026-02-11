@@ -19,7 +19,7 @@ type IniciarPagoInput = {
   ordenId: string;
   userId: string;
   metodoPago: MetodoPago;
-  idempotencyKey: string;
+  idempotencyKey?: string;
 };
 
 type IniciarPagoResult = {
@@ -28,6 +28,23 @@ type IniciarPagoResult = {
   clientSecret: string;
   status: EstadoPago;
   created: boolean;
+};
+
+type ProcesarReembolsoInput = {
+  pagoId: string;
+  refundAmount?: number;
+  refundReason?: string;
+  requestedByUid: string;
+};
+
+type ProcesarReembolsoResult = {
+  pagoId: string;
+  ordenId: string;
+  estadoPago: EstadoPago;
+  estadoOrden: EstadoOrden;
+  refundId: string;
+  refundAmount: number;
+  refundReason?: string;
 };
 
 export type StripeWebhookOutcome =
@@ -155,7 +172,27 @@ const isAdminOrEmpleado = (rol?: string): boolean => {
   return rol === RolUsuario.ADMIN || rol === RolUsuario.EMPLEADO;
 };
 
+const ESTADOS_PAGO_ACTIVOS: EstadoPago[] = [
+  EstadoPago.PENDIENTE,
+  EstadoPago.PROCESANDO,
+  EstadoPago.REQUIERE_ACCION,
+];
+
 class PagoService {
+  private async generateServerIdempotencyKey(
+    ordenId: string,
+    userId: string,
+  ): Promise<string> {
+    const pagosSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .where("userId", "==", userId)
+      .get();
+
+    const attempt = pagosSnapshot.size + 1;
+    return `pay_${ordenId}_${userId}_${attempt}`;
+  }
+
   async iniciarPago(input: IniciarPagoInput): Promise<IniciarPagoResult> {
     const { ordenId, userId, metodoPago, idempotencyKey } = input;
     const stripe = getStripeClient();
@@ -205,9 +242,66 @@ class PagoService {
       throw new ApiError(409, "La orden tiene un monto invalido para pago");
     }
 
+    const pagoActivoSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .where("userId", "==", userId)
+      .where("estado", "in", ESTADOS_PAGO_ACTIVOS)
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+
+    if (!pagoActivoSnapshot.empty) {
+      const pagoActivoDoc = pagoActivoSnapshot.docs[0];
+      const pagoActivo = pagoActivoDoc.data() as Pago;
+
+      if (!pagoActivo.paymentIntentId) {
+        throw new ApiError(
+          409,
+          "Existe un pago activo inconsistente para esta orden. Revisa el estado antes de reintentar",
+        );
+      }
+
+      try {
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          pagoActivo.paymentIntentId,
+        );
+
+        if (!paymentIntent.client_secret) {
+          throw new ApiError(
+            502,
+            "No fue posible recuperar el client secret del intento activo",
+          );
+        }
+
+        return {
+          pagoId: pagoActivoDoc.id,
+          paymentIntentId: paymentIntent.id,
+          clientSecret: paymentIntent.client_secret,
+          status: mapPaymentIntentStatusToEstadoPago(paymentIntent.status),
+          created: false,
+        };
+      } catch (error) {
+        console.error("Error al recuperar pago activo por orden", {
+          ordenId,
+          userId,
+          pagoId: pagoActivoDoc.id,
+          paymentIntentId: pagoActivo.paymentIntentId,
+          error: parseWebhookErrorMessage(error),
+        });
+        throw new ApiError(
+          502,
+          "No fue posible reutilizar el intento activo de pago",
+        );
+      }
+    }
+
+    const resolvedIdempotencyKey =
+      idempotencyKey || (await this.generateServerIdempotencyKey(ordenId, userId));
+
     const idemSnapshot = await firestoreTienda
       .collection(COLECCION_PAGOS)
-      .where("idempotencyKey", "==", idempotencyKey)
+      .where("idempotencyKey", "==", resolvedIdempotencyKey)
       .limit(1)
       .get();
 
@@ -281,7 +375,7 @@ class PagoService {
       monto: ordenData.total,
       currency: CURRENCY_DEFAULT,
       estado: EstadoPago.PROCESANDO,
-      idempotencyKey,
+      idempotencyKey: resolvedIdempotencyKey,
       createdAt: now,
       updatedAt: now,
     };
@@ -301,7 +395,7 @@ class PagoService {
             pagoId: pagoRef.id,
           },
         },
-        { idempotencyKey },
+        { idempotencyKey: resolvedIdempotencyKey },
       );
 
       const estadoPago = mapPaymentIntentStatusToEstadoPago(paymentIntent.status);
@@ -423,6 +517,137 @@ class PagoService {
 
       throw error;
     }
+  }
+
+  async procesarReembolso(
+    input: ProcesarReembolsoInput,
+  ): Promise<ProcesarReembolsoResult> {
+    const { pagoId, refundAmount, refundReason, requestedByUid } = input;
+    const stripe = getStripeClient();
+
+    const pagoRef = firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId);
+    const pagoDoc = await pagoRef.get();
+    if (!pagoDoc.exists) {
+      throw new ApiError(404, `Pago con ID "${pagoId}" no encontrado`);
+    }
+
+    const pago = pagoDoc.data() as Pago;
+    if (pago.estado !== EstadoPago.COMPLETADO) {
+      throw new ApiError(
+        409,
+        `El pago debe estar COMPLETADO para reembolso. Estado actual: ${pago.estado}`,
+      );
+    }
+
+    if (!pago.paymentIntentId) {
+      throw new ApiError(
+        409,
+        "El pago no tiene paymentIntentId para procesar reembolso en Stripe",
+      );
+    }
+
+    if (typeof pago.monto !== "number" || pago.monto <= 0) {
+      throw new ApiError(409, "El pago tiene un monto inválido para reembolso");
+    }
+
+    const refundAmountToApply = refundAmount ?? pago.monto;
+    if (refundAmountToApply > pago.monto) {
+      throw new ApiError(
+        400,
+        "El monto de reembolso no puede ser mayor al monto original del pago",
+      );
+    }
+
+    const refundAmountInCents = Math.round(refundAmountToApply * 100);
+    if (refundAmountInCents <= 0) {
+      throw new ApiError(400, "El monto de reembolso debe ser mayor a 0");
+    }
+
+    let refund: Stripe.Refund;
+    try {
+      refund = await stripe.refunds.create({
+        payment_intent: pago.paymentIntentId,
+        amount: refundAmount ? refundAmountInCents : undefined,
+        reason: refundReason ? "requested_by_customer" : undefined,
+        metadata: refundReason ? { refundReason } : undefined,
+      });
+    } catch (error) {
+      const stripeError = error as {
+        code?: string;
+        message?: string;
+        type?: string;
+      };
+      const failureCode = stripeError?.code || "stripe_refund_error";
+      const failureMessage =
+        stripeError?.message || "No fue posible procesar el reembolso";
+      const providerStatus = stripeError?.type || "stripe_refund_error";
+
+      await pagoRef.update({
+        failureCode,
+        failureMessage,
+        providerStatus,
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+
+      console.error("stripe_refund_error", {
+        pagoId,
+        ordenId: pago.ordenId,
+        requestedByUid,
+        failureCode,
+        failureMessage,
+      });
+
+      throw new ApiError(502, "Error al procesar el reembolso con Stripe");
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const ordenRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(pago.ordenId);
+
+    await firestoreTienda.runTransaction(async (tx) => {
+      const ordenDoc = await tx.get(ordenRef);
+      if (!ordenDoc.exists) {
+        throw new ApiError(
+          404,
+          `Orden asociada con ID "${pago.ordenId}" no encontrada`,
+        );
+      }
+
+      tx.update(pagoRef, {
+        estado: EstadoPago.REEMBOLSADO,
+        providerStatus: refund.status,
+        refundId: refund.id,
+        refundAmount: refund.amount / 100,
+        refundReason:
+          refundReason || refund.metadata?.refundReason || refund.reason || undefined,
+        failureCode: admin.firestore.FieldValue.delete(),
+        failureMessage: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      });
+
+      tx.update(ordenRef, {
+        estado: EstadoOrden.CANCELADA,
+        updatedAt: now,
+      });
+    });
+
+    console.info("stripe_refund_processed", {
+      pagoId,
+      ordenId: pago.ordenId,
+      refundId: refund.id,
+      refundAmount: refund.amount / 100,
+      requestedByUid,
+    });
+
+    return {
+      pagoId,
+      ordenId: pago.ordenId,
+      estadoPago: EstadoPago.REEMBOLSADO,
+      estadoOrden: EstadoOrden.CANCELADA,
+      refundId: refund.id,
+      refundAmount: refund.amount / 100,
+      refundReason:
+        refundReason || refund.metadata?.refundReason || refund.reason || undefined,
+    };
   }
 
   async getPagoById(pagoId: string, user: AuthUser): Promise<PagoConsultaResult> {

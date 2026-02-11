@@ -6,8 +6,9 @@ import {
   iniciarPagoSchema,
   ordenPagoParamSchema,
   pagoIdParamSchema,
+  refundPagoSchema,
 } from "../middleware/validators/pago.validator";
-import { authMiddleware } from "../utils/middlewares";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -123,19 +124,20 @@ router.post("/webhook", commandController.webhook);
  *
  *       **IMPORTANTE:**
  *       - Requiere autenticación (solo el dueño de la orden puede pagarla)
- *       - Requiere header `Idempotency-Key` para evitar cobros duplicados
+ *       - Header `Idempotency-Key` recomendado (si no llega, el backend genera clave idempotente)
  *       - El monto se calcula server-side usando `orden.total`
  *       - Solo acepta órdenes en estado `PENDIENTE`
  *       - Solo acepta método de pago `TARJETA` para Stripe en esta tarea
  *       - NO confirma la orden como pagada aquí (se confirma en webhook TASK-060)
+ *       - Si existe un pago activo para la orden, se reutiliza y responde `200`
  *     tags: [Payments]
  *     security:
  *       - BearerAuth: []
  *     parameters:
  *       - in: header
  *         name: Idempotency-Key
- *         required: true
- *         description: Clave única para reintentos seguros sin cobros duplicados
+ *         required: false
+ *         description: Clave única recomendada para reintentos seguros; opcional con fallback server-side
  *         schema:
  *           type: string
  *           minLength: 8
@@ -196,7 +198,7 @@ router.post("/webhook", commandController.webhook);
  *               headerInvalido:
  *                 value:
  *                   success: false
- *                   message: "El header Idempotency-Key es obligatorio para iniciar pagos"
+ *                   message: "Idempotency-Key debe tener entre 8 y 255 caracteres"
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  *       403:
@@ -223,6 +225,75 @@ router.post(
   authMiddleware,
   validateBody(iniciarPagoSchema),
   commandController.iniciar,
+);
+
+/**
+ * @swagger
+ * /api/pagos/{id}/reembolso:
+ *   post:
+ *     summary: Procesar reembolso de un pago en Stripe
+ *     description: |
+ *       Procesa un reembolso total o parcial para un pago completado.
+ *
+ *       **Reglas de negocio:**
+ *       - El pago debe existir y estar en estado `COMPLETADO`
+ *       - Debe tener `paymentIntentId`
+ *       - Permite reembolso total o parcial (`refundAmount` opcional)
+ *       - Actualiza pago a `REEMBOLSADO` y la orden asociada a `CANCELADA`
+ *
+ *       **Autorización:**
+ *       - Solo usuarios ADMIN/EMPLEADO pueden procesar reembolsos
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del pago a reembolsar
+ *         schema:
+ *           type: string
+ *           example: "pago_abc123"
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RefundPago'
+ *           example:
+ *             refundAmount: 1500
+ *             refundReason: "Solicitud del cliente"
+ *     responses:
+ *       200:
+ *         description: Reembolso procesado exitosamente
+ *       400:
+ *         description: Validación de negocio o request inválido
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       502:
+ *         description: Error procesando el reembolso en Stripe
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/:id/reembolso",
+  authMiddleware,
+  requireAdmin,
+  validateParams(pagoIdParamSchema),
+  validateBody(refundPagoSchema),
+  commandController.reembolso,
 );
 
 /**
