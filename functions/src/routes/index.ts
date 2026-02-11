@@ -21,6 +21,7 @@ import authRoutes from "./auth.routes";
 import ordenesRoutes from "./ordenes.routes";
 import newsRoutes from "./news.routes";
 import carritoRoutes from "./carrito.routes";
+import pagosRoutes from "./pagos.routes";
 
 const router = Router();
 
@@ -38,8 +39,8 @@ router.use("/noticias", newsRoutes);
 router.use("/auth", authRoutes);
 router.use("/ordenes", ordenesRoutes);
 router.use("/carrito", carritoRoutes);
+router.use("/pagos", pagosRoutes);
 
 // Futuros módulos:
-// router.use('/pagos', pagosRoutes);
 
 export default router;
