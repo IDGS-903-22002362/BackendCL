@@ -79,11 +79,13 @@ export const registerOrLogin = async (req: Request, res: Response) => {
                 updatedAt: now,
             };
 
-            const docRef = await firestoreApp
+            const docRef = firestoreApp
                 .collection("usuariosApp")
-                .add(nuevoUsuario);
+                .doc(uid); // usar UID como ID del documento
 
-            usuario = { id: docRef.id, ...nuevoUsuario };
+            await docRef.set(nuevoUsuario);
+
+            usuario = { id: uid, ...nuevoUsuario };
         } else {
             const doc = snapshot.docs[0];
             usuario = { id: doc.id, ...doc.data() };
