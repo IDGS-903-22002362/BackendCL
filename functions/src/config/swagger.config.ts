@@ -34,6 +34,11 @@ import {
   mergeCarritoSchema,
   checkoutCarritoSchema,
 } from "../middleware/validators/carrito.validator";
+import {
+  iniciarPagoSchema,
+  updateEstadoPagoSchema,
+  refundPagoSchema,
+} from "../middleware/validators/pago.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -107,6 +112,11 @@ const swaggerDefinition = {
     {
       name: "Cart",
       description: "Carrito de compras (usuarios autenticados y anónimos)",
+    },
+    {
+      name: "Payments",
+      description:
+        "Sistema de pagos con Stripe (PaymentIntent / Checkout Session)",
     },
     {
       name: "Authentication",
@@ -237,6 +247,10 @@ const swaggerDefinition = {
       UpdateEstadoOrden: zodToJsonSchema(updateEstadoOrdenSchema),
       ListOrdenesQuery: zodToJsonSchema(listOrdenesQuerySchema),
       HistorialOrdenesQuery: zodToJsonSchema(historialOrdenesQuerySchema),
+
+      IniciarPago: zodToJsonSchema(iniciarPagoSchema),
+      UpdateEstadoPago: zodToJsonSchema(updateEstadoPagoSchema),
+      RefundPago: zodToJsonSchema(refundPagoSchema),
 
       // Modelos completos de entidades
       Product: {
@@ -413,6 +427,130 @@ const swaggerDefinition = {
           transportista: { type: "string", example: "FedEx" },
           costoEnvio: { type: "number", example: 150.0 },
           notas: { type: "string", example: "Entregar en horario laboral" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-15T10:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-20T14:20:00Z",
+          },
+        },
+      },
+      Pago: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "pago_abc123" },
+          ordenId: { type: "string", example: "orden_12345" },
+          userId: { type: "string", example: "firebase_uid_xyz" },
+          provider: {
+            type: "string",
+            enum: ["STRIPE"],
+            example: "STRIPE",
+            description: "Proveedor de pago",
+          },
+          metodoPago: {
+            type: "string",
+            enum: [
+              "TARJETA",
+              "TRANSFERENCIA",
+              "EFECTIVO",
+              "PAYPAL",
+              "MERCADOPAGO",
+            ],
+            example: "TARJETA",
+          },
+          monto: {
+            type: "number",
+            example: 3015.97,
+            description: "Monto total en la moneda especificada",
+          },
+          currency: {
+            type: "string",
+            example: "mxn",
+            description: "Código de moneda ISO 4217",
+          },
+          estado: {
+            type: "string",
+            enum: [
+              "PENDIENTE",
+              "REQUIERE_ACCION",
+              "PROCESANDO",
+              "COMPLETADO",
+              "FALLIDO",
+              "REEMBOLSADO",
+            ],
+            example: "PENDIENTE",
+          },
+          providerStatus: {
+            type: "string",
+            example: "requires_payment_method",
+            description: "Status crudo de Stripe",
+          },
+          paymentIntentId: {
+            type: "string",
+            example: "pi_3ABC123DEF456",
+            description: "ID del PaymentIntent en Stripe",
+          },
+          checkoutSessionId: {
+            type: "string",
+            example: "cs_test_abc123",
+            description: "ID del Checkout Session en Stripe",
+          },
+          transaccionId: {
+            type: "string",
+            example: "TXN-2024-00001",
+            description: "Referencia interna legible",
+          },
+          idempotencyKey: {
+            type: "string",
+            example: "orden_12345_1_firebase_uid_xyz",
+            description: "Clave para evitar cobros duplicados",
+          },
+          fechaPago: {
+            type: "string",
+            format: "date-time",
+            example: "2024-01-15T10:30:00Z",
+            description: "Fecha de confirmación del pago",
+          },
+          failureCode: {
+            type: "string",
+            example: "card_declined",
+            description: "Código de error de Stripe",
+          },
+          failureMessage: {
+            type: "string",
+            example: "Tu tarjeta fue rechazada",
+            description: "Mensaje descriptivo del fallo",
+          },
+          refundId: {
+            type: "string",
+            example: "re_3ABC123DEF456",
+            description: "ID del reembolso en Stripe",
+          },
+          refundAmount: {
+            type: "number",
+            example: 3015.97,
+            description: "Monto reembolsado",
+          },
+          refundReason: {
+            type: "string",
+            example: "Producto defectuoso",
+            description: "Motivo del reembolso",
+          },
+          webhookEventIdsProcesados: {
+            type: "array",
+            items: { type: "string" },
+            example: ["evt_1ABC123", "evt_2DEF456"],
+            description: "IDs de eventos de Stripe procesados (deduplicación)",
+          },
+          metadata: {
+            type: "object",
+            example: { source: "web", campaign: "promo_verano" },
+            description: "Datos adicionales",
+          },
           createdAt: {
             type: "string",
             format: "date-time",
