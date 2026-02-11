@@ -1315,7 +1315,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-057: Convertir carrito en orden
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para convertir el carrito en una orden de compra.  
 **Criterios de Aceptación:**
 
@@ -1338,7 +1338,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### TASK-058: Modelo de datos de Pago
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE
 **Descripción:** Crear modelo de datos para pagos alineado a Stripe (PaymentIntent o Checkout Session).  
 **Criterios de Aceptación:**
 
@@ -1383,7 +1383,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### TASK-059: Iniciar pago de orden (crear intento en Stripe)
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para **iniciar** el pago de una orden creando un PaymentIntent o Checkout Session en Stripe.  
 **Criterios de Aceptación:**
 
