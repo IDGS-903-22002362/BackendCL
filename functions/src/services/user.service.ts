@@ -261,7 +261,7 @@ export class UserAppService {
       const now = admin.firestore.Timestamp.now();
 
       const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
-        uid: usuarioData.uid, // UID interno
+        uid: usuarioData.uid,
         provider: "email",
         nombre: usuarioData.nombre,
         email: usuarioData.email.toLowerCase(),
@@ -276,30 +276,24 @@ export class UserAppService {
         updatedAt: now,
       };
 
-      // VALIDAR EMAIL
       const emailExists = await this.existsByEmail(usuarioData.email);
       if (emailExists) {
         throw new Error("El correo electrónico ya está registrado");
       }
+      console.log("CREANDO USUARIO CON UID:", usuarioData.uid);
 
-      // Crear el documento con timestamps
-      const docRef = await firestoreApp
+      // 🔥 AQUÍ EL CAMBIO IMPORTANTE
+      const docRef = firestoreApp
         .collection(USUARIOSAPP_COLLECTION)
-        .add(nuevoUsuarioData);
+        .doc(usuarioData.uid);
 
-      // Obtener el documento creado
-      const docSnapshot = await docRef.get();
-      const data = docSnapshot.data()!;
+      await docRef.set(nuevoUsuarioData);
 
-      const nuevoUsuario: UsuarioApp = {
-        id: docRef.id,
-        ...data,
+      return {
+        id: usuarioData.uid,
+        ...nuevoUsuarioData,
       } as UsuarioApp;
 
-      console.log(
-        `Usuario creado: ${nuevoUsuario.nombre} (ID: ${nuevoUsuario.id})`,
-      );
-      return nuevoUsuario;
     } catch (error) {
       console.error("❌ Error al crear usuario:", error);
       throw new Error(
@@ -307,6 +301,7 @@ export class UserAppService {
       );
     }
   }
+
 
   /**
    * Actualiza un usuario existente
