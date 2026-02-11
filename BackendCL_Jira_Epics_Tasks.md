@@ -1328,87 +1328,225 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ---
 
-## ÉPICA 7: Sistema de Pagos
+## ÉPICA 7: Sistema de Pagos (Stripe)
 
 **Tipo:** Epic  
-**Descripción:** Integración con sistemas de pago para procesar transacciones.
-
-### Tareas
-
-#### TASK-058: Modelo de datos de Pago
-
-**Tipo:** Task  
-**Estado:** 🔲 TODO  
-**Descripción:** Crear modelo de datos para pagos.  
-**Criterios de Aceptación:**
-
-- Interface de Pago con campos: id, ordenId, metodoPago, monto, estado, transaccionId, fechaPago, createdAt
-- Estados: pendiente, procesando, completado, fallido, reembolsado
-- Métodos: tarjeta, transferencia, efectivo
+**Descripción:** Integración con Stripe para iniciar pagos, confirmar transacciones vía webhook, consultar estados y procesar reembolsos, evitando cobros duplicados (idempotencia) y asegurando consistencia Orden ↔ Pago.
 
 ---
 
-#### TASK-059: Procesar pago de orden
+### TASK-058: Modelo de datos de Pago
 
 **Tipo:** Task  
 **Estado:** 🔲 TODO  
-**Descripción:** Endpoint para procesar el pago de una orden.  
+**Descripción:** Crear modelo de datos para pagos alineado a Stripe (PaymentIntent o Checkout Session).  
 **Criterios de Aceptación:**
 
-- POST /api/pagos/procesar
-- Validar que orden exista y esté pendiente
-- Validar método de pago
-- Integrar con pasarela de pago (ej: Stripe, PayPal)
-- Actualizar estado de orden a "confirmada"
-- Crear registro de pago
-- Manejar errores de pago
+- Crear `interface Pago` (o esquema DB) con campos mínimos:
+  - `id` (string)
+  - `ordenId` (string)
+  - `userId` (string)
+  - `provider` (string) → `"stripe"`
+  - `metodoPago` (string) → `tarjeta | transferencia | efectivo`
+  - `monto` (number)
+  - `currency` (string) → ejemplo `"mxn"`
+  - `estado` (string) → ver “Estados”
+  - `providerStatus` (string, opcional) → status crudo de Stripe
+  - `paymentIntentId` (string, opcional)
+  - `checkoutSessionId` (string, opcional)
+  - `transaccionId` (string, opcional) → id interno o referencia legible
+  - `idempotencyKey` (string) → para creación del intento de cobro
+  - `fechaPago` (Timestamp | Date, opcional)
+  - `failureCode` (string, opcional)
+  - `failureMessage` (string, opcional)
+  - `refundId` (string, opcional)
+  - `refundAmount` (number, opcional)
+  - `refundReason` (string, opcional)
+  - `webhookEventIdsProcesados` (string[], opcional) **o** colección/tablas separadas para dedupe
+  - `metadata` (object, opcional)
+  - `createdAt` (Timestamp | Date)
+  - `updatedAt` (Timestamp | Date)
+
+- **Estados** permitidos:
+  - `pendiente`
+  - `requiere_accion` (ej. 3DS / requires_action)
+  - `procesando`
+  - `completado`
+  - `fallido`
+  - `reembolsado`
+
+- **Regla de integridad**:
+  - Un `Pago` pertenece a una `Orden` (`ordenId`) y debe permitir reintentos sin duplicar cobros (idempotencia).
 
 ---
 
-#### TASK-060: Webhook de pasarela de pago
+### TASK-059: Iniciar pago de orden (crear intento en Stripe)
 
 **Tipo:** Task  
 **Estado:** 🔲 TODO  
-**Descripción:** Endpoint webhook para recibir notificaciones de la pasarela de pago.  
+**Descripción:** Endpoint para **iniciar** el pago de una orden creando un PaymentIntent o Checkout Session en Stripe.  
 **Criterios de Aceptación:**
 
-- POST /api/pagos/webhook
-- Verificar firma del webhook
-- Actualizar estado de pago según notificación
-- Actualizar estado de orden
-- Manejar diferentes eventos (pago exitoso, fallido, reembolso)
+- `POST /api/pagos/iniciar` _(si mantienes el nombre original, ok, pero semántica = iniciar)_
+
+- Validaciones:
+  - Validar que la orden exista.
+  - Validar que la orden esté en estado pagable (ej. `pendiente`).
+  - Calcular `monto` **server-side** (no confiar en monto del cliente).
+  - Validar `metodoPago` permitido para esa orden.
+
+- Stripe:
+  - Crear **PaymentIntent** (regresa `client_secret`) **o** crear **Checkout Session** (regresa `checkout_url`).
+  - Usar `idempotencyKey` para evitar cobros duplicados si hay reintentos.
+
+- Persistencia:
+  - Crear registro `Pago` con:
+    - `estado: pendiente` o `procesando`
+    - `paymentIntentId` o `checkoutSessionId`
+    - `idempotencyKey`
+    - `monto`, `currency`, `ordenId`, `userId`
+
+- Respuesta:
+  - Si PaymentIntent: devolver `clientSecret` (y `paymentIntentId`).
+  - Si Checkout: devolver `checkoutUrl` (y `checkoutSessionId`).
+  - Devolver `pagoId` interno.
+
+- **IMPORTANTE**:
+  - **NO** marcar la orden como “confirmada/pagada” aquí.  
+    La confirmación final se hace en el webhook (TASK-060).
+
+- Manejo de errores:
+  - Errores de validación (404 orden, 409 estado inválido, 400 método inválido).
+  - Errores Stripe (log + persistir `failureCode/failureMessage` si aplica).
 
 ---
 
-#### TASK-061: Consultar estado de pago
+### TASK-060: Webhook de Stripe (confirmación final)
 
 **Tipo:** Task  
 **Estado:** 🔲 TODO  
-**Descripción:** Endpoint para consultar el estado de un pago específico.  
+**Descripción:** Endpoint webhook para recibir eventos de Stripe, verificar firma y actualizar Pago/Orden de forma idempotente.  
 **Criterios de Aceptación:**
 
-- GET /api/pagos/:id
-- Retornar información del pago
-- Incluir información de orden asociada
-- Solo usuario propietario o administrador puede consultar
+- `POST /api/pagos/webhook`
+
+- Seguridad:
+  - Verificar firma del webhook con `Stripe-Signature` y secret del endpoint.
+  - Usar **raw body** (sin transformar) para validar firma correctamente.
+
+- Idempotencia del webhook:
+  - Guardar `event.id` procesado (por Pago o en colección dedicada).
+  - Si `event.id` ya fue procesado → responder 200 sin re-ejecutar lógica.
+
+- Eventos a manejar (según estrategia):
+  - **PaymentIntents**:
+    - `payment_intent.succeeded` → `Pago.estado = completado` + `Orden.estado = confirmada/pagada`
+    - `payment_intent.payment_failed` → `Pago.estado = fallido` (y mantener orden no pagada)
+  - **Checkout**:
+    - `checkout.session.completed` → confirmar pago/orden
+    - _(si usas métodos diferidos)_ `checkout.session.async_payment_succeeded` / `...failed`
+
+- Actualizaciones:
+  - Actualizar `Pago` según evento (estado, providerStatus, fechaPago, errores).
+  - Actualizar `Orden` en consecuencia:
+    - pago exitoso → `confirmada/pagada`
+    - pago fallido → mantener `pendiente` o `fallida` según reglas del negocio
+    - reembolso → `cancelada` o `reembolsada` según reglas
+
+- Observabilidad:
+  - Log de evento + correlación con `ordenId`/`pagoId`.
+  - Manejo de “no encontrado” (evento llega sin match): registrar para revisión.
 
 ---
 
-#### TASK-062: Procesar reembolso
+### TASK-061: Consultar estado de pago
 
 **Tipo:** Task  
 **Estado:** 🔲 TODO  
-**Descripción:** Endpoint para procesar reembolsos de pagos.  
+**Descripción:** Endpoint para consultar el estado de un pago específico y su orden asociada.  
 **Criterios de Aceptación:**
 
-- POST /api/pagos/:id/reembolso
-- Validar que pago esté completado
-- Procesar reembolso en pasarela de pago
-- Actualizar estado de pago a "reembolsado"
-- Cancelar orden asociada
-- Solo administradores pueden procesar reembolsos
+- `GET /api/pagos/:id`
+
+- Respuesta:
+  - Retornar información del `Pago`:
+    - `estado`, `monto`, `currency`, `metodoPago`, `provider`, `paymentIntentId/checkoutSessionId`,
+    - `fechaPago`, `failureCode/failureMessage` (si aplica),
+    - datos mínimos de la `Orden` asociada (id, estado, total, etc.)
+
+- Autorización:
+  - Solo el usuario propietario (`userId`) o un administrador puede consultar.
+
+- Opcional recomendado:
+  - `GET /api/ordenes/:ordenId/pago` para recuperar el pago por orden.
 
 ---
+
+### TASK-062: Procesar reembolso (Stripe)
+
+**Tipo:** Task  
+**Estado:** 🔲 TODO  
+**Descripción:** Endpoint para procesar reembolsos en Stripe y actualizar Pago/Orden.  
+**Criterios de Aceptación:**
+
+- `POST /api/pagos/:id/reembolso`
+
+- Validaciones:
+  - Validar que el pago exista.
+  - Validar que el pago esté `completado`.
+  - Validar que tenga `paymentIntentId` (o referencia necesaria según implementación).
+  - Soportar reembolso total y opcionalmente parcial (`refundAmount`).
+
+- Stripe:
+  - Crear reembolso en Stripe (guardar `refundId`).
+  - Registrar `refundReason` si se proporciona.
+
+- Persistencia:
+  - Actualizar `Pago.estado = reembolsado`
+  - Guardar `refundId`, `refundAmount`, `refundReason`, `updatedAt`
+  - Actualizar `Orden` asociada:
+    - por defecto: `cancelada/reembolsada` según tu modelo de estados
+
+- Autorización:
+  - Solo administradores pueden procesar reembolsos.
+
+- Manejo de errores:
+  - Si Stripe falla, no cambiar a `reembolsado`; guardar detalles de error.
+
+---
+
+### (Recomendado) TASK-063: Estrategia de idempotencia y deduplicación
+
+**Tipo:** Task  
+**Estado:** 🔲 TODO  
+**Descripción:** Evitar cobros duplicados por reintentos del cliente y reenvíos de Stripe.  
+**Criterios de Aceptación:**
+
+- Definir generación de `idempotencyKey` (por `ordenId + intento + userId` o similar).
+- Al iniciar pago:
+  - Si ya existe un `Pago` activo para la orden (pendiente/procesando/requiere_accion) → reusar o devolver el existente.
+- En webhook:
+  - Persistir y validar `event.id` para no procesarlo dos veces.
+- Tests:
+  - Simular 2 llamadas seguidas a `/iniciar` y validar que no se crean 2 cobros.
+  - Simular reintento de webhook y validar que no duplica cambios.
+
+---
+
+### (Recomendado) TASK-064: Entornos, llaves y configuración Stripe
+
+**Tipo:** Task  
+**Estado:** 🔲 TODO  
+**Descripción:** Configurar Stripe por ambiente (dev/stg/prod) y documentar variables.  
+**Criterios de Aceptación:**
+
+- Variables de entorno:
+  - `STRIPE_SECRET_KEY`
+  - `STRIPE_WEBHOOK_SECRET`
+  - `STRIPE_PUBLIC_KEY` (si aplica al cliente)
+- Separación por ambiente (dev/stg/prod).
+- Documentar cómo probar:
+  - Eventos webhook en local con Stripe CLI (si tu equipo lo usa).
 
 ## ÉPICA 8: Gestión de Inventario
 
