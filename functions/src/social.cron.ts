@@ -1,13 +1,13 @@
 import * as functions from "firebase-functions";
 import { firestore } from "firebase-admin";
-import { obtenerPostsInstagram } from "./services/instagram.service";
+import instagramService from "./services/instagram.service";
 import newService from "./services/new.service";
 
 
 export const syncInstagramPosts = functions.pubsub
     .schedule("every 30 minutes")
     .onRun(async () => {
-        const posts = await obtenerPostsInstagram();
+        const posts = await instagramService.obtenerPublicaciones();
         const db = firestore();
 
         for (const post of posts) {

@@ -1,38 +1,26 @@
 // services/instagram.service.ts
-
-const TOKEN = process.env.INSTAGRAM_TOKEN!;
-const IG_USER_ID = process.env.INSTAGRAM_IG_USER_ID!;
-
-export async function obtenerPostsInstagram() {
-    const { data } = await axios.get(
-        `${IG_BASE}/${IG_USER_ID}/media`,
-        {
-            params: {
-                fields:
-                    "id,caption,media_type,media_url,permalink,timestamp",
-                access_token: TOKEN,
-            },
-        }
-    );
-
-    return data.data;
-}
-
 import axios from "axios";
 
-const IG_BASE = "https://graph.facebook.com/v19.0";
+const IG_BASE = "https://graph.facebook.com/v24.0";
+
+const IG_USER_ID = process.env.INSTAGRAM_USER_ID!;
+const ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN!;
 
 class InstagramService {
     async obtenerPublicaciones() {
-        const igUserId = process.env.IG_BUSINESS_ID!;
-        const token = process.env.META_PAGE_TOKEN!;
+        if (!IG_USER_ID || !ACCESS_TOKEN) {
+            throw new Error("Instagram env vars no definidas");
+        }
 
-        const { data } = await axios.get(`${IG_BASE}/${igUserId}/media`, {
-            params: {
-                fields: "id,caption,media_type,media_url,permalink,timestamp",
-                access_token: token,
-            },
-        });
+        const { data } = await axios.get(
+            `${IG_BASE}/${IG_USER_ID}/media`,
+            {
+                params: {
+                    fields: "id,caption,media_type,media_url,permalink,timestamp",
+                    access_token: ACCESS_TOKEN,
+                },
+            }
+        );
 
         return data.data;
     }
