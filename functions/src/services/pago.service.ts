@@ -9,6 +9,7 @@ import {
   Pago,
   ProveedorPago,
 } from "../models/pago.model";
+import { RolUsuario } from "../models/usuario.model";
 import { ApiError } from "../utils/error-handler";
 
 const ORDENES_COLLECTION = "ordenes";
@@ -42,6 +43,30 @@ export type StripeWebhookProcessResult = {
   pagoId?: string;
   ordenId?: string;
   reason?: string;
+};
+
+type AuthUser = {
+  uid: string;
+  rol?: string;
+};
+
+type PagoConsultaResult = {
+  id: string;
+  estado: EstadoPago;
+  monto: number;
+  currency: string;
+  metodoPago: MetodoPago;
+  provider: ProveedorPago;
+  paymentIntentId?: string;
+  checkoutSessionId?: string;
+  fechaPago?: FirebaseFirestore.Timestamp;
+  failureCode?: string;
+  failureMessage?: string;
+  orden: {
+    id: string;
+    estado: EstadoOrden;
+    total: number;
+  };
 };
 
 const getStripeClient = (): Stripe => {
@@ -124,6 +149,10 @@ const getMetadataString = (
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
+};
+
+const isAdminOrEmpleado = (rol?: string): boolean => {
+  return rol === RolUsuario.ADMIN || rol === RolUsuario.EMPLEADO;
 };
 
 class PagoService {
@@ -394,6 +423,111 @@ class PagoService {
 
       throw error;
     }
+  }
+
+  async getPagoById(pagoId: string, user: AuthUser): Promise<PagoConsultaResult> {
+    const pagoRef = firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId);
+    const pagoDoc = await pagoRef.get();
+
+    if (!pagoDoc.exists) {
+      console.info("pago_query_not_found", {
+        pagoId,
+        uid: user.uid,
+        rol: user.rol,
+        reason: "pago_not_found",
+      });
+      throw new ApiError(404, `Pago con ID "${pagoId}" no encontrado`);
+    }
+
+    const pago = pagoDoc.data() as Pago;
+
+    if (!isAdminOrEmpleado(user.rol) && pago.userId !== user.uid) {
+      console.warn("pago_query_denied", {
+        pagoId,
+        ordenId: pago.ordenId,
+        uid: user.uid,
+        rol: user.rol,
+        reason: "ownership_denied",
+      });
+      throw new ApiError(
+        403,
+        "No tienes permisos para consultar este pago",
+      );
+    }
+
+    const ordenRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(pago.ordenId);
+    const ordenDoc = await ordenRef.get();
+    if (!ordenDoc.exists) {
+      console.error("pago_query_not_found", {
+        pagoId,
+        ordenId: pago.ordenId,
+        uid: user.uid,
+        rol: user.rol,
+        reason: "orden_related_not_found",
+      });
+      throw new ApiError(
+        404,
+        `Orden asociada con ID "${pago.ordenId}" no encontrada`,
+      );
+    }
+
+    const orden = ordenDoc.data() as Orden;
+
+    const result: PagoConsultaResult = {
+      id: pagoDoc.id,
+      estado: pago.estado,
+      monto: pago.monto,
+      currency: pago.currency,
+      metodoPago: pago.metodoPago,
+      provider: pago.provider,
+      paymentIntentId: pago.paymentIntentId,
+      checkoutSessionId: pago.checkoutSessionId,
+      fechaPago: pago.fechaPago,
+      failureCode: pago.failureCode,
+      failureMessage: pago.failureMessage,
+      orden: {
+        id: ordenDoc.id,
+        estado: orden.estado,
+        total: orden.total,
+      },
+    };
+
+    console.info("pago_query_success", {
+      pagoId,
+      ordenId: ordenDoc.id,
+      uid: user.uid,
+      rol: user.rol,
+    });
+
+    return result;
+  }
+
+  async getPagoByOrdenId(
+    ordenId: string,
+    user: AuthUser,
+  ): Promise<PagoConsultaResult> {
+    const pagosSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+
+    if (pagosSnapshot.empty) {
+      console.info("pago_query_not_found", {
+        ordenId,
+        uid: user.uid,
+        rol: user.rol,
+        reason: "pago_not_found_by_orden",
+      });
+      throw new ApiError(
+        404,
+        `No se encontró pago para la orden "${ordenId}"`,
+      );
+    }
+
+    const pagoId = pagosSnapshot.docs[0].id;
+    return this.getPagoById(pagoId, user);
   }
 
   private async reserveWebhookEvent(event: Stripe.Event): Promise<boolean> {
