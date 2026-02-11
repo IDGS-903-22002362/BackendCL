@@ -1,7 +1,12 @@
 import { Router } from "express";
 import * as commandController from "../controllers/payments/payments.command.controller";
-import { validateBody } from "../middleware/validation.middleware";
-import { iniciarPagoSchema } from "../middleware/validators/pago.validator";
+import * as queryController from "../controllers/payments/payments.query.controller";
+import { validateBody, validateParams } from "../middleware/validation.middleware";
+import {
+  iniciarPagoSchema,
+  ordenPagoParamSchema,
+  pagoIdParamSchema,
+} from "../middleware/validators/pago.validator";
 import { authMiddleware } from "../utils/middlewares";
 
 const router = Router();
@@ -218,6 +223,143 @@ router.post(
   authMiddleware,
   validateBody(iniciarPagoSchema),
   commandController.iniciar,
+);
+
+/**
+ * @swagger
+ * /api/pagos/orden/{ordenId}:
+ *   get:
+ *     summary: Obtener el estado de pago por orden
+ *     description: |
+ *       Consulta el pago más reciente asociado a una orden.
+ *
+ *       **Autorización:**
+ *       - Solo el propietario del pago/orden o usuarios ADMIN/EMPLEADO
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ordenId
+ *         required: true
+ *         description: ID de la orden a consultar
+ *         schema:
+ *           type: string
+ *           example: "orden_abc123"
+ *     responses:
+ *       200:
+ *         description: Pago obtenido exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Pago obtenido exitosamente"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "pago_abc123"
+ *                     estado:
+ *                       type: string
+ *                       example: "COMPLETADO"
+ *                     monto:
+ *                       type: number
+ *                       example: 3015.97
+ *                     currency:
+ *                       type: string
+ *                       example: "mxn"
+ *                     metodoPago:
+ *                       type: string
+ *                       example: "TARJETA"
+ *                     provider:
+ *                       type: string
+ *                       example: "STRIPE"
+ *                     paymentIntentId:
+ *                       type: string
+ *                       example: "pi_3ABC123DEF456"
+ *                     checkoutSessionId:
+ *                       type: string
+ *                       example: "cs_test_abc123"
+ *                     fechaPago:
+ *                       type: string
+ *                       format: date-time
+ *                     failureCode:
+ *                       type: string
+ *                     failureMessage:
+ *                       type: string
+ *                     orden:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                           example: "orden_abc123"
+ *                         estado:
+ *                           type: string
+ *                           example: "CONFIRMADA"
+ *                         total:
+ *                           type: number
+ *                           example: 3015.97
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/orden/:ordenId",
+  authMiddleware,
+  validateParams(ordenPagoParamSchema),
+  queryController.getByOrdenId,
+);
+
+/**
+ * @swagger
+ * /api/pagos/{id}:
+ *   get:
+ *     summary: Obtener estado de un pago por ID
+ *     description: |
+ *       Consulta un pago específico y retorna datos mínimos de su orden asociada.
+ *
+ *       **Autorización:**
+ *       - Solo el propietario del pago o usuarios ADMIN/EMPLEADO
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del pago a consultar
+ *         schema:
+ *           type: string
+ *           example: "pago_abc123"
+ *     responses:
+ *       200:
+ *         description: Pago obtenido exitosamente
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:id",
+  authMiddleware,
+  validateParams(pagoIdParamSchema),
+  queryController.getById,
 );
 
 export default router;

@@ -1462,7 +1462,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### TASK-061: Consultar estado de pago
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para consultar el estado de un pago específico y su orden asociada.  
 **Criterios de Aceptación:**
 
