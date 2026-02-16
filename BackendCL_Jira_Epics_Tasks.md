@@ -1675,7 +1675,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-066: Alertas de stock bajo
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Sistema para detectar y notificar cuando el stock está bajo.  
 **Criterios de Aceptación:**
 
@@ -1683,6 +1683,31 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Endpoint para consultar productos con stock bajo
 - Notificación automática a administradores
 - Dashboard de alertas
+
+**Archivos de Código:**
+
+- `functions/src/models/producto.model.ts` (campos `stockMinimoGlobal` y `stockMinimoPorTalla`)
+- `functions/src/middleware/validators/product.validator.ts` (validación Zod de umbrales)
+- `functions/src/services/product.service.ts` (detección de stock bajo + trigger de notificación en tiempo real)
+- `functions/src/services/inventory.service.ts` (agregación de dashboard de alertas)
+- `functions/src/services/stock-alert.service.ts` (notificaciones automáticas a ADMIN/EMPLEADO con deduplicación)
+- `functions/src/middleware/validators/inventory.validator.ts` (schema `listLowStockAlertsQuerySchema`)
+- `functions/src/controllers/inventory/inventory.query.controller.ts` (endpoint `getLowStockAlerts`)
+- `functions/src/routes/inventory.routes.ts` (ruta `GET /api/inventario/alertas-stock` con Swagger)
+- `functions/src/stock-alert.cron.ts` (digest diario programado)
+- `functions/src/index.ts` (export de función `lowStockDailyDigest`)
+- `functions/src/config/swagger.config.ts` (schemas de dashboard/alertas y registro de query)
+- `functions/tests/inventory.low-stock-alerts.test.ts` (pruebas de detección de alertas)
+
+**Notas de Implementación:**
+
+- Umbral híbrido implementado: global por producto + opcional por talla.
+- Endpoint de dashboard implementado en `/api/inventario/alertas-stock` (solo ADMIN/EMPLEADO).
+- Notificación automática híbrida:
+  - Tiempo real cuando una actualización de stock deja al producto/talla bajo mínimo.
+  - Digest diario con resumen de alertas activas.
+- Destinatarios automáticos: usuarios activos con rol `ADMIN` o `EMPLEADO` en `usuariosApp`.
+- Deduplicación aplicada para evitar spam de notificaciones repetidas con el mismo estado.
 
 ---
 
