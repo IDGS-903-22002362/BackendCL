@@ -253,6 +253,24 @@ const swaggerDefinition = {
       RefundPago: zodToJsonSchema(refundPagoSchema),
 
       // Modelos completos de entidades
+      InventoryBySizeItem: {
+        type: "object",
+        properties: {
+          tallaId: { type: "string", example: "m" },
+          cantidad: { type: "integer", example: 8 },
+        },
+      },
+      ProductStockBySize: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_12345" },
+          existencias: { type: "integer", example: 18 },
+          inventarioPorTalla: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+        },
+      },
       Product: {
         type: "object",
         properties: {
@@ -276,6 +294,15 @@ const swaggerDefinition = {
             type: "array",
             items: { type: "string" },
             example: ["s", "m", "l", "xl"],
+          },
+          inventarioPorTalla: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+            example: [
+              { tallaId: "s", cantidad: 5 },
+              { tallaId: "m", cantidad: 8 },
+              { tallaId: "l", cantidad: 5 },
+            ],
           },
           imagenes: {
             type: "array",

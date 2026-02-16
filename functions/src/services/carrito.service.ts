@@ -44,6 +44,78 @@ const PRODUCTOS_COLLECTION = "productos";
  * Encapsula las operaciones de carrito de compras
  */
 export class CarritoService {
+  private normalizeInventoryBySize(
+    inventarioPorTalla: unknown,
+  ): Array<{ tallaId: string; cantidad: number }> {
+    if (!Array.isArray(inventarioPorTalla)) {
+      return [];
+    }
+
+    return inventarioPorTalla
+      .filter(
+        (item): item is { tallaId: unknown; cantidad: unknown } =>
+          typeof item === "object" && item !== null,
+      )
+      .map((item) => ({
+        tallaId: String(item.tallaId ?? "").trim(),
+        cantidad: Math.max(0, Math.floor(Number(item.cantidad ?? 0))),
+      }))
+      .filter((item) => item.tallaId.length > 0);
+  }
+
+  private resolveStockContext(
+    prodData: Record<string, any>,
+    tallaId?: string,
+  ): {
+    available: number;
+    tallaId?: string;
+    usesInventoryBySize: boolean;
+  } {
+    const inventarioPorTalla = this.normalizeInventoryBySize(
+      prodData.inventarioPorTalla,
+    );
+
+    if (inventarioPorTalla.length === 0) {
+      return {
+        available: Math.max(0, Math.floor(Number(prodData.existencias ?? 0))),
+        usesInventoryBySize: false,
+      };
+    }
+
+    const tallaIdNormalizada = tallaId?.trim();
+    if (!tallaIdNormalizada) {
+      throw new Error(
+        `Se requiere seleccionar una talla para "${prodData.descripcion || "el producto"}"`,
+      );
+    }
+
+    const tallaIds = Array.isArray(prodData.tallaIds)
+      ? prodData.tallaIds.map((id: unknown) => String(id).trim())
+      : [];
+
+    if (tallaIds.length > 0 && !tallaIds.includes(tallaIdNormalizada)) {
+      throw new Error(
+        `La talla "${tallaIdNormalizada}" no es válida para "${prodData.descripcion || "el producto"}"`,
+      );
+    }
+
+    const inventarioTalla = inventarioPorTalla.find(
+      (item) => item.tallaId === tallaIdNormalizada,
+    );
+
+    if (!inventarioTalla) {
+      throw new Error(
+        `La talla "${tallaIdNormalizada}" no está disponible para "${prodData.descripcion || "el producto"}"`,
+      );
+    }
+
+    return {
+      available: inventarioTalla.cantidad,
+      tallaId: tallaIdNormalizada,
+      usesInventoryBySize: true,
+    };
+  }
+
   // ===================================
   // Métodos de Lectura
   // ===================================
@@ -295,6 +367,8 @@ export class CarritoService {
         );
       }
 
+      const stockContext = this.resolveStockContext(prodData, itemDTO.tallaId);
+
       // 2. Obtener el carrito actual
       const cartDoc = await firestoreTienda
         .collection(CARRITOS_COLLECTION)
@@ -312,7 +386,7 @@ export class CarritoService {
       const existingIndex = items.findIndex(
         (item) =>
           item.productoId === itemDTO.productoId &&
-          item.tallaId === itemDTO.tallaId,
+          item.tallaId === stockContext.tallaId,
       );
 
       let cantidadTotal: number;
@@ -333,11 +407,11 @@ export class CarritoService {
         );
       }
 
-      const existencias = prodData.existencias || 0;
-      if (cantidadTotal > existencias) {
+      if (cantidadTotal > stockContext.available) {
         throw new Error(
           `Stock insuficiente para "${prodData.descripcion || itemDTO.productoId}". ` +
-            `Disponible: ${existencias}, solicitado: ${cantidadTotal}`,
+            `${stockContext.tallaId ? `Talla: ${stockContext.tallaId}. ` : ""}` +
+            `Disponible: ${stockContext.available}, solicitado: ${cantidadTotal}`,
         );
       }
 
@@ -355,7 +429,7 @@ export class CarritoService {
           productoId: itemDTO.productoId,
           cantidad: itemDTO.cantidad,
           precioUnitario,
-          ...(itemDTO.tallaId ? { tallaId: itemDTO.tallaId } : {}),
+          ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}),
         };
         items.push(newItem);
       }
@@ -388,6 +462,7 @@ export class CarritoService {
           error.message.includes("no existe") ||
           error.message.includes("no está disponible") ||
           error.message.includes("Stock insuficiente") ||
+          error.message.includes("talla") ||
           error.message.includes("cantidad máxima") ||
           error.message.includes("no encontrado")
         ) {
@@ -454,12 +529,16 @@ export class CarritoService {
 
       if (prodDoc.exists) {
         const prodData = prodDoc.data()!;
-        const existencias = prodData.existencias || 0;
+        const stockContext = this.resolveStockContext(
+          prodData,
+          items[itemIndex].tallaId ?? tallaId,
+        );
 
-        if (cantidad > existencias) {
+        if (cantidad > stockContext.available) {
           throw new Error(
             `Stock insuficiente para "${prodData.descripcion || productoId}". ` +
-              `Disponible: ${existencias}, solicitado: ${cantidad}`,
+              `${stockContext.tallaId ? `Talla: ${stockContext.tallaId}. ` : ""}` +
+              `Disponible: ${stockContext.available}, solicitado: ${cantidad}`,
           );
         }
 
@@ -468,6 +547,7 @@ export class CarritoService {
           ...items[itemIndex],
           cantidad,
           precioUnitario: prodData.precioPublico,
+          ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}),
         };
       } else {
         // Producto eliminado, actualizar cantidad sin cambiar precio
@@ -502,7 +582,8 @@ export class CarritoService {
       if (error instanceof Error) {
         if (
           error.message.includes("no encontrado") ||
-          error.message.includes("Stock insuficiente")
+          error.message.includes("Stock insuficiente") ||
+          error.message.includes("talla")
         ) {
           throw error;
         }
@@ -690,13 +771,35 @@ export class CarritoService {
         }
 
         const prodData = prodDoc.data()!;
-        const existencias = prodData.existencias || 0;
+        let stockContext: {
+          available: number;
+          tallaId?: string;
+          usesInventoryBySize: boolean;
+        } | null = null;
+
+        try {
+          stockContext = this.resolveStockContext(
+            prodData,
+            sessionItem.tallaId,
+          );
+        } catch (_stockError) {
+          console.log(
+            `🛒 Merge: Omitiendo variante no válida ${sessionItem.productoId}/${sessionItem.tallaId || "sin-talla"}`,
+          );
+          continue;
+        }
+
+        if (!stockContext) {
+          continue;
+        }
+
+        const resolvedStockContext = stockContext;
 
         // Buscar si el producto ya existe en el carrito del usuario
         const existingIndex = mergedItems.findIndex(
           (item) =>
             item.productoId === sessionItem.productoId &&
-            item.tallaId === sessionItem.tallaId,
+            item.tallaId === resolvedStockContext.tallaId,
         );
 
         if (existingIndex >= 0) {
@@ -704,7 +807,7 @@ export class CarritoService {
           const newQuantity = Math.min(
             mergedItems[existingIndex].cantidad + sessionItem.cantidad,
             MAX_CANTIDAD_POR_ITEM,
-            existencias,
+            resolvedStockContext.available,
           );
           mergedItems[existingIndex] = {
             ...mergedItems[existingIndex],
@@ -716,14 +819,16 @@ export class CarritoService {
           const quantity = Math.min(
             sessionItem.cantidad,
             MAX_CANTIDAD_POR_ITEM,
-            existencias,
+            resolvedStockContext.available,
           );
           if (quantity > 0) {
             mergedItems.push({
               productoId: sessionItem.productoId,
               cantidad: quantity,
               precioUnitario: prodData.precioPublico,
-              ...(sessionItem.tallaId ? { tallaId: sessionItem.tallaId } : {}),
+              ...(resolvedStockContext.tallaId
+                ? { tallaId: resolvedStockContext.tallaId }
+                : {}),
             });
           }
         }
