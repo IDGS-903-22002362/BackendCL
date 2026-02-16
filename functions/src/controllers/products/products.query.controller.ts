@@ -108,3 +108,29 @@ export const search = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getStockBySize = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const stock = await productService.getStockBySize(id);
+
+    if (!stock) {
+      return res.status(404).json({
+        success: false,
+        message: `Producto con ID ${id} no encontrado`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: stock,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/productos/:id/stock:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener stock por talla del producto",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};

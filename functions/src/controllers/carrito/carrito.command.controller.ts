@@ -88,6 +88,7 @@ export const addItem = async (req: Request, res: Response) => {
         msg.includes("no existe") ||
         msg.includes("no está disponible") ||
         msg.includes("stock insuficiente") ||
+        msg.includes("talla") ||
         msg.includes("cantidad máxima") ||
         msg.includes("se requiere")
       ) {
@@ -167,7 +168,7 @@ export const updateItem = async (req: Request, res: Response) => {
       const msg = error.message.toLowerCase();
       if (msg.includes("no encontrado")) {
         statusCode = 404;
-      } else if (msg.includes("stock insuficiente")) {
+      } else if (msg.includes("stock insuficiente") || msg.includes("talla")) {
         statusCode = 400;
       }
     }

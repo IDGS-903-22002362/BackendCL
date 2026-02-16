@@ -6,6 +6,15 @@
 import { Timestamp } from "firebase-admin/firestore";
 
 /**
+ * Interface para inventario por talla
+ * Cada elemento representa el stock disponible para una talla específica
+ */
+export interface InventarioPorTalla {
+  tallaId: string;
+  cantidad: number;
+}
+
+/**
  * Interface principal de Producto
  * Representa un artículo en la colección 'productos' de Firestore
  */
@@ -20,6 +29,7 @@ export interface Producto {
   existencias: number; // Stock total general (suma de todos los stocks)
   proveedorId: string; // Referencia a documento en colección 'proveedores'
   tallaIds: string[]; // Array de IDs de tallas disponibles
+  inventarioPorTalla: InventarioPorTalla[]; // Stock por talla (fuente de verdad)
   imagenes: string[]; // Array de URLs de imágenes del producto
   activo: boolean; // Si el producto está disponible para venta
   createdAt: Timestamp; // Fecha de creación
@@ -40,6 +50,7 @@ export interface CrearProductoDTO {
   existencias: number;
   proveedorId: string;
   tallaIds: string[];
+  inventarioPorTalla: InventarioPorTalla[];
   imagenes: string[];
   activo: boolean;
 }
@@ -58,6 +69,7 @@ export interface ActualizarProductoDTO {
   existencias?: number;
   proveedorId?: string;
   tallaIds?: string[];
+  inventarioPorTalla?: InventarioPorTalla[];
   imagenes?: string[];
   activo?: boolean;
 }

@@ -5,7 +5,7 @@
 
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
-import { Producto } from "../models/producto.model";
+import { InventarioPorTalla, Producto } from "../models/producto.model";
 
 /**
  * Colección de productos en Firestore
@@ -17,6 +17,56 @@ const PRODUCTOS_COLLECTION = "productos";
  * Encapsula las operaciones CRUD y consultas de productos
  */
 export class ProductService {
+  private normalizeInventoryBySize(
+    inventarioPorTalla: unknown,
+  ): InventarioPorTalla[] {
+    if (!Array.isArray(inventarioPorTalla)) {
+      return [];
+    }
+
+    return inventarioPorTalla
+      .filter(
+        (item): item is { tallaId: unknown; cantidad: unknown } =>
+          typeof item === "object" && item !== null,
+      )
+      .map((item) => {
+        const tallaId = String(item.tallaId ?? "").trim();
+        const cantidadRaw = Number(item.cantidad ?? 0);
+        const cantidad =
+          Number.isFinite(cantidadRaw) && cantidadRaw > 0
+            ? Math.floor(cantidadRaw)
+            : 0;
+
+        return {
+          tallaId,
+          cantidad,
+        };
+      })
+      .filter((item) => item.tallaId.length > 0);
+  }
+
+  private getDerivedExistencias(
+    inventarioPorTalla: InventarioPorTalla[],
+    fallbackExistencias?: number,
+  ): number {
+    if (inventarioPorTalla.length === 0) {
+      return Math.max(0, Math.floor(Number(fallbackExistencias ?? 0)));
+    }
+
+    return inventarioPorTalla.reduce((acc, item) => acc + item.cantidad, 0);
+  }
+
+  private getMergedTallaIds(
+    tallaIds: string[] = [],
+    inventarioPorTalla: InventarioPorTalla[] = [],
+  ): string[] {
+    const ids = [...tallaIds, ...inventarioPorTalla.map((item) => item.tallaId)]
+      .map((id) => id.trim())
+      .filter((id) => id.length > 0);
+
+    return [...new Set(ids)];
+  }
+
   /**
    * Obtiene todos los productos activos
    * @returns Promise con array de productos activos ordenados alfabéticamente
@@ -50,6 +100,9 @@ export class ProductService {
           existencias: data.existencias,
           proveedorId: data.proveedorId,
           tallaIds: data.tallaIds || [],
+          inventarioPorTalla: this.normalizeInventoryBySize(
+            data.inventarioPorTalla,
+          ),
           imagenes: data.imagenes || [],
           activo: data.activo,
           createdAt: data.createdAt,
@@ -97,6 +150,9 @@ export class ProductService {
         existencias: data.existencias,
         proveedorId: data.proveedorId,
         tallaIds: data.tallaIds || [],
+        inventarioPorTalla: this.normalizeInventoryBySize(
+          data.inventarioPorTalla,
+        ),
         imagenes: data.imagenes || [],
         activo: data.activo,
         createdAt: data.createdAt,
@@ -219,6 +275,17 @@ export class ProductService {
   ): Promise<Producto> {
     try {
       const now = admin.firestore.Timestamp.now();
+      const inventarioPorTalla = this.normalizeInventoryBySize(
+        productoData.inventarioPorTalla,
+      );
+      const tallaIds = this.getMergedTallaIds(
+        productoData.tallaIds,
+        inventarioPorTalla,
+      );
+      const existencias = this.getDerivedExistencias(
+        inventarioPorTalla,
+        productoData.existencias,
+      );
 
       // Validar que la clave no exista
       const existingProduct = await firestoreTienda
@@ -238,6 +305,9 @@ export class ProductService {
         .collection(PRODUCTOS_COLLECTION)
         .add({
           ...productoData,
+          tallaIds,
+          inventarioPorTalla,
+          existencias,
           createdAt: now,
           updatedAt: now,
         });
@@ -298,9 +368,46 @@ export class ProductService {
 
       // Actualizar con timestamp
       const now = admin.firestore.Timestamp.now();
-      await docRef.update({
+      const productoActual = doc.data() as Producto;
+
+      const inventarioPorTalla =
+        updateData.inventarioPorTalla !== undefined
+          ? this.normalizeInventoryBySize(updateData.inventarioPorTalla)
+          : this.normalizeInventoryBySize(productoActual.inventarioPorTalla);
+
+      const shouldDeriveFromInventory =
+        updateData.inventarioPorTalla !== undefined ||
+        this.normalizeInventoryBySize(productoActual.inventarioPorTalla)
+          .length > 0;
+
+      const payload: Partial<Omit<Producto, "id" | "createdAt">> = {
         ...updateData,
         updatedAt: now,
+      };
+
+      if (updateData.inventarioPorTalla !== undefined) {
+        payload.inventarioPorTalla = inventarioPorTalla;
+      }
+
+      if (
+        updateData.tallaIds !== undefined ||
+        updateData.inventarioPorTalla !== undefined
+      ) {
+        payload.tallaIds = this.getMergedTallaIds(
+          updateData.tallaIds ?? productoActual.tallaIds ?? [],
+          inventarioPorTalla,
+        );
+      }
+
+      if (shouldDeriveFromInventory) {
+        payload.existencias = this.getDerivedExistencias(
+          inventarioPorTalla,
+          updateData.existencias ?? productoActual.existencias,
+        );
+      }
+
+      await docRef.update({
+        ...payload,
       });
 
       // Obtener el documento actualizado
@@ -319,6 +426,43 @@ export class ProductService {
           ? error.message
           : "Error al actualizar el producto",
       );
+    }
+  }
+
+  async getStockBySize(id: string): Promise<{
+    productoId: string;
+    existencias: number;
+    inventarioPorTalla: InventarioPorTalla[];
+  } | null> {
+    try {
+      const doc = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .doc(id)
+        .get();
+
+      if (!doc.exists) {
+        return null;
+      }
+
+      const data = doc.data()!;
+      const inventarioPorTalla = this.normalizeInventoryBySize(
+        data.inventarioPorTalla,
+      );
+
+      return {
+        productoId: doc.id,
+        existencias: this.getDerivedExistencias(
+          inventarioPorTalla,
+          data.existencias,
+        ),
+        inventarioPorTalla,
+      };
+    } catch (error) {
+      console.error(
+        `❌ Error al obtener stock por talla de producto ${id}:`,
+        error,
+      );
+      throw new Error("Error al obtener stock por talla del producto");
     }
   }
 
