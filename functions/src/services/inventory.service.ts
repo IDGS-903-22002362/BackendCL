@@ -1,6 +1,8 @@
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
 import {
+  DashboardAlertasStock,
+  ListarAlertasStockQuery,
   ListarMovimientosInventarioQuery,
   MovimientoInventario,
   RegistrarMovimientoInventarioDTO,
@@ -155,9 +157,7 @@ class InventoryService {
     };
   }
 
-  async listMovements(
-    queryParams: ListarMovimientosInventarioQuery,
-  ): Promise<{
+  async listMovements(queryParams: ListarMovimientosInventarioQuery): Promise<{
     movimientos: MovimientoInventario[];
     nextCursor: string | null;
   }> {
@@ -257,6 +257,30 @@ class InventoryService {
           : "Error al consultar movimientos de inventario",
       );
     }
+  }
+
+  async listLowStockAlerts(
+    queryParams: ListarAlertasStockQuery,
+  ): Promise<DashboardAlertasStock> {
+    const alerts = await productService.listLowStockProducts(queryParams);
+    const totalAlertas = alerts.reduce(
+      (acc, item) => acc + item.totalAlertas,
+      0,
+    );
+    const alertasCriticas = alerts.filter(
+      (item) => item.maxDeficit >= 5,
+    ).length;
+
+    return {
+      resumen: {
+        totalProductosBajoStock: alerts.length,
+        totalAlertas,
+        alertasCriticas,
+        alertasModeradas: Math.max(0, alerts.length - alertasCriticas),
+        fechaCorte: new Date(),
+      },
+      alertas: alerts,
+    };
   }
 }
 

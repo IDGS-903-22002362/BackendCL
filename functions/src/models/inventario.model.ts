@@ -138,3 +138,43 @@ export interface ListarMovimientosInventarioQuery {
   cursor?: string;
   usuarioId?: string;
 }
+
+export interface AlertaStockTalla {
+  tallaId: string;
+  cantidadActual: number;
+  minimo: number;
+  deficit: number;
+}
+
+export interface AlertaStockProducto {
+  productoId: string;
+  clave: string;
+  descripcion: string;
+  lineaId: string;
+  categoriaId: string;
+  existencias: number;
+  stockMinimoGlobal: number;
+  globalBajoStock: boolean;
+  tallasBajoStock: AlertaStockTalla[];
+  totalAlertas: number;
+  maxDeficit: number;
+}
+
+export interface ListarAlertasStockQuery {
+  lineaId?: string;
+  categoriaId?: string;
+  productoId?: string;
+  soloCriticas?: boolean;
+  limit: number;
+}
+
+export interface DashboardAlertasStock {
+  resumen: {
+    totalProductosBajoStock: number;
+    totalAlertas: number;
+    alertasCriticas: number;
+    alertasModeradas: number;
+    fechaCorte: Date;
+  };
+  alertas: AlertaStockProducto[];
+}

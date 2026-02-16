@@ -4,6 +4,7 @@ import {
   validateQuery,
 } from "../middleware/validation.middleware";
 import {
+  listLowStockAlertsQuerySchema,
   listInventoryMovementsQuerySchema,
   registerInventoryMovementSchema,
 } from "../middleware/validators/inventory.validator";
@@ -185,6 +186,80 @@ router.get(
   authMiddleware,
   validateQuery(listInventoryMovementsQuerySchema),
   queryController.getMovements,
+);
+
+/**
+ * @swagger
+ * /api/inventario/alertas-stock:
+ *   get:
+ *     summary: Consultar dashboard de alertas de stock bajo
+ *     description: |
+ *       Retorna productos con stock bajo usando umbral global por producto y umbrales opcionales por talla.
+ *
+ *       **Solo ADMIN/EMPLEADO**.
+ *
+ *       **Uso para dashboard:**
+ *       - `data.resumen` para cards
+ *       - `data.alertas` para listado de productos con riesgo
+ *     tags: [Inventory]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: productoId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: lineaId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: categoriaId
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: soloCriticas
+ *         schema:
+ *           type: boolean
+ *           default: false
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 200
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: Dashboard de alertas obtenido exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: integer
+ *                   example: 4
+ *                 data:
+ *                   $ref: '#/components/schemas/LowStockDashboard'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/alertas-stock",
+  authMiddleware,
+  requireAdmin,
+  validateQuery(listLowStockAlertsQuerySchema),
+  queryController.getLowStockAlerts,
 );
 
 export default router;

@@ -364,6 +364,12 @@ router.get(
  *                 cantidad: 20
  *               - tallaId: "l"
  *                 cantidad: 18
+ *             stockMinimoGlobal: 10
+ *             stockMinimoPorTalla:
+ *               - tallaId: "s"
+ *                 minimo: 4
+ *               - tallaId: "m"
+ *                 minimo: 8
  *     responses:
  *       201:
  *         description: Producto creado exitosamente
