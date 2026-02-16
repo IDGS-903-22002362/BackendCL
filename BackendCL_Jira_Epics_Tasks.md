@@ -1571,7 +1571,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-063: Modelo de inventario por talla
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Extender modelo de producto para manejar inventario por talla.  
 **Criterios de Aceptación:**
 
@@ -1579,6 +1579,26 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Actualizar modelo de Producto
 - Endpoint para consultar stock por talla
 - Validar disponibilidad antes de agregar al carrito
+
+**Archivos de Código:**
+
+- `functions/src/models/producto.model.ts` (nuevo tipo `InventarioPorTalla` y campo `inventarioPorTalla`)
+- `functions/src/middleware/validators/product.validator.ts` (schemas Zod create/update con `inventarioPorTalla`)
+- `functions/src/services/product.service.ts` (normalización, `existencias` derivado y método `getStockBySize`)
+- `functions/src/controllers/products/products.query.controller.ts` (función `getStockBySize`)
+- `functions/src/routes/products.routes.ts` (ruta `GET /api/productos/:id/stock` con Swagger)
+- `functions/src/services/carrito.service.ts` (validación de stock por talla en `addItem` y `updateItemQuantity`)
+- `functions/src/controllers/carrito/carrito.command.controller.ts` (mapeo de errores de talla a 400)
+- `functions/src/config/swagger.config.ts` (schemas `InventoryBySizeItem` y `ProductStockBySize`)
+- `functions/src/routes/carrito.routes.ts` (documentación de `tallaId` obligatorio cuando aplica)
+- `functions/tests/inventory.by-size.test.ts` (4 pruebas de inventario por talla)
+
+**Notas de Implementación:**
+
+- `inventarioPorTalla` es la fuente de verdad de stock por variante y `existencias` se deriva automáticamente cuando hay inventario por talla.
+- El endpoint público `GET /api/productos/:id/stock` retorna `productoId`, `existencias` e `inventarioPorTalla`.
+- En carrito, si el producto maneja inventario por talla, `tallaId` es obligatorio y se valida existencia + disponibilidad antes de agregar/actualizar.
+- Validado con build TypeScript y pruebas específicas (`inventory.by-size.test.ts`, 4/4 passing).
 
 ---
 
