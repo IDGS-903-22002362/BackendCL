@@ -236,3 +236,50 @@ export const deleteImageSchema = z
       .min(1, "La URL no puede estar vacía"),
   })
   .strict();
+
+/**
+ * Schema para actualizar stock de producto
+ * Permite actualización general o por talla según aplique
+ */
+export const updateProductStockSchema = z
+  .object({
+    cantidadNueva: z
+      .number({
+        required_error: "La nueva cantidad es requerida",
+        invalid_type_error: "La nueva cantidad debe ser un número",
+      })
+      .int("La nueva cantidad debe ser un número entero")
+      .nonnegative("La nueva cantidad no puede ser negativa"),
+
+    tallaId: z
+      .string({
+        invalid_type_error: "El ID de talla debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El ID de talla no puede estar vacío")
+      .optional(),
+
+    tipo: z
+      .enum(["entrada", "salida", "ajuste", "venta", "devolucion"], {
+        invalid_type_error: "El tipo de movimiento es inválido",
+      })
+      .optional()
+      .default("ajuste"),
+
+    motivo: z
+      .string({
+        invalid_type_error: "El motivo debe ser una cadena de texto",
+      })
+      .trim()
+      .max(200, "El motivo no puede exceder 200 caracteres")
+      .optional(),
+
+    referencia: z
+      .string({
+        invalid_type_error: "La referencia debe ser una cadena de texto",
+      })
+      .trim()
+      .max(120, "La referencia no puede exceder 120 caracteres")
+      .optional(),
+  })
+  .strict();

@@ -4,6 +4,7 @@ import {
   createProductSchema,
   updateProductSchema,
   deleteImageSchema,
+  updateProductStockSchema,
 } from "../middleware/validators/product.validator";
 import {
   createCategorySchema,
@@ -224,6 +225,7 @@ const swaggerDefinition = {
       CreateProduct: zodToJsonSchema(createProductSchema),
       UpdateProduct: zodToJsonSchema(updateProductSchema),
       DeleteImage: zodToJsonSchema(deleteImageSchema),
+      UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
 
       CreateCategory: zodToJsonSchema(createCategorySchema),
       UpdateCategory: zodToJsonSchema(updateCategorySchema),
@@ -265,6 +267,21 @@ const swaggerDefinition = {
         properties: {
           productoId: { type: "string", example: "prod_12345" },
           existencias: { type: "integer", example: 18 },
+          inventarioPorTalla: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+        },
+      },
+      ProductStockUpdateResult: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_12345" },
+          tallaId: { type: "string", nullable: true, example: "m" },
+          cantidadAnterior: { type: "integer", example: 8 },
+          cantidadNueva: { type: "integer", example: 12 },
+          diferencia: { type: "integer", example: 4 },
+          existencias: { type: "integer", example: 30 },
           inventarioPorTalla: {
             type: "array",
             items: { $ref: "#/components/schemas/InventoryBySizeItem" },

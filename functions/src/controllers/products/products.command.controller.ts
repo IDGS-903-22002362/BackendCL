@@ -173,3 +173,60 @@ export const deleteImage = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const updateStock = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { cantidadNueva, tallaId, tipo, motivo, referencia } = req.body;
+
+    const result = await productService.updateStock(id, {
+      cantidadNueva,
+      tallaId,
+      tipo,
+      motivo,
+      referencia,
+      usuarioId: req.user?.uid,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Stock actualizado exitosamente",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en PUT /api/productos/:id/stock:", error);
+
+    let statusCode = 500;
+
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+
+      if (msg.includes("no encontrado")) {
+        statusCode = 404;
+      } else if (
+        msg.includes("no puede ser negativa") ||
+        msg.includes("se requiere tallaid") ||
+        msg.includes("no maneja inventario por talla") ||
+        msg.includes("no pertenece al producto")
+      ) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 400
+          ? error instanceof Error
+            ? error.message
+            : "Error de validación"
+          : statusCode === 404
+            ? "Producto no encontrado"
+            : "Error al actualizar stock del producto",
+      error:
+        statusCode === 500 && error instanceof Error
+          ? error.message
+          : undefined,
+    });
+  }
+};
