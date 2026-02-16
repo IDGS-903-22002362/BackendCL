@@ -19,6 +19,7 @@ export interface UpdateProductStockDTO {
   tipo?: "entrada" | "salida" | "ajuste" | "venta" | "devolucion";
   motivo?: string;
   referencia?: string;
+  ordenId?: string;
   usuarioId?: string;
 }
 
@@ -30,6 +31,8 @@ export interface ProductStockUpdateResult {
   diferencia: number;
   existencias: number;
   inventarioPorTalla: InventarioPorTalla[];
+  movimientoId: string;
+  createdAt: Date;
 }
 
 /**
@@ -621,6 +624,7 @@ export class ProductService {
             tipo: payload.tipo ?? "ajuste",
             motivo: payload.motivo,
             referencia: payload.referencia,
+            ordenId: payload.ordenId,
             usuarioId: payload.usuarioId,
             createdAt: now,
           });
@@ -633,6 +637,11 @@ export class ProductService {
             diferencia,
             existencias: existenciasActualizadas,
             inventarioPorTalla: inventarioPorTallaActualizado,
+            movimientoId: movimientoRef.id,
+            createdAt:
+              typeof (now as { toDate?: () => Date }).toDate === "function"
+                ? (now as { toDate: () => Date }).toDate()
+                : (now as unknown as Date),
           } as ProductStockUpdateResult;
         },
       );
