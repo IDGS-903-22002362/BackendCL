@@ -1605,7 +1605,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-064: Actualizar stock de producto
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Endpoint para actualizar el stock de un producto (por talla si aplica).  
 **Criterios de Aceptación:**
 
@@ -1614,6 +1614,23 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Registrar movimiento de inventario
 - Validar que cantidad no sea negativa
 - Solo administradores pueden actualizar stock
+
+**Archivos de Código:**
+
+- `functions/src/middleware/validators/product.validator.ts` (schema `updateProductStockSchema`)
+- `functions/src/services/product.service.ts` (método `updateStock` transaccional + registro en `movimientosInventario`)
+- `functions/src/controllers/products/products.command.controller.ts` (función `updateStock`)
+- `functions/src/routes/products.routes.ts` (ruta protegida `PUT /api/productos/:id/stock`)
+- `functions/src/config/swagger.config.ts` (schemas `UpdateProductStock` y `ProductStockUpdateResult`)
+- `functions/tests/product.stock-update.test.ts` (4 pruebas de actualización de stock)
+
+**Notas de Implementación:**
+
+- Endpoint protegido con `authMiddleware` + `requireAdmin` (solo ADMIN/EMPLEADO).
+- Para productos sin inventario por talla, actualiza `existencias` generales.
+- Para productos con inventario por talla, `tallaId` es obligatorio y se recalcula `existencias` derivado.
+- Cada actualización registra un movimiento en colección `movimientosInventario` con: `productoId`, `tallaId`, `cantidadAnterior`, `cantidadNueva`, `diferencia`, `tipo`, `motivo`, `referencia`, `usuarioId`, `createdAt`.
+- Validación estricta con Zod para impedir cantidades negativas y campos extra.
 
 ---
 

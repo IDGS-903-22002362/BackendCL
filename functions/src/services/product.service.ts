@@ -11,6 +11,26 @@ import { InventarioPorTalla, Producto } from "../models/producto.model";
  * Colección de productos en Firestore
  */
 const PRODUCTOS_COLLECTION = "productos";
+const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
+
+export interface UpdateProductStockDTO {
+  cantidadNueva: number;
+  tallaId?: string;
+  tipo?: "entrada" | "salida" | "ajuste" | "venta" | "devolucion";
+  motivo?: string;
+  referencia?: string;
+  usuarioId?: string;
+}
+
+export interface ProductStockUpdateResult {
+  productoId: string;
+  tallaId: string | null;
+  cantidadAnterior: number;
+  cantidadNueva: number;
+  diferencia: number;
+  existencias: number;
+  inventarioPorTalla: InventarioPorTalla[];
+}
 
 /**
  * Clase ProductService
@@ -463,6 +483,171 @@ export class ProductService {
         error,
       );
       throw new Error("Error al obtener stock por talla del producto");
+    }
+  }
+
+  /**
+   * Actualiza stock de un producto de forma atómica y registra movimiento de inventario.
+   * - Si el producto usa inventario por talla, requiere tallaId.
+   * - Si no usa inventario por talla, actualiza existencias generales.
+   * - Registra movimiento en colección `movimientosInventario`.
+   */
+  async updateStock(
+    productoId: string,
+    payload: UpdateProductStockDTO,
+  ): Promise<ProductStockUpdateResult> {
+    const cantidadNueva = Math.floor(Number(payload.cantidadNueva));
+
+    if (!Number.isFinite(cantidadNueva) || cantidadNueva < 0) {
+      throw new Error("La nueva cantidad no puede ser negativa");
+    }
+
+    const docRef = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .doc(productoId);
+
+    try {
+      const result = await firestoreTienda.runTransaction(
+        async (transaction) => {
+          const snapshot = await transaction.get(docRef);
+
+          if (!snapshot.exists) {
+            throw new Error(`Producto con ID ${productoId} no encontrado`);
+          }
+
+          const data = snapshot.data() as Producto;
+          const now = admin.firestore.Timestamp.now();
+
+          const inventarioPorTallaActual = this.normalizeInventoryBySize(
+            data.inventarioPorTalla,
+          );
+          const usaInventarioPorTalla = inventarioPorTallaActual.length > 0;
+
+          let tallaIdMovimiento: string | null = null;
+          let cantidadAnterior = 0;
+          let inventarioPorTallaActualizado = inventarioPorTallaActual;
+          let existenciasActualizadas = Math.max(
+            0,
+            Math.floor(Number(data.existencias ?? 0)),
+          );
+
+          if (usaInventarioPorTalla) {
+            const tallaId = payload.tallaId?.trim();
+
+            if (!tallaId) {
+              throw new Error(
+                "Se requiere tallaId para actualizar stock por talla en este producto",
+              );
+            }
+
+            const tallaIdsProducto = Array.isArray(data.tallaIds)
+              ? data.tallaIds.map((id) => String(id).trim())
+              : [];
+
+            if (
+              tallaIdsProducto.length > 0 &&
+              !tallaIdsProducto.includes(tallaId)
+            ) {
+              throw new Error(
+                `La talla \"${tallaId}\" no pertenece al producto ${productoId}`,
+              );
+            }
+
+            const tallaIndex = inventarioPorTallaActual.findIndex(
+              (item) => item.tallaId === tallaId,
+            );
+
+            tallaIdMovimiento = tallaId;
+            cantidadAnterior =
+              tallaIndex >= 0
+                ? inventarioPorTallaActual[tallaIndex].cantidad
+                : 0;
+
+            if (tallaIndex >= 0) {
+              inventarioPorTallaActualizado = [...inventarioPorTallaActual];
+              inventarioPorTallaActualizado[tallaIndex] = {
+                ...inventarioPorTallaActualizado[tallaIndex],
+                cantidad: cantidadNueva,
+              };
+            } else {
+              inventarioPorTallaActualizado = [
+                ...inventarioPorTallaActual,
+                { tallaId, cantidad: cantidadNueva },
+              ];
+            }
+
+            existenciasActualizadas = this.getDerivedExistencias(
+              inventarioPorTallaActualizado,
+              data.existencias,
+            );
+
+            transaction.update(docRef, {
+              inventarioPorTalla: inventarioPorTallaActualizado,
+              tallaIds: this.getMergedTallaIds(
+                data.tallaIds || [],
+                inventarioPorTallaActualizado,
+              ),
+              existencias: existenciasActualizadas,
+              updatedAt: now,
+            });
+          } else {
+            if (payload.tallaId) {
+              throw new Error(
+                "Este producto no maneja inventario por talla; actualiza stock general sin tallaId",
+              );
+            }
+
+            cantidadAnterior = existenciasActualizadas;
+            existenciasActualizadas = cantidadNueva;
+
+            transaction.update(docRef, {
+              existencias: existenciasActualizadas,
+              updatedAt: now,
+            });
+          }
+
+          const diferencia = cantidadNueva - cantidadAnterior;
+
+          const movimientoRef = firestoreTienda
+            .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+            .doc();
+
+          transaction.set(movimientoRef, {
+            productoId,
+            tallaId: tallaIdMovimiento,
+            cantidadAnterior,
+            cantidadNueva,
+            diferencia,
+            tipo: payload.tipo ?? "ajuste",
+            motivo: payload.motivo,
+            referencia: payload.referencia,
+            usuarioId: payload.usuarioId,
+            createdAt: now,
+          });
+
+          return {
+            productoId,
+            tallaId: tallaIdMovimiento,
+            cantidadAnterior,
+            cantidadNueva,
+            diferencia,
+            existencias: existenciasActualizadas,
+            inventarioPorTalla: inventarioPorTallaActualizado,
+          } as ProductStockUpdateResult;
+        },
+      );
+
+      return result;
+    } catch (error) {
+      console.error(
+        `❌ Error al actualizar stock de producto ${productoId}:`,
+        error,
+      );
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar stock del producto",
+      );
     }
   }
 
