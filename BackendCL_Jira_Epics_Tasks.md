@@ -1637,7 +1637,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-065: Movimientos de inventario
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Sistema para registrar movimientos de inventario (entradas, salidas, ajustes).  
 **Criterios de Aceptación:**
 
@@ -1646,6 +1646,29 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Endpoint para registrar movimientos
 - Endpoint para consultar historial de movimientos
 - Relación con órdenes y productos
+
+**Archivos de Código:**
+
+- `functions/src/models/inventario.model.ts` (modelo `MovimientoInventario` + `TipoMovimientoInventario`)
+- `functions/src/middleware/validators/inventory.validator.ts` (schemas `registerInventoryMovementSchema`, `listInventoryMovementsQuerySchema`)
+- `functions/src/services/inventory.service.ts` (registro y consulta de movimientos con cursor)
+- `functions/src/controllers/inventory/inventory.command.controller.ts` (POST movimientos)
+- `functions/src/controllers/inventory/inventory.query.controller.ts` (GET historial)
+- `functions/src/routes/inventory.routes.ts` (endpoints `/api/inventario/movimientos`)
+- `functions/src/routes/index.ts` (montaje de rutas en router principal)
+- `functions/src/services/orden.service.ts` (registro automático de `venta` al crear orden y `devolucion` al cancelar)
+- `functions/src/services/product.service.ts` (movimiento con `ordenId` + `movimientoId` en resultado)
+- `functions/src/config/swagger.config.ts` (schemas y tag `Inventory`)
+- `firestore.indexes.json` (índices para historial de `movimientosInventario`)
+- `functions/tests/inventory.movements.test.ts` (4 pruebas unitarias nuevas)
+
+**Notas de Implementación:**
+
+- Tipos soportados y validados: `entrada`, `salida`, `ajuste`, `venta`, `devolucion`.
+- `POST /api/inventario/movimientos`: protegido con `authMiddleware` + `requireAdmin`; actualiza stock y registra movimiento en la misma operación.
+- `GET /api/inventario/movimientos`: requiere autenticación, usa paginación cursor-based (`limit`, `cursor`) y filtros (`productoId`, `tallaId`, `tipo`, `ordenId`, rango de fechas).
+- Relación con órdenes: `venta` y `devolucion` requieren `ordenId`; además se registran automáticamente desde el flujo de órdenes.
+- Historial con control de visibilidad: ADMIN/EMPLEADO ven global; clientes ven solo movimientos con su `usuarioId`.
 
 ---
 
@@ -1916,7 +1939,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (46 tareas)
+### ✅ DONE (47 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
@@ -1929,7 +1952,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (36 tareas)
+### 🔲 TODO (35 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
@@ -1937,7 +1960,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Órdenes y Pedidos:** 1 tarea (TASK-050)
 - **Carrito de Compras:** 4 tareas
 - **Sistema de Pagos:** 4 tareas
-- **Gestión de Inventario:** 5 tareas
+- **Gestión de Inventario:** 4 tareas
 - **Sistema de Envíos:** 5 tareas
 - **Reportes y Analytics:** 5 tareas
 - **Notificaciones:** 5 tareas

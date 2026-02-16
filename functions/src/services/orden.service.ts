@@ -20,7 +20,8 @@ import {
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
 import { RolUsuario } from "../models/usuario.model";
-import productService from "./product.service";
+import { TipoMovimientoInventario } from "../models/inventario.model";
+import inventoryService from "./inventory.service";
 
 /**
  * Colección de órdenes en Firestore
@@ -152,13 +153,22 @@ export class OrdenService {
         .collection(ORDENES_COLLECTION)
         .add(nuevaOrden);
 
-      // PASO 5: Reducir stock de productos (transacciones atómicas)
+      // PASO 5: Reducir stock de productos y registrar movimientos de venta
       console.log(
         `📦 Reduciendo stock de ${itemsValidados.length} productos...`,
       );
       try {
         for (const item of itemsValidados) {
-          await productService.decrementStock(item.productoId, item.cantidad);
+          await inventoryService.registerMovement({
+            tipo: TipoMovimientoInventario.VENTA,
+            productoId: item.productoId,
+            tallaId: item.tallaId,
+            cantidad: item.cantidad,
+            ordenId: docRef.id,
+            referencia: docRef.id,
+            motivo: "Venta asociada a creación de orden",
+            usuarioId: data.usuarioId,
+          });
         }
         console.log(`✅ Stock reducido exitosamente para todos los productos`);
       } catch (stockError) {
@@ -681,10 +691,21 @@ export class OrdenService {
 
       console.log(`  ✓ Estado validado: ${orden.estado} (puede cancelarse)`);
 
-      // PASO 5: Restaurar stock de productos (transacciones atómicas)
+      // PASO 5: Restaurar stock de productos y registrar devoluciones
       console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);
       try {
-        await productService.restoreStockFromOrder(orden.items);
+        for (const item of orden.items) {
+          await inventoryService.registerMovement({
+            tipo: TipoMovimientoInventario.DEVOLUCION,
+            productoId: item.productoId,
+            tallaId: item.tallaId,
+            cantidad: item.cantidad,
+            ordenId,
+            referencia: ordenId,
+            motivo: "Devolución por cancelación de orden",
+            usuarioId: orden.usuarioId,
+          });
+        }
         console.log(`✅ Stock restaurado exitosamente`);
       } catch (stockError) {
         // Si falla la restauración de stock, loggear error pero continuar
