@@ -14,6 +14,7 @@ import { ApiError } from "../utils/error-handler";
 
 const ORDENES_COLLECTION = "ordenes";
 const STRIPE_WEBHOOK_EVENTS_COLLECTION = "stripe_webhook_events";
+const STRIPE_PAYMENT_START_LOCKS_COLLECTION = "stripe_payment_start_locks";
 
 type IniciarPagoInput = {
   ordenId: string;
@@ -178,7 +179,171 @@ const ESTADOS_PAGO_ACTIVOS: EstadoPago[] = [
   EstadoPago.REQUIERE_ACCION,
 ];
 
+const wait = (ms: number): Promise<void> => {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+};
+
 class PagoService {
+  private getStartPaymentLockRef(
+    ordenId: string,
+    userId: string,
+  ): FirebaseFirestore.DocumentReference {
+    const lockId = `${ordenId}_${userId}`;
+    return firestoreTienda
+      .collection(STRIPE_PAYMENT_START_LOCKS_COLLECTION)
+      .doc(lockId);
+  }
+
+  private async withStartPaymentLock<T>(
+    ordenId: string,
+    userId: string,
+    operation: () => Promise<T>,
+    onLockContention?: () => Promise<T | undefined>,
+  ): Promise<T> {
+    const lockRef = this.getStartPaymentLockRef(ordenId, userId);
+    const now = admin.firestore.Timestamp.now();
+
+    try {
+      await lockRef.create({
+        ordenId,
+        userId,
+        status: "acquired",
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) {
+        throw error;
+      }
+
+      if (onLockContention) {
+        const fallbackResult = await onLockContention();
+        if (fallbackResult !== undefined) {
+          return fallbackResult;
+        }
+      }
+
+      throw new ApiError(
+        409,
+        "Ya existe un inicio de pago en curso para esta orden. Reintenta en unos segundos",
+      );
+    }
+
+    try {
+      return await operation();
+    } finally {
+      try {
+        await lockRef.delete();
+      } catch (error) {
+        console.warn("payment_start_lock_release_failed", {
+          ordenId,
+          userId,
+          reason: parseWebhookErrorMessage(error),
+        });
+      }
+    }
+  }
+
+  private async findLatestActivePagoDoc(
+    ordenId: string,
+    userId: string,
+  ): Promise<FirebaseFirestore.QueryDocumentSnapshot | null> {
+    const pagoActivoSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .where("userId", "==", userId)
+      .where("estado", "in", ESTADOS_PAGO_ACTIVOS)
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+
+    if (pagoActivoSnapshot.empty) {
+      return null;
+    }
+
+    return pagoActivoSnapshot.docs[0];
+  }
+
+  private async buildReusedPaymentResult(
+    stripe: Stripe,
+    pagoDoc: FirebaseFirestore.QueryDocumentSnapshot,
+    context: {
+      ordenId: string;
+      userId: string;
+      reason: string;
+    },
+  ): Promise<IniciarPagoResult> {
+    const pago = pagoDoc.data() as Pago;
+
+    if (!pago.paymentIntentId) {
+      throw new ApiError(
+        409,
+        "Existe un pago activo inconsistente para esta orden. Revisa el estado antes de reintentar",
+      );
+    }
+
+    try {
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        pago.paymentIntentId,
+      );
+
+      if (!paymentIntent.client_secret) {
+        throw new ApiError(
+          502,
+          "No fue posible recuperar el client secret del intento activo",
+        );
+      }
+
+      return {
+        pagoId: pagoDoc.id,
+        paymentIntentId: paymentIntent.id,
+        clientSecret: paymentIntent.client_secret,
+        status: mapPaymentIntentStatusToEstadoPago(paymentIntent.status),
+        created: false,
+      };
+    } catch (error) {
+      console.error("Error al recuperar pago reutilizable", {
+        ordenId: context.ordenId,
+        userId: context.userId,
+        pagoId: pagoDoc.id,
+        paymentIntentId: pago.paymentIntentId,
+        reason: context.reason,
+        error: parseWebhookErrorMessage(error),
+      });
+      throw new ApiError(
+        502,
+        "No fue posible reutilizar el intento activo de pago",
+      );
+    }
+  }
+
+  private async waitForReusableActivePayment(
+    stripe: Stripe,
+    ordenId: string,
+    userId: string,
+  ): Promise<IniciarPagoResult | undefined> {
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      await wait(75 * attempt);
+      const activePagoDoc = await this.findLatestActivePagoDoc(ordenId, userId);
+      if (activePagoDoc) {
+        const activePago = activePagoDoc.data() as Pago;
+        if (!activePago.paymentIntentId) {
+          continue;
+        }
+
+        return this.buildReusedPaymentResult(stripe, activePagoDoc, {
+          ordenId,
+          userId,
+          reason: "lock_contention_wait",
+        });
+      }
+    }
+
+    return undefined;
+  }
+
   private async generateServerIdempotencyKey(
     ordenId: string,
     userId: string,
@@ -242,217 +407,165 @@ class PagoService {
       throw new ApiError(409, "La orden tiene un monto invalido para pago");
     }
 
-    const pagoActivoSnapshot = await firestoreTienda
-      .collection(COLECCION_PAGOS)
-      .where("ordenId", "==", ordenId)
-      .where("userId", "==", userId)
-      .where("estado", "in", ESTADOS_PAGO_ACTIVOS)
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
-
-    if (!pagoActivoSnapshot.empty) {
-      const pagoActivoDoc = pagoActivoSnapshot.docs[0];
-      const pagoActivo = pagoActivoDoc.data() as Pago;
-
-      if (!pagoActivo.paymentIntentId) {
-        throw new ApiError(
-          409,
-          "Existe un pago activo inconsistente para esta orden. Revisa el estado antes de reintentar",
-        );
-      }
-
-      try {
-        const paymentIntent = await stripe.paymentIntents.retrieve(
-          pagoActivo.paymentIntentId,
+    return this.withStartPaymentLock(
+      ordenId,
+      userId,
+      async () => {
+        const pagoActivoDoc = await this.findLatestActivePagoDoc(
+          ordenId,
+          userId,
         );
 
-        if (!paymentIntent.client_secret) {
+        if (pagoActivoDoc) {
+          return this.buildReusedPaymentResult(stripe, pagoActivoDoc, {
+            ordenId,
+            userId,
+            reason: "active_payment_found",
+          });
+        }
+
+        const resolvedIdempotencyKey =
+          idempotencyKey ||
+          (await this.generateServerIdempotencyKey(ordenId, userId));
+
+        const idemSnapshot = await firestoreTienda
+          .collection(COLECCION_PAGOS)
+          .where("idempotencyKey", "==", resolvedIdempotencyKey)
+          .limit(1)
+          .get();
+
+        if (!idemSnapshot.empty) {
+          const pagoExistenteDoc = idemSnapshot.docs[0];
+          const pagoExistente = pagoExistenteDoc.data() as Pago;
+
+          if (
+            pagoExistente.ordenId !== ordenId ||
+            pagoExistente.userId !== userId
+          ) {
+            throw new ApiError(
+              409,
+              "La idempotency key ya fue usada en otra operacion de pago",
+            );
+          }
+
+          if (pagoExistente.estado === EstadoPago.FALLIDO) {
+            throw new ApiError(
+              409,
+              "La idempotency key corresponde a un intento fallido. Usa una nueva",
+            );
+          }
+
+          if (
+            pagoExistente.paymentIntentId &&
+            isEstadoReutilizable(pagoExistente.estado)
+          ) {
+            return this.buildReusedPaymentResult(stripe, pagoExistenteDoc, {
+              ordenId,
+              userId,
+              reason: "existing_idempotency_key",
+            });
+          }
+
           throw new ApiError(
-            502,
-            "No fue posible recuperar el client secret del intento activo",
+            409,
+            "La idempotency key ya tiene un intento registrado no reutilizable",
           );
         }
 
-        return {
-          pagoId: pagoActivoDoc.id,
-          paymentIntentId: paymentIntent.id,
-          clientSecret: paymentIntent.client_secret,
-          status: mapPaymentIntentStatusToEstadoPago(paymentIntent.status),
-          created: false,
-        };
-      } catch (error) {
-        console.error("Error al recuperar pago activo por orden", {
+        const now = admin.firestore.Timestamp.now();
+        const pagoDraft: Omit<Pago, "id"> = {
           ordenId,
           userId,
-          pagoId: pagoActivoDoc.id,
-          paymentIntentId: pagoActivo.paymentIntentId,
-          error: parseWebhookErrorMessage(error),
-        });
-        throw new ApiError(
-          502,
-          "No fue posible reutilizar el intento activo de pago",
-        );
-      }
-    }
+          provider: ProveedorPago.STRIPE,
+          metodoPago,
+          monto: ordenData.total,
+          currency: CURRENCY_DEFAULT,
+          estado: EstadoPago.PROCESANDO,
+          idempotencyKey: resolvedIdempotencyKey,
+          createdAt: now,
+          updatedAt: now,
+        };
 
-    const resolvedIdempotencyKey =
-      idempotencyKey || (await this.generateServerIdempotencyKey(ordenId, userId));
+        const pagoRef = await firestoreTienda
+          .collection(COLECCION_PAGOS)
+          .add(pagoDraft);
 
-    const idemSnapshot = await firestoreTienda
-      .collection(COLECCION_PAGOS)
-      .where("idempotencyKey", "==", resolvedIdempotencyKey)
-      .limit(1)
-      .get();
-
-    if (!idemSnapshot.empty) {
-      const pagoExistenteDoc = idemSnapshot.docs[0];
-      const pagoExistente = pagoExistenteDoc.data() as Pago;
-
-      if (pagoExistente.ordenId !== ordenId || pagoExistente.userId !== userId) {
-        throw new ApiError(
-          409,
-          "La idempotency key ya fue usada en otra operacion de pago",
-        );
-      }
-
-      if (pagoExistente.estado === EstadoPago.FALLIDO) {
-        throw new ApiError(
-          409,
-          "La idempotency key corresponde a un intento fallido. Usa una nueva",
-        );
-      }
-
-      if (
-        pagoExistente.paymentIntentId &&
-        isEstadoReutilizable(pagoExistente.estado)
-      ) {
         try {
-          const paymentIntent = await stripe.paymentIntents.retrieve(
-            pagoExistente.paymentIntentId,
+          const paymentIntent = await stripe.paymentIntents.create(
+            {
+              amount,
+              currency: CURRENCY_DEFAULT,
+              automatic_payment_methods: { enabled: true },
+              metadata: {
+                ordenId,
+                userId,
+                metodoPago,
+                pagoId: pagoRef.id,
+              },
+            },
+            { idempotencyKey: resolvedIdempotencyKey },
           );
+
+          const estadoPago = mapPaymentIntentStatusToEstadoPago(
+            paymentIntent.status,
+          );
+          await pagoRef.update({
+            paymentIntentId: paymentIntent.id,
+            providerStatus: paymentIntent.status,
+            estado: estadoPago,
+            updatedAt: admin.firestore.Timestamp.now(),
+          });
+
           if (!paymentIntent.client_secret) {
             throw new ApiError(
               502,
-              "No fue posible recuperar el client secret del intento existente",
+              "Stripe no devolvio client secret para el intento de pago",
             );
           }
 
           return {
-            pagoId: pagoExistenteDoc.id,
+            pagoId: pagoRef.id,
             paymentIntentId: paymentIntent.id,
             clientSecret: paymentIntent.client_secret,
-            status: mapPaymentIntentStatusToEstadoPago(paymentIntent.status),
-            created: false,
+            status: estadoPago,
+            created: true,
           };
         } catch (error) {
-          console.error("Error al recuperar PaymentIntent existente", {
-            ordenId,
-            userId,
-            pagoId: pagoExistenteDoc.id,
-            paymentIntentId: pagoExistente.paymentIntentId,
-            error: parseWebhookErrorMessage(error),
+          const stripeError = error as {
+            code?: string;
+            message?: string;
+            type?: string;
+          };
+          const failureCode = stripeError?.code || "stripe_error";
+          const failureMessage =
+            stripeError?.message || "No fue posible crear el intento de pago";
+          const providerStatus = stripeError?.type || "stripe_error";
+
+          await pagoRef.update({
+            estado: EstadoPago.FALLIDO,
+            failureCode,
+            failureMessage,
+            providerStatus,
+            updatedAt: admin.firestore.Timestamp.now(),
           });
-          throw new ApiError(
-            502,
-            "No fue posible reutilizar el intento de pago existente",
-          );
-        }
-      }
 
-      throw new ApiError(
-        409,
-        "La idempotency key ya tiene un intento registrado no reutilizable",
-      );
-    }
-
-    const now = admin.firestore.Timestamp.now();
-    const pagoDraft: Omit<Pago, "id"> = {
-      ordenId,
-      userId,
-      provider: ProveedorPago.STRIPE,
-      metodoPago,
-      monto: ordenData.total,
-      currency: CURRENCY_DEFAULT,
-      estado: EstadoPago.PROCESANDO,
-      idempotencyKey: resolvedIdempotencyKey,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const pagoRef = await firestoreTienda.collection(COLECCION_PAGOS).add(pagoDraft);
-
-    try {
-      const paymentIntent = await stripe.paymentIntents.create(
-        {
-          amount,
-          currency: CURRENCY_DEFAULT,
-          automatic_payment_methods: { enabled: true },
-          metadata: {
+          console.error("Error al crear PaymentIntent", {
             ordenId,
             userId,
-            metodoPago,
             pagoId: pagoRef.id,
-          },
-        },
-        { idempotencyKey: resolvedIdempotencyKey },
-      );
+            failureCode,
+            failureMessage,
+          });
 
-      const estadoPago = mapPaymentIntentStatusToEstadoPago(paymentIntent.status);
-      await pagoRef.update({
-        paymentIntentId: paymentIntent.id,
-        providerStatus: paymentIntent.status,
-        estado: estadoPago,
-        updatedAt: admin.firestore.Timestamp.now(),
-      });
+          if (error instanceof ApiError) {
+            throw error;
+          }
 
-      if (!paymentIntent.client_secret) {
-        throw new ApiError(
-          502,
-          "Stripe no devolvio client secret para el intento de pago",
-        );
-      }
-
-      return {
-        pagoId: pagoRef.id,
-        paymentIntentId: paymentIntent.id,
-        clientSecret: paymentIntent.client_secret,
-        status: estadoPago,
-        created: true,
-      };
-    } catch (error) {
-      const stripeError = error as {
-        code?: string;
-        message?: string;
-        type?: string;
-      };
-      const failureCode = stripeError?.code || "stripe_error";
-      const failureMessage =
-        stripeError?.message || "No fue posible crear el intento de pago";
-      const providerStatus = stripeError?.type || "stripe_error";
-
-      await pagoRef.update({
-        estado: EstadoPago.FALLIDO,
-        failureCode,
-        failureMessage,
-        providerStatus,
-        updatedAt: admin.firestore.Timestamp.now(),
-      });
-
-      console.error("Error al crear PaymentIntent", {
-        ordenId,
-        userId,
-        pagoId: pagoRef.id,
-        failureCode,
-        failureMessage,
-      });
-
-      if (error instanceof ApiError) {
-        throw error;
-      }
-
-      throw new ApiError(502, "Error al iniciar el pago con Stripe");
-    }
+          throw new ApiError(502, "Error al iniciar el pago con Stripe");
+        }
+      },
+      () => this.waitForReusableActivePayment(stripe, ordenId, userId),
+    );
   }
 
   async procesarWebhookStripe(
@@ -601,7 +714,9 @@ class PagoService {
     }
 
     const now = admin.firestore.Timestamp.now();
-    const ordenRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(pago.ordenId);
+    const ordenRef = firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(pago.ordenId);
 
     await firestoreTienda.runTransaction(async (tx) => {
       const ordenDoc = await tx.get(ordenRef);
@@ -618,7 +733,10 @@ class PagoService {
         refundId: refund.id,
         refundAmount: refund.amount / 100,
         refundReason:
-          refundReason || refund.metadata?.refundReason || refund.reason || undefined,
+          refundReason ||
+          refund.metadata?.refundReason ||
+          refund.reason ||
+          undefined,
         failureCode: admin.firestore.FieldValue.delete(),
         failureMessage: admin.firestore.FieldValue.delete(),
         updatedAt: now,
@@ -646,11 +764,17 @@ class PagoService {
       refundId: refund.id,
       refundAmount: refund.amount / 100,
       refundReason:
-        refundReason || refund.metadata?.refundReason || refund.reason || undefined,
+        refundReason ||
+        refund.metadata?.refundReason ||
+        refund.reason ||
+        undefined,
     };
   }
 
-  async getPagoById(pagoId: string, user: AuthUser): Promise<PagoConsultaResult> {
+  async getPagoById(
+    pagoId: string,
+    user: AuthUser,
+  ): Promise<PagoConsultaResult> {
     const pagoRef = firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId);
     const pagoDoc = await pagoRef.get();
 
@@ -674,13 +798,12 @@ class PagoService {
         rol: user.rol,
         reason: "ownership_denied",
       });
-      throw new ApiError(
-        403,
-        "No tienes permisos para consultar este pago",
-      );
+      throw new ApiError(403, "No tienes permisos para consultar este pago");
     }
 
-    const ordenRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(pago.ordenId);
+    const ordenRef = firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(pago.ordenId);
     const ordenDoc = await ordenRef.get();
     if (!ordenDoc.exists) {
       console.error("pago_query_not_found", {
@@ -745,10 +868,7 @@ class PagoService {
         rol: user.rol,
         reason: "pago_not_found_by_orden",
       });
-      throw new ApiError(
-        404,
-        `No se encontró pago para la orden "${ordenId}"`,
-      );
+      throw new ApiError(404, `No se encontró pago para la orden "${ordenId}"`);
     }
 
     const pagoId = pagosSnapshot.docs[0].id;
@@ -775,6 +895,32 @@ class PagoService {
       return true;
     } catch (error) {
       if (isAlreadyExistsError(error)) {
+        const existingSnapshot = await eventRef.get();
+        const existingData = existingSnapshot.data() as
+          | {
+              status?: string;
+              retryCount?: number;
+            }
+          | undefined;
+
+        if (existingData?.status === "error") {
+          const retryCount =
+            typeof existingData.retryCount === "number"
+              ? existingData.retryCount + 1
+              : 1;
+
+          await eventRef.set(
+            {
+              status: "received",
+              retryCount,
+              updatedAt: now,
+            },
+            { merge: true },
+          );
+
+          return true;
+        }
+
         return false;
       }
 
@@ -879,7 +1025,9 @@ class PagoService {
         fechaPago: now,
         failureCode: admin.firestore.FieldValue.delete(),
         failureMessage: admin.firestore.FieldValue.delete(),
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(event.id),
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
         updatedAt: now,
       });
 
@@ -913,7 +1061,8 @@ class PagoService {
       };
     }
 
-    const failureCode = paymentIntent.last_payment_error?.code || "payment_failed";
+    const failureCode =
+      paymentIntent.last_payment_error?.code || "payment_failed";
     const failureMessage =
       paymentIntent.last_payment_error?.message ||
       "Stripe reporto fallo al confirmar el pago";
@@ -936,7 +1085,9 @@ class PagoService {
         paymentIntentId: paymentIntent.id,
         failureCode,
         failureMessage,
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(event.id),
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
         updatedAt: now,
       });
 
@@ -994,7 +1145,9 @@ class PagoService {
         fechaPago: now,
         failureCode: admin.firestore.FieldValue.delete(),
         failureMessage: admin.firestore.FieldValue.delete(),
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(event.id),
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
         updatedAt: now,
       });
 
@@ -1051,7 +1204,9 @@ class PagoService {
             : pagoData.paymentIntentId,
         failureCode: "checkout_async_payment_failed",
         failureMessage: "Stripe reporto fallo en el pago async de Checkout",
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(event.id),
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
         updatedAt: now,
       });
 
@@ -1114,7 +1269,9 @@ class PagoService {
         refundReason:
           refundData?.reason ||
           (charge.refunded ? "refund_processed_by_stripe" : undefined),
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(event.id),
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
         updatedAt: now,
       });
 
@@ -1141,12 +1298,18 @@ class PagoService {
     pagoRef: FirebaseFirestore.DocumentReference;
     ordenRef: FirebaseFirestore.DocumentReference;
   } | null> {
-    const byIntent = await this.findPagoByField("paymentIntentId", paymentIntent.id);
+    const byIntent = await this.findPagoByField(
+      "paymentIntentId",
+      paymentIntent.id,
+    );
     if (byIntent) {
       return byIntent;
     }
 
-    const pagoIdFromMetadata = getMetadataString(paymentIntent.metadata, "pagoId");
+    const pagoIdFromMetadata = getMetadataString(
+      paymentIntent.metadata,
+      "pagoId",
+    );
     if (!pagoIdFromMetadata) {
       return null;
     }
@@ -1185,9 +1348,7 @@ class PagoService {
     return null;
   }
 
-  private async resolvePagoFromRefundCharge(
-    charge: Stripe.Charge,
-  ): Promise<{
+  private async resolvePagoFromRefundCharge(charge: Stripe.Charge): Promise<{
     pagoId: string;
     ordenId: string;
     pagoRef: FirebaseFirestore.DocumentReference;
@@ -1236,13 +1397,13 @@ class PagoService {
       pagoId: pagoDoc.id,
       ordenId: pagoData.ordenId,
       pagoRef: pagoDoc.ref,
-      ordenRef: firestoreTienda.collection(ORDENES_COLLECTION).doc(pagoData.ordenId),
+      ordenRef: firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(pagoData.ordenId),
     };
   }
 
-  private async findPagoById(
-    pagoId: string,
-  ): Promise<{
+  private async findPagoById(pagoId: string): Promise<{
     pagoId: string;
     ordenId: string;
     pagoRef: FirebaseFirestore.DocumentReference;
@@ -1264,7 +1425,9 @@ class PagoService {
       pagoId: pagoDoc.id,
       ordenId: pagoData.ordenId,
       pagoRef,
-      ordenRef: firestoreTienda.collection(ORDENES_COLLECTION).doc(pagoData.ordenId),
+      ordenRef: firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(pagoData.ordenId),
     };
   }
 }

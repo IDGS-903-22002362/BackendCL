@@ -6,8 +6,8 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 **Total de Tareas:** 82
 
-- ✅ **DONE:** 44 tareas (implementadas en código)
-- 🔲 **TODO:** 38 tareas (pendientes de implementar)
+- ✅ **DONE:** 46 tareas (implementadas en código)
+- 🔲 **TODO:** 36 tareas (pendientes de implementar)
 
 ---
 
@@ -1518,7 +1518,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 ### (Recomendado) TASK-063: Estrategia de idempotencia y deduplicación
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE  
 **Descripción:** Evitar cobros duplicados por reintentos del cliente y reenvíos de Stripe.  
 **Criterios de Aceptación:**
 
@@ -1530,6 +1530,19 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - Tests:
   - Simular 2 llamadas seguidas a `/iniciar` y validar que no se crean 2 cobros.
   - Simular reintento de webhook y validar que no duplica cambios.
+
+**Archivos de Código:**
+
+- `functions/src/services/pago.service.ts` (lock de inicio por `ordenId+userId`, reuso de pago activo, dedupe/reintento de webhook en estado error)
+- `functions/tests/payments.idempotency.test.ts` (tests secuenciales y concurrentes de `/iniciar`, dedupe de webhook por `event.id`, reintento post-error)
+
+**Notas de Implementación:**
+
+- Se evita doble cobro en llamadas concurrentes a `/api/pagos/iniciar` usando lock temporal por orden/usuario.
+- Si el lock está ocupado, el servicio espera brevemente y reusa el pago activo cuando ya está disponible.
+- `event.id` del webhook se persiste en colección dedicada y se deduplica por defecto.
+- Si un webhook previo quedó en `error`, el mismo `event.id` se permite reintentar de forma controlada.
+- Validado con `npm test -- payments.idempotency.test.ts` en `functions/` (4/4 pruebas pasando).
 
 ---
 
@@ -1866,7 +1879,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 
 ## Resumen de Estados
 
-### ✅ DONE (45 tareas)
+### ✅ DONE (46 tareas)
 
 - **Infraestructura Base:** 8 tareas
 - **Módulo Productos:** 11 tareas (+ gestión de stock con transacciones)
@@ -1879,14 +1892,14 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 - **Servicio Storage:** 1 tarea
 - **Otros:** 5 tareas
 
-### 🔲 TODO (37 tareas)
+### 🔲 TODO (36 tareas)
 
 - **Catálogos Auxiliares:** 0 tareas (completado)
 - **Infraestructura adicional:** 4 tareas
 - **Usuarios y Autenticación:** 8 tareas
 - **Órdenes y Pedidos:** 1 tarea (TASK-050)
 - **Carrito de Compras:** 4 tareas
-- **Sistema de Pagos:** 5 tareas
+- **Sistema de Pagos:** 4 tareas
 - **Gestión de Inventario:** 5 tareas
 - **Sistema de Envíos:** 5 tareas
 - **Reportes y Analytics:** 5 tareas
