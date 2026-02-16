@@ -88,20 +88,53 @@ export interface StockDetallado extends Stock {
   };
 }
 
+export enum TipoMovimientoInventario {
+  ENTRADA = "entrada",
+  SALIDA = "salida",
+  AJUSTE = "ajuste",
+  VENTA = "venta",
+  DEVOLUCION = "devolucion",
+}
+
 /**
- * Interface para movimientos de inventario (para futuro)
- * Registra entradas, salidas, traspasos, ajustes
+ * Interface para movimientos de inventario.
+ * Registra la trazabilidad de cambios de stock por producto/talla.
  */
 export interface MovimientoInventario {
   id?: string;
-  tipo: "ENTRADA" | "SALIDA" | "TRASPASO" | "AJUSTE" | "VENTA" | "DEVOLUCION";
+  tipo: TipoMovimientoInventario;
   productoId: string;
   tallaId: string | null;
-  ubicacionOrigenId?: string; // Para traspasos
-  ubicacionDestinoId: string;
-  cantidad: number;
-  referencia?: string; // Número de orden, ticket, etc.
-  notas?: string;
-  usuarioId?: string; // Quien realizó el movimiento
+  cantidadAnterior: number;
+  cantidadNueva: number;
+  diferencia: number;
+  motivo?: string;
+  referencia?: string;
+  ordenId?: string;
+  usuarioId?: string;
   createdAt: Date;
+}
+
+export interface RegistrarMovimientoInventarioDTO {
+  tipo: TipoMovimientoInventario;
+  productoId: string;
+  tallaId?: string;
+  cantidad?: number;
+  cantidadNueva?: number;
+  motivo?: string;
+  referencia?: string;
+  ordenId?: string;
+  usuarioId?: string;
+}
+
+export interface ListarMovimientosInventarioQuery {
+  productoId?: string;
+  tallaId?: string;
+  tipo?: TipoMovimientoInventario;
+  ordenId?: string;
+  fechaDesde?: string;
+  fechaHasta?: string;
+  limit: number;
+  cursor?: string;
+  usuarioId?: string;
 }
