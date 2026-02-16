@@ -22,6 +22,7 @@ import ordenesRoutes from "./ordenes.routes";
 import newsRoutes from "./news.routes";
 import carritoRoutes from "./carrito.routes";
 import pagosRoutes from "./pagos.routes";
+import inventoryRoutes from "./inventory.routes";
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.use("/auth", authRoutes);
 router.use("/ordenes", ordenesRoutes);
 router.use("/carrito", carritoRoutes);
 router.use("/pagos", pagosRoutes);
+router.use("/inventario", inventoryRoutes);
 
 // Futuros módulos:
 

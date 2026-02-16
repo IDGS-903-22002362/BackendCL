@@ -40,6 +40,10 @@ import {
   updateEstadoPagoSchema,
   refundPagoSchema,
 } from "../middleware/validators/pago.validator";
+import {
+  registerInventoryMovementSchema,
+  listInventoryMovementsQuerySchema,
+} from "../middleware/validators/inventory.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -118,6 +122,10 @@ const swaggerDefinition = {
       name: "Payments",
       description:
         "Sistema de pagos con Stripe (PaymentIntent / Checkout Session)",
+    },
+    {
+      name: "Inventory",
+      description: "Gestión de movimientos de inventario y trazabilidad",
     },
     {
       name: "Authentication",
@@ -254,6 +262,13 @@ const swaggerDefinition = {
       UpdateEstadoPago: zodToJsonSchema(updateEstadoPagoSchema),
       RefundPago: zodToJsonSchema(refundPagoSchema),
 
+      RegisterInventoryMovement: zodToJsonSchema(
+        registerInventoryMovementSchema,
+      ),
+      ListInventoryMovementsQuery: zodToJsonSchema(
+        listInventoryMovementsQuerySchema,
+      ),
+
       // Modelos completos de entidades
       InventoryBySizeItem: {
         type: "object",
@@ -285,6 +300,40 @@ const swaggerDefinition = {
           inventarioPorTalla: {
             type: "array",
             items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+          movimientoId: { type: "string", example: "mov_abc123" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-02-16T15:00:00Z",
+          },
+        },
+      },
+      InventoryMovement: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "mov_abc123" },
+          tipo: {
+            type: "string",
+            enum: ["entrada", "salida", "ajuste", "venta", "devolucion"],
+            example: "venta",
+          },
+          productoId: { type: "string", example: "prod_123" },
+          tallaId: { type: "string", nullable: true, example: "m" },
+          cantidadAnterior: { type: "integer", example: 10 },
+          cantidadNueva: { type: "integer", example: 8 },
+          diferencia: { type: "integer", example: -2 },
+          motivo: {
+            type: "string",
+            example: "Venta asociada a creación de orden",
+          },
+          referencia: { type: "string", example: "orden_abc123" },
+          ordenId: { type: "string", example: "orden_abc123" },
+          usuarioId: { type: "string", example: "user_123" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-02-16T15:00:00Z",
           },
         },
       },
