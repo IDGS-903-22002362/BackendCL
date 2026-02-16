@@ -17,6 +17,7 @@ import {
   createProductSchema,
   updateProductSchema,
   deleteImageSchema,
+  updateProductStockSchema,
 } from "../middleware/validators/product.validator";
 import {
   idParamSchema,
@@ -24,6 +25,7 @@ import {
   categoriaIdParamSchema,
   lineaIdParamSchema,
 } from "../middleware/validators/common.validator";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 // Configurar multer para almacenar archivos en memoria
 const upload = multer({
@@ -450,6 +452,78 @@ router.put(
   validateParams(idParamSchema),
   validateBody(updateProductSchema),
   commandController.update,
+);
+
+/**
+ * @swagger
+ * /api/productos/{id}/stock:
+ *   put:
+ *     summary: Actualizar stock de producto
+ *     description: |
+ *       Actualiza stock general o stock por talla de un producto y registra movimiento de inventario.
+ *
+ *       **Reglas:**
+ *       - Si el producto usa inventario por talla, `tallaId` es requerido.
+ *       - Si no usa inventario por talla, se actualiza stock general (`existencias`).
+ *       - La cantidad no puede ser negativa.
+ *       - Solo administradores/empleados pueden ejecutar esta operación.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del producto
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProductStock'
+ *           example:
+ *             cantidadNueva: 15
+ *             tallaId: "m"
+ *             tipo: "ajuste"
+ *             motivo: "Conteo físico"
+ *             referencia: "INV-2026-001"
+ *     responses:
+ *       200:
+ *         description: Stock actualizado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Stock actualizado exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/ProductStockUpdateResult'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/:id/stock",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  validateBody(updateProductStockSchema),
+  commandController.updateStock,
 );
 
 /**
