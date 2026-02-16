@@ -5,13 +5,24 @@
 
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
-import { InventarioPorTalla, Producto } from "../models/producto.model";
+import {
+  InventarioPorTalla,
+  Producto,
+  StockMinimoPorTalla,
+} from "../models/producto.model";
+import {
+  AlertaStockProducto,
+  AlertaStockTalla,
+  ListarAlertasStockQuery,
+} from "../models/inventario.model";
+import stockAlertService from "./stock-alert.service";
 
 /**
  * Colección de productos en Firestore
  */
 const PRODUCTOS_COLLECTION = "productos";
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
+const DEFAULT_STOCK_MINIMO_GLOBAL = 5;
 
 export interface UpdateProductStockDTO {
   cantidadNueva: number;
@@ -31,6 +42,13 @@ export interface ProductStockUpdateResult {
   diferencia: number;
   existencias: number;
   inventarioPorTalla: InventarioPorTalla[];
+  stockMinimoGlobal: number;
+  stockMinimoPorTalla: StockMinimoPorTalla[];
+  alertaStockBajo: {
+    activo: boolean;
+    totalAlertas: number;
+    maxDeficit: number;
+  };
   movimientoId: string;
   createdAt: Date;
 }
@@ -66,6 +84,126 @@ export class ProductService {
         };
       })
       .filter((item) => item.tallaId.length > 0);
+  }
+
+  private normalizeStockThresholdBySize(
+    stockMinimoPorTalla: unknown,
+  ): StockMinimoPorTalla[] {
+    if (!Array.isArray(stockMinimoPorTalla)) {
+      return [];
+    }
+
+    return stockMinimoPorTalla
+      .filter(
+        (item): item is { tallaId: unknown; minimo: unknown } =>
+          typeof item === "object" && item !== null,
+      )
+      .map((item) => {
+        const tallaId = String(item.tallaId ?? "").trim();
+        const minimoRaw = Number(item.minimo ?? 0);
+        const minimo =
+          Number.isFinite(minimoRaw) && minimoRaw >= 0
+            ? Math.floor(minimoRaw)
+            : 0;
+
+        return {
+          tallaId,
+          minimo,
+        };
+      })
+      .filter((item) => item.tallaId.length > 0);
+  }
+
+  private getNormalizedGlobalThreshold(value: unknown): number {
+    const threshold = Number(value);
+
+    if (!Number.isFinite(threshold) || threshold < 0) {
+      return DEFAULT_STOCK_MINIMO_GLOBAL;
+    }
+
+    return Math.floor(threshold);
+  }
+
+  private getThresholdForSize(
+    tallaId: string,
+    stockMinimoGlobal: number,
+    stockMinimoPorTalla: StockMinimoPorTalla[],
+  ): number {
+    const custom = stockMinimoPorTalla.find((item) => item.tallaId === tallaId);
+    return custom ? custom.minimo : stockMinimoGlobal;
+  }
+
+  private evaluateLowStock(
+    producto: Pick<
+      Producto,
+      | "id"
+      | "clave"
+      | "descripcion"
+      | "lineaId"
+      | "categoriaId"
+      | "existencias"
+      | "stockMinimoGlobal"
+      | "stockMinimoPorTalla"
+      | "inventarioPorTalla"
+    >,
+  ): AlertaStockProducto {
+    const stockMinimoGlobal = this.getNormalizedGlobalThreshold(
+      producto.stockMinimoGlobal,
+    );
+    const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
+      producto.stockMinimoPorTalla,
+    );
+    const inventarioPorTalla = this.normalizeInventoryBySize(
+      producto.inventarioPorTalla,
+    );
+
+    const tallasBajoStock: AlertaStockTalla[] = inventarioPorTalla
+      .map((item) => {
+        const minimo = this.getThresholdForSize(
+          item.tallaId,
+          stockMinimoGlobal,
+          stockMinimoPorTalla,
+        );
+        const deficit = minimo - item.cantidad;
+
+        if (deficit <= 0) {
+          return null;
+        }
+
+        return {
+          tallaId: item.tallaId,
+          cantidadActual: item.cantidad,
+          minimo,
+          deficit,
+        } as AlertaStockTalla;
+      })
+      .filter((item): item is AlertaStockTalla => item !== null)
+      .sort((a, b) => b.deficit - a.deficit);
+
+    const existencias = Math.max(
+      0,
+      Math.floor(Number(producto.existencias ?? 0)),
+    );
+    const globalBajoStock = existencias < stockMinimoGlobal;
+    const globalDeficit = globalBajoStock ? stockMinimoGlobal - existencias : 0;
+    const maxDeficitTalla = tallasBajoStock.reduce(
+      (acc, talla) => Math.max(acc, talla.deficit),
+      0,
+    );
+
+    return {
+      productoId: producto.id ?? "",
+      clave: String(producto.clave ?? ""),
+      descripcion: String(producto.descripcion ?? ""),
+      lineaId: String(producto.lineaId ?? ""),
+      categoriaId: String(producto.categoriaId ?? ""),
+      existencias,
+      stockMinimoGlobal,
+      globalBajoStock,
+      tallasBajoStock,
+      totalAlertas: tallasBajoStock.length + (globalBajoStock ? 1 : 0),
+      maxDeficit: Math.max(globalDeficit, maxDeficitTalla),
+    };
   }
 
   private getDerivedExistencias(
@@ -126,6 +264,12 @@ export class ProductService {
           inventarioPorTalla: this.normalizeInventoryBySize(
             data.inventarioPorTalla,
           ),
+          stockMinimoGlobal: this.getNormalizedGlobalThreshold(
+            data.stockMinimoGlobal,
+          ),
+          stockMinimoPorTalla: this.normalizeStockThresholdBySize(
+            data.stockMinimoPorTalla,
+          ),
           imagenes: data.imagenes || [],
           activo: data.activo,
           createdAt: data.createdAt,
@@ -175,6 +319,12 @@ export class ProductService {
         tallaIds: data.tallaIds || [],
         inventarioPorTalla: this.normalizeInventoryBySize(
           data.inventarioPorTalla,
+        ),
+        stockMinimoGlobal: this.getNormalizedGlobalThreshold(
+          data.stockMinimoGlobal,
+        ),
+        stockMinimoPorTalla: this.normalizeStockThresholdBySize(
+          data.stockMinimoPorTalla,
         ),
         imagenes: data.imagenes || [],
         activo: data.activo,
@@ -301,6 +451,12 @@ export class ProductService {
       const inventarioPorTalla = this.normalizeInventoryBySize(
         productoData.inventarioPorTalla,
       );
+      const stockMinimoGlobal = this.getNormalizedGlobalThreshold(
+        productoData.stockMinimoGlobal,
+      );
+      const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
+        productoData.stockMinimoPorTalla,
+      );
       const tallaIds = this.getMergedTallaIds(
         productoData.tallaIds,
         inventarioPorTalla,
@@ -330,6 +486,8 @@ export class ProductService {
           ...productoData,
           tallaIds,
           inventarioPorTalla,
+          stockMinimoGlobal,
+          stockMinimoPorTalla,
           existencias,
           createdAt: now,
           updatedAt: now,
@@ -398,6 +556,18 @@ export class ProductService {
           ? this.normalizeInventoryBySize(updateData.inventarioPorTalla)
           : this.normalizeInventoryBySize(productoActual.inventarioPorTalla);
 
+      const stockMinimoPorTalla =
+        updateData.stockMinimoPorTalla !== undefined
+          ? this.normalizeStockThresholdBySize(updateData.stockMinimoPorTalla)
+          : this.normalizeStockThresholdBySize(
+              productoActual.stockMinimoPorTalla,
+            );
+
+      const stockMinimoGlobal =
+        updateData.stockMinimoGlobal !== undefined
+          ? this.getNormalizedGlobalThreshold(updateData.stockMinimoGlobal)
+          : this.getNormalizedGlobalThreshold(productoActual.stockMinimoGlobal);
+
       const shouldDeriveFromInventory =
         updateData.inventarioPorTalla !== undefined ||
         this.normalizeInventoryBySize(productoActual.inventarioPorTalla)
@@ -410,6 +580,14 @@ export class ProductService {
 
       if (updateData.inventarioPorTalla !== undefined) {
         payload.inventarioPorTalla = inventarioPorTalla;
+      }
+
+      if (updateData.stockMinimoPorTalla !== undefined) {
+        payload.stockMinimoPorTalla = stockMinimoPorTalla;
+      }
+
+      if (updateData.stockMinimoGlobal !== undefined) {
+        payload.stockMinimoGlobal = stockMinimoGlobal;
       }
 
       if (
@@ -487,6 +665,77 @@ export class ProductService {
       );
       throw new Error("Error al obtener stock por talla del producto");
     }
+  }
+
+  async getLowStockAlertByProductId(
+    productoId: string,
+  ): Promise<AlertaStockProducto | null> {
+    const producto = await this.getProductById(productoId);
+
+    if (!producto || !producto.activo) {
+      return null;
+    }
+
+    const alert = this.evaluateLowStock(producto);
+    return alert.totalAlertas > 0 ? alert : null;
+  }
+
+  async listLowStockProducts(
+    filters: ListarAlertasStockQuery,
+  ): Promise<AlertaStockProducto[]> {
+    const snapshot = await firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true)
+      .get();
+
+    const allAlerts = snapshot.docs
+      .map((doc) => {
+        const data = doc.data() as Producto;
+        const alert = this.evaluateLowStock({
+          id: doc.id,
+          clave: data.clave,
+          descripcion: data.descripcion,
+          lineaId: data.lineaId,
+          categoriaId: data.categoriaId,
+          existencias: data.existencias,
+          stockMinimoGlobal: data.stockMinimoGlobal,
+          stockMinimoPorTalla: data.stockMinimoPorTalla,
+          inventarioPorTalla: data.inventarioPorTalla,
+        });
+
+        return alert;
+      })
+      .filter((alert) => alert.totalAlertas > 0);
+
+    const filtered = allAlerts.filter((alert) => {
+      if (filters.productoId && alert.productoId !== filters.productoId) {
+        return false;
+      }
+
+      if (filters.lineaId && alert.lineaId !== filters.lineaId) {
+        return false;
+      }
+
+      if (filters.categoriaId && alert.categoriaId !== filters.categoriaId) {
+        return false;
+      }
+
+      if (filters.soloCriticas && alert.maxDeficit < 5) {
+        return false;
+      }
+
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      if (b.maxDeficit !== a.maxDeficit) {
+        return b.maxDeficit - a.maxDeficit;
+      }
+
+      return a.descripcion.localeCompare(b.descripcion);
+    });
+
+    return filtered.slice(0, filters.limit);
   }
 
   /**
@@ -610,6 +859,23 @@ export class ProductService {
           }
 
           const diferencia = cantidadNueva - cantidadAnterior;
+          const stockMinimoGlobal = this.getNormalizedGlobalThreshold(
+            data.stockMinimoGlobal,
+          );
+          const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
+            data.stockMinimoPorTalla,
+          );
+          const lowStockSnapshot = this.evaluateLowStock({
+            id: productoId,
+            clave: data.clave,
+            descripcion: data.descripcion,
+            lineaId: data.lineaId,
+            categoriaId: data.categoriaId,
+            existencias: existenciasActualizadas,
+            stockMinimoGlobal,
+            stockMinimoPorTalla,
+            inventarioPorTalla: inventarioPorTallaActualizado,
+          });
 
           const movimientoRef = firestoreTienda
             .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
@@ -637,6 +903,13 @@ export class ProductService {
             diferencia,
             existencias: existenciasActualizadas,
             inventarioPorTalla: inventarioPorTallaActualizado,
+            stockMinimoGlobal,
+            stockMinimoPorTalla,
+            alertaStockBajo: {
+              activo: lowStockSnapshot.totalAlertas > 0,
+              totalAlertas: lowStockSnapshot.totalAlertas,
+              maxDeficit: lowStockSnapshot.maxDeficit,
+            },
             movimientoId: movimientoRef.id,
             createdAt:
               typeof (now as { toDate?: () => Date }).toDate === "function"
@@ -645,6 +918,14 @@ export class ProductService {
           } as ProductStockUpdateResult;
         },
       );
+
+      if (result.alertaStockBajo.activo) {
+        const alert = await this.getLowStockAlertByProductId(productoId);
+
+        if (alert) {
+          await stockAlertService.notifyRealtime([alert]);
+        }
+      }
 
       return result;
     } catch (error) {
