@@ -86,7 +86,11 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
   const applyFieldValueOps = (current: DocData, patch: DocData): DocData => {
     const next = { ...current };
     Object.entries(patch).forEach(([key, value]) => {
-      if (value && typeof value === "object" && (value as any).__op === "arrayUnion") {
+      if (
+        value &&
+        typeof value === "object" &&
+        (value as any).__op === "arrayUnion"
+      ) {
         const existing = Array.isArray(next[key]) ? next[key] : [];
         const merged = [...existing];
         (value as any).values.forEach((v: unknown) => {
@@ -98,7 +102,11 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
         return;
       }
 
-      if (value && typeof value === "object" && (value as any).__op === "delete") {
+      if (
+        value &&
+        typeof value === "object" &&
+        (value as any).__op === "delete"
+      ) {
         delete next[key];
         return;
       }
@@ -120,7 +128,7 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
         ref: docRefFactory(collectionName, id),
       };
     },
-    update: async (patch: DocData) => {
+    update: (patch: DocData) => {
       const col = getCollection(collectionName);
       const existing = col.get(id);
       if (!existing) {
@@ -128,7 +136,7 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
       }
       col.set(id, applyFieldValueOps(existing, patch));
     },
-    set: async (data: DocData, opts?: { merge?: boolean }) => {
+    set: (data: DocData, opts?: { merge?: boolean }) => {
       const col = getCollection(collectionName);
       const existing = col.get(id);
       if (opts?.merge && existing) {
@@ -137,7 +145,7 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
       }
       col.set(id, { ...data });
     },
-    create: async (data: DocData) => {
+    create: (data: DocData) => {
       const col = getCollection(collectionName);
       if (col.has(id)) {
         const err = new Error("already exists") as Error & { code?: string };
@@ -145,6 +153,10 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
         throw err;
       }
       col.set(id, { ...data });
+    },
+    delete: () => {
+      const col = getCollection(collectionName);
+      col.delete(id);
     },
   });
 
@@ -166,7 +178,13 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
     orderBy: (field: string, direction: "asc" | "desc" = "asc") =>
       queryFactory(collectionName, filters, field, direction, limitCount),
     limit: (count: number) =>
-      queryFactory(collectionName, filters, orderByField, orderByDirection, count),
+      queryFactory(
+        collectionName,
+        filters,
+        orderByField,
+        orderByDirection,
+        count,
+      ),
     get: async () => {
       const col = getCollection(collectionName);
       let docs = [...col.entries()].map(([id, data]) => ({ id, data }));
@@ -225,11 +243,25 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
         queryFactory(name, [{ field, op, value }]),
     }),
     runTransaction: async (cb: (tx: any) => Promise<void>) => {
+      const stagedUpdates: Array<{ docRef: any; data: DocData }> = [];
       const tx = {
         get: async (docRef: any) => docRef.get(),
-        update: async (docRef: any, data: DocData) => docRef.update(data),
+        update: (docRef: any, data: DocData) => {
+          stagedUpdates.push({ docRef, data });
+        },
       };
       await cb(tx);
+
+      for (const operation of stagedUpdates) {
+        const snapshot = await operation.docRef.get();
+        if (!snapshot.exists) {
+          throw new Error(`Doc ${operation.docRef.id} not found`);
+        }
+      }
+
+      for (const operation of stagedUpdates) {
+        operation.docRef.update(operation.data);
+      }
     },
     getDoc: (collectionName: string, id: string) => {
       const col = getCollection(collectionName);
@@ -297,6 +329,59 @@ describe("TASK-063 idempotency and dedupe", () => {
     expect(fakeFirestore.countDocs("pagos")).toBe(1);
   });
 
+  it("avoids duplicate charge creation on concurrent iniciar calls", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_1: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.TARJETA,
+          total: 1200,
+        },
+      },
+      pagos: {},
+    });
+
+    stripeMocks.createPaymentIntent.mockImplementation(
+      async () =>
+        await new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve({
+                id: "pi_1",
+                client_secret: "secret_1",
+                status: "requires_payment_method",
+              }),
+            120,
+          );
+        }),
+    );
+    stripeMocks.retrievePaymentIntent.mockResolvedValue({
+      id: "pi_1",
+      client_secret: "secret_1",
+      status: "requires_action",
+    });
+
+    const [first, second] = await Promise.all([
+      pagoService.iniciarPago({
+        ordenId: "orden_1",
+        userId: "user_1",
+        metodoPago: MetodoPago.TARJETA,
+      }),
+      pagoService.iniciarPago({
+        ordenId: "orden_1",
+        userId: "user_1",
+        metodoPago: MetodoPago.TARJETA,
+      }),
+    ]);
+
+    expect(first.created || second.created).toBe(true);
+    expect(first.created && second.created).toBe(false);
+    expect(stripeMocks.createPaymentIntent).toHaveBeenCalledTimes(1);
+    expect(stripeMocks.retrievePaymentIntent).toHaveBeenCalledTimes(1);
+    expect(fakeFirestore.countDocs("pagos")).toBe(1);
+  });
+
   it("deduplicates webhook retry by event.id and does not duplicate state changes", async () => {
     fakeFirestore = createFakeFirestore({
       pagos: {
@@ -356,5 +441,70 @@ describe("TASK-063 idempotency and dedupe", () => {
     expect(pago!.estado).toBe(EstadoPago.COMPLETADO);
     expect(orden!.estado).toBe(EstadoOrden.CONFIRMADA);
     expect(pago!.webhookEventIdsProcesados).toEqual(["evt_1"]);
+  });
+
+  it("reprocesses webhook event when previous attempt ended in error", async () => {
+    fakeFirestore = createFakeFirestore({
+      pagos: {
+        pago_1: {
+          ordenId: "orden_1",
+          userId: "user_1",
+          provider: ProveedorPago.STRIPE,
+          metodoPago: MetodoPago.TARJETA,
+          monto: 1200,
+          currency: "mxn",
+          estado: EstadoPago.PENDIENTE,
+          idempotencyKey: "pay_orden_1_user_1_1",
+          paymentIntentId: "pi_1",
+          createdAt: new Date("2026-02-10T10:00:00.000Z"),
+          updatedAt: new Date("2026-02-10T10:00:00.000Z"),
+        },
+      },
+      ordenes: {},
+      stripe_webhook_events: {},
+    });
+
+    stripeMocks.constructWebhookEvent.mockReturnValue({
+      id: "evt_retry_1",
+      type: "payment_intent.succeeded",
+      livemode: false,
+      data: {
+        object: {
+          id: "pi_1",
+          status: "succeeded",
+          metadata: {},
+        },
+      },
+    });
+
+    await expect(
+      pagoService.procesarWebhookStripe(Buffer.from("{}"), "sig_1"),
+    ).rejects.toThrow();
+
+    await fakeFirestore.collection("ordenes").doc("orden_1").set({
+      usuarioId: "user_1",
+      estado: EstadoOrden.PENDIENTE,
+      total: 1200,
+    });
+
+    const second = await pagoService.procesarWebhookStripe(
+      Buffer.from("{}"),
+      "sig_1",
+    );
+
+    expect(second.outcome).toBe("processed");
+
+    const eventDoc = fakeFirestore.getDoc(
+      "stripe_webhook_events",
+      "evt_retry_1",
+    );
+    const pago = fakeFirestore.getDoc("pagos", "pago_1");
+    const orden = fakeFirestore.getDoc("ordenes", "orden_1");
+
+    expect(eventDoc).toBeDefined();
+    expect(eventDoc!.status).toBe("processed");
+    expect(eventDoc!.retryCount).toBe(1);
+    expect(pago!.estado).toBe(EstadoPago.COMPLETADO);
+    expect(orden!.estado).toBe(EstadoOrden.CONFIRMADA);
   });
 });
