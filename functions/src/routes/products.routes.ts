@@ -126,6 +126,45 @@ router.get("/", queryController.getAll);
 
 /**
  * @swagger
+ * /api/productos/{id}/stock:
+ *   get:
+ *     summary: Consultar stock por talla de un producto
+ *     description: Retorna el inventario por talla y el stock total derivado del producto
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del producto
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     responses:
+ *       200:
+ *         description: Stock por talla obtenido exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/ProductStockBySize'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:id/stock",
+  validateParams(idParamSchema),
+  queryController.getStockBySize,
+);
+
+/**
+ * @swagger
  * /api/productos/{id}:
  *   get:
  *     summary: Obtener producto por ID
@@ -316,6 +355,13 @@ router.get(
  *             existencias: 50
  *             proveedorId: "proveedor_01"
  *             tallaIds: ["s", "m", "l", "xl"]
+ *             inventarioPorTalla:
+ *               - tallaId: "s"
+ *                 cantidad: 12
+ *               - tallaId: "m"
+ *                 cantidad: 20
+ *               - tallaId: "l"
+ *                 cantidad: 18
  *     responses:
  *       201:
  *         description: Producto creado exitosamente

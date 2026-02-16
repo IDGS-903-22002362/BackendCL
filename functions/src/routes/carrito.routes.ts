@@ -116,6 +116,7 @@ router.get("/", optionalAuthMiddleware, queryController.getCart);
  *       **Seguridad:**
  *       - El precio unitario se obtiene del servidor (precioPublico del producto), nunca del cliente
  *       - Se valida existencia, disponibilidad y stock del producto
+ *       - Si el producto maneja inventario por talla, `tallaId` es obligatorio
  *       - Cantidad máxima por producto: 10 unidades
  *
  *       **Identificación:**
@@ -175,6 +176,11 @@ router.get("/", optionalAuthMiddleware, queryController.getCart);
  *                 value:
  *                   success: false
  *                   message: 'Stock insuficiente para "Jersey Oficial". Disponible: 5, solicitado: 10'
+ *               tallaRequerida:
+ *                 summary: Talla requerida
+ *                 value:
+ *                   success: false
+ *                   message: 'Se requiere seleccionar una talla para "Jersey Oficial"'
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */

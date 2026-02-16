@@ -1,5 +1,29 @@
 import { z } from "zod";
 
+const inventarioPorTallaItemSchema = z
+  .object({
+    tallaId: z
+      .string({
+        required_error: "El ID de talla es requerido",
+        invalid_type_error: "El ID de talla debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El ID de talla no puede estar vacío"),
+    cantidad: z
+      .number({
+        required_error: "La cantidad de inventario por talla es requerida",
+        invalid_type_error: "La cantidad debe ser un número",
+      })
+      .int("La cantidad debe ser un número entero")
+      .nonnegative("La cantidad no puede ser negativa"),
+  })
+  .strict();
+
+const hasUniqueTallaIds = (items: Array<{ tallaId: string }>): boolean => {
+  const uniqueIds = new Set(items.map((item) => item.tallaId));
+  return uniqueIds.size === items.length;
+};
+
 /**
  * Schema para crear un nuevo producto
  * Valida todos los campos requeridos según el modelo Producto
@@ -72,6 +96,18 @@ export const createProductSchema = z
         invalid_type_error: "Los IDs de talla deben ser un array",
       })
       .max(50, "No se pueden asignar más de 50 tallas")
+      .optional()
+      .default([]),
+
+    inventarioPorTalla: z
+      .array(inventarioPorTallaItemSchema, {
+        invalid_type_error: "El inventario por talla debe ser un array",
+      })
+      .max(50, "No se pueden asignar más de 50 tallas de inventario")
+      .refine(
+        hasUniqueTallaIds,
+        "No se permiten tallas duplicadas en inventarioPorTalla",
+      )
       .optional()
       .default([]),
 
@@ -162,6 +198,15 @@ export const updateProductSchema = z
     tallaIds: z
       .array(z.string().min(1, "Los IDs de talla no pueden estar vacíos"))
       .max(50, "No se pueden asignar más de 50 tallas")
+      .optional(),
+
+    inventarioPorTalla: z
+      .array(inventarioPorTallaItemSchema)
+      .max(50, "No se pueden asignar más de 50 tallas de inventario")
+      .refine(
+        hasUniqueTallaIds,
+        "No se permiten tallas duplicadas en inventarioPorTalla",
+      )
       .optional(),
 
     imagenes: z
