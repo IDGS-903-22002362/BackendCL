@@ -129,3 +129,16 @@ export const listInventoryMovementsQuerySchema = z.object({
     .default(20),
   cursor: z.string().trim().min(1).max(200).optional(),
 });
+
+export const listLowStockAlertsQuerySchema = z.object({
+  productoId: z.string().trim().min(1).max(120).optional(),
+  lineaId: z.string().trim().min(1).max(120).optional(),
+  categoriaId: z.string().trim().min(1).max(120).optional(),
+  soloCriticas: z.coerce.boolean().default(false),
+  limit: z.coerce
+    .number()
+    .int("El límite debe ser un número entero")
+    .min(1, "El límite debe ser al menos 1")
+    .max(200, "El límite no puede exceder 200")
+    .default(50),
+});

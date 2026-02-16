@@ -41,6 +41,7 @@ import {
   refundPagoSchema,
 } from "../middleware/validators/pago.validator";
 import {
+  listLowStockAlertsQuerySchema,
   registerInventoryMovementSchema,
   listInventoryMovementsQuerySchema,
 } from "../middleware/validators/inventory.validator";
@@ -268,6 +269,7 @@ const swaggerDefinition = {
       ListInventoryMovementsQuery: zodToJsonSchema(
         listInventoryMovementsQuerySchema,
       ),
+      ListLowStockAlertsQuery: zodToJsonSchema(listLowStockAlertsQuerySchema),
 
       // Modelos completos de entidades
       InventoryBySizeItem: {
@@ -300,6 +302,25 @@ const swaggerDefinition = {
           inventarioPorTalla: {
             type: "array",
             items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+          stockMinimoGlobal: { type: "integer", example: 10 },
+          stockMinimoPorTalla: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tallaId: { type: "string", example: "m" },
+                minimo: { type: "integer", example: 8 },
+              },
+            },
+          },
+          alertaStockBajo: {
+            type: "object",
+            properties: {
+              activo: { type: "boolean", example: true },
+              totalAlertas: { type: "integer", example: 2 },
+              maxDeficit: { type: "integer", example: 6 },
+            },
           },
           movimientoId: { type: "string", example: "mov_abc123" },
           createdAt: {
@@ -337,6 +358,57 @@ const swaggerDefinition = {
           },
         },
       },
+      LowStockAlertBySize: {
+        type: "object",
+        properties: {
+          tallaId: { type: "string", example: "m" },
+          cantidadActual: { type: "integer", example: 2 },
+          minimo: { type: "integer", example: 8 },
+          deficit: { type: "integer", example: 6 },
+        },
+      },
+      LowStockAlertProduct: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_123" },
+          clave: { type: "string", example: "JER-001" },
+          descripcion: { type: "string", example: "Jersey Oficial" },
+          lineaId: { type: "string", example: "jersey" },
+          categoriaId: { type: "string", example: "hombre" },
+          existencias: { type: "integer", example: 4 },
+          stockMinimoGlobal: { type: "integer", example: 10 },
+          globalBajoStock: { type: "boolean", example: true },
+          tallasBajoStock: {
+            type: "array",
+            items: { $ref: "#/components/schemas/LowStockAlertBySize" },
+          },
+          totalAlertas: { type: "integer", example: 3 },
+          maxDeficit: { type: "integer", example: 7 },
+        },
+      },
+      LowStockDashboard: {
+        type: "object",
+        properties: {
+          resumen: {
+            type: "object",
+            properties: {
+              totalProductosBajoStock: { type: "integer", example: 4 },
+              totalAlertas: { type: "integer", example: 9 },
+              alertasCriticas: { type: "integer", example: 2 },
+              alertasModeradas: { type: "integer", example: 2 },
+              fechaCorte: {
+                type: "string",
+                format: "date-time",
+                example: "2026-02-16T15:00:00Z",
+              },
+            },
+          },
+          alertas: {
+            type: "array",
+            items: { $ref: "#/components/schemas/LowStockAlertProduct" },
+          },
+        },
+      },
       Product: {
         type: "object",
         properties: {
@@ -369,6 +441,17 @@ const swaggerDefinition = {
               { tallaId: "m", cantidad: 8 },
               { tallaId: "l", cantidad: 5 },
             ],
+          },
+          stockMinimoGlobal: { type: "integer", example: 10 },
+          stockMinimoPorTalla: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tallaId: { type: "string", example: "m" },
+                minimo: { type: "integer", example: 8 },
+              },
+            },
           },
           imagenes: {
             type: "array",

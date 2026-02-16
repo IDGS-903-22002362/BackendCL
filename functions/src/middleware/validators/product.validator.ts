@@ -19,6 +19,25 @@ const inventarioPorTallaItemSchema = z
   })
   .strict();
 
+const stockMinimoPorTallaItemSchema = z
+  .object({
+    tallaId: z
+      .string({
+        required_error: "El ID de talla es requerido",
+        invalid_type_error: "El ID de talla debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El ID de talla no puede estar vacío"),
+    minimo: z
+      .number({
+        required_error: "El mínimo por talla es requerido",
+        invalid_type_error: "El mínimo por talla debe ser un número",
+      })
+      .int("El mínimo por talla debe ser un número entero")
+      .nonnegative("El mínimo por talla no puede ser negativo"),
+  })
+  .strict();
+
 const hasUniqueTallaIds = (items: Array<{ tallaId: string }>): boolean => {
   const uniqueIds = new Set(items.map((item) => item.tallaId));
   return uniqueIds.size === items.length;
@@ -107,6 +126,27 @@ export const createProductSchema = z
       .refine(
         hasUniqueTallaIds,
         "No se permiten tallas duplicadas en inventarioPorTalla",
+      )
+      .optional()
+      .default([]),
+
+    stockMinimoGlobal: z
+      .number({
+        invalid_type_error: "El stock mínimo global debe ser un número",
+      })
+      .int("El stock mínimo global debe ser un número entero")
+      .nonnegative("El stock mínimo global no puede ser negativo")
+      .optional()
+      .default(5),
+
+    stockMinimoPorTalla: z
+      .array(stockMinimoPorTallaItemSchema, {
+        invalid_type_error: "El stock mínimo por talla debe ser un array",
+      })
+      .max(50, "No se pueden asignar más de 50 umbrales por talla")
+      .refine(
+        hasUniqueTallaIds,
+        "No se permiten tallas duplicadas en stockMinimoPorTalla",
       )
       .optional()
       .default([]),
@@ -206,6 +246,23 @@ export const updateProductSchema = z
       .refine(
         hasUniqueTallaIds,
         "No se permiten tallas duplicadas en inventarioPorTalla",
+      )
+      .optional(),
+
+    stockMinimoGlobal: z
+      .number({
+        invalid_type_error: "El stock mínimo global debe ser un número",
+      })
+      .int("El stock mínimo global debe ser un número entero")
+      .nonnegative("El stock mínimo global no puede ser negativo")
+      .optional(),
+
+    stockMinimoPorTalla: z
+      .array(stockMinimoPorTallaItemSchema)
+      .max(50, "No se pueden asignar más de 50 umbrales por talla")
+      .refine(
+        hasUniqueTallaIds,
+        "No se permiten tallas duplicadas en stockMinimoPorTalla",
       )
       .optional(),
 

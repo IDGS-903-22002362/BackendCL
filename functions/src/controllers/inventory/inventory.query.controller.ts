@@ -72,3 +72,42 @@ export const getMovements = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getLowStockAlerts = async (req: Request, res: Response) => {
+  try {
+    const soloCriticasQuery = req.query.soloCriticas;
+    const soloCriticas = String(soloCriticasQuery).toLowerCase() === "true";
+
+    const result = await inventoryService.listLowStockAlerts({
+      productoId:
+        typeof req.query.productoId === "string"
+          ? req.query.productoId
+          : undefined,
+      lineaId:
+        typeof req.query.lineaId === "string" ? req.query.lineaId : undefined,
+      categoriaId:
+        typeof req.query.categoriaId === "string"
+          ? req.query.categoriaId
+          : undefined,
+      soloCriticas,
+      limit:
+        typeof req.query.limit === "number"
+          ? req.query.limit
+          : Number(req.query.limit) || 50,
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: result.alertas.length,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/alertas-stock:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar alertas de stock bajo",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
