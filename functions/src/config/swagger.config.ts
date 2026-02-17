@@ -42,6 +42,7 @@ import {
 } from "../middleware/validators/pago.validator";
 import {
   listLowStockAlertsQuerySchema,
+  registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
   listInventoryMovementsQuerySchema,
 } from "../middleware/validators/inventory.validator";
@@ -265,6 +266,9 @@ const swaggerDefinition = {
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,
+      ),
+      RegisterInventoryAdjustment: zodToJsonSchema(
+        registerInventoryAdjustmentSchema,
       ),
       ListInventoryMovementsQuery: zodToJsonSchema(
         listInventoryMovementsQuerySchema,
