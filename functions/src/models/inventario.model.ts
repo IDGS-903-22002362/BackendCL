@@ -127,6 +127,21 @@ export interface RegistrarMovimientoInventarioDTO {
   usuarioId?: string;
 }
 
+export interface RegistrarAjusteInventarioDTO {
+  productoId: string;
+  tallaId?: string;
+  cantidadFisica: number;
+  motivo: string;
+  referencia?: string;
+  usuarioId?: string;
+  idempotencyKey?: string;
+}
+
+export interface RegistrarAjusteInventarioResult {
+  movimiento: MovimientoInventario;
+  reused: boolean;
+}
+
 export interface ListarMovimientosInventarioQuery {
   productoId?: string;
   tallaId?: string;

@@ -5,6 +5,8 @@ import {
   ListarAlertasStockQuery,
   ListarMovimientosInventarioQuery,
   MovimientoInventario,
+  RegistrarAjusteInventarioDTO,
+  RegistrarAjusteInventarioResult,
   RegistrarMovimientoInventarioDTO,
   TipoMovimientoInventario,
 } from "../models/inventario.model";
@@ -12,6 +14,7 @@ import productService from "./product.service";
 
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
 const ORDENES_COLLECTION = "ordenes";
+const AJUSTES_IDEMPOTENCY_COLLECTION = "inventarioAjustesIdempotency";
 
 class InventoryService {
   private async getCantidadActual(
@@ -116,6 +119,12 @@ class InventoryService {
     payload: RegistrarMovimientoInventarioDTO,
   ): Promise<MovimientoInventario> {
     const tipo = payload.tipo;
+    if (tipo === TipoMovimientoInventario.AJUSTE) {
+      throw new Error(
+        "Los ajustes de inventario deben registrarse mediante POST /api/inventario/ajustes",
+      );
+    }
+
     const tallaId = payload.tallaId?.trim();
 
     await this.validateOrdenIfNeeded(tipo, payload.ordenId);
@@ -154,6 +163,129 @@ class InventoryService {
       ordenId: payload.ordenId,
       usuarioId: payload.usuarioId,
       createdAt: stockResult.createdAt,
+    };
+  }
+
+  private buildAdjustmentIdempotencyDocId(
+    payload: RegistrarAjusteInventarioDTO,
+    idempotencyKey: string,
+  ): string {
+    const tallaKey = payload.tallaId?.trim() ?? "_";
+    const rawKey = `${payload.productoId}:${tallaKey}:${idempotencyKey}`;
+    return Buffer.from(rawKey).toString("base64url");
+  }
+
+  private async getCachedAdjustment(
+    payload: RegistrarAjusteInventarioDTO,
+    idempotencyKey: string,
+  ): Promise<MovimientoInventario | null> {
+    const idempotencyDocId = this.buildAdjustmentIdempotencyDocId(
+      payload,
+      idempotencyKey,
+    );
+
+    const snapshot = await firestoreTienda
+      .collection(AJUSTES_IDEMPOTENCY_COLLECTION)
+      .doc(idempotencyDocId)
+      .get();
+
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    const data = snapshot.data() as { movimiento?: MovimientoInventario };
+    return data?.movimiento ?? null;
+  }
+
+  private async cacheAdjustmentResult(
+    payload: RegistrarAjusteInventarioDTO,
+    idempotencyKey: string,
+    movimiento: MovimientoInventario,
+  ): Promise<void> {
+    const idempotencyDocId = this.buildAdjustmentIdempotencyDocId(
+      payload,
+      idempotencyKey,
+    );
+
+    await firestoreTienda
+      .collection(AJUSTES_IDEMPOTENCY_COLLECTION)
+      .doc(idempotencyDocId)
+      .set({
+        productoId: payload.productoId,
+        tallaId: payload.tallaId ?? null,
+        idempotencyKey,
+        movimiento,
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+  }
+
+  async registerAdjustment(
+    payload: RegistrarAjusteInventarioDTO,
+  ): Promise<RegistrarAjusteInventarioResult> {
+    const tallaId = payload.tallaId?.trim();
+    const idempotencyKey = payload.idempotencyKey?.trim();
+
+    if (idempotencyKey) {
+      const cachedMovement = await this.getCachedAdjustment(
+        {
+          ...payload,
+          tallaId,
+          idempotencyKey,
+        },
+        idempotencyKey,
+      );
+
+      if (cachedMovement) {
+        return {
+          movimiento: cachedMovement,
+          reused: true,
+        };
+      }
+    }
+
+    const { cantidadActual, tallaIdFinal } = await this.getCantidadActual(
+      payload.productoId,
+      tallaId,
+    );
+
+    const stockResult = await productService.updateStock(payload.productoId, {
+      cantidadNueva: payload.cantidadFisica,
+      tallaId: tallaIdFinal ?? undefined,
+      tipo: TipoMovimientoInventario.AJUSTE,
+      motivo: payload.motivo,
+      referencia: payload.referencia,
+      usuarioId: payload.usuarioId,
+    });
+
+    const movimiento: MovimientoInventario = {
+      id: stockResult.movimientoId,
+      tipo: TipoMovimientoInventario.AJUSTE,
+      productoId: stockResult.productoId,
+      tallaId: stockResult.tallaId,
+      cantidadAnterior: stockResult.cantidadAnterior,
+      cantidadNueva: stockResult.cantidadNueva,
+      diferencia: stockResult.cantidadNueva - cantidadActual,
+      motivo: payload.motivo,
+      referencia: payload.referencia,
+      usuarioId: payload.usuarioId,
+      createdAt: stockResult.createdAt,
+    };
+
+    if (idempotencyKey) {
+      await this.cacheAdjustmentResult(
+        {
+          ...payload,
+          tallaId,
+          idempotencyKey,
+        },
+        idempotencyKey,
+        movimiento,
+      );
+    }
+
+    return {
+      movimiento,
+      reused: false,
     };
   }
 

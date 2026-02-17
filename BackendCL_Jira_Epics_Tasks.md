@@ -1714,7 +1714,7 @@ Este documento contiene la estructura completa de épicas y tareas identificadas
 #### TASK-067: Ajuste de inventario
 
 **Tipo:** Task  
-**Estado:** 🔲 TODO  
+**Estado:** ✅ DONE
 **Descripción:** Endpoint para realizar ajustes de inventario (conteo físico).  
 **Criterios de Aceptación:**
 
