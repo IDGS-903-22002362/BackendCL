@@ -6,6 +6,7 @@ import {
 import {
   listLowStockAlertsQuerySchema,
   listInventoryMovementsQuerySchema,
+  registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
 } from "../middleware/validators/inventory.validator";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
@@ -22,12 +23,12 @@ const router = Router();
  *     description: |
  *       Registra un movimiento de inventario y actualiza stock del producto (general o por talla).
  *
- *       **Tipos soportados:** `entrada`, `salida`, `ajuste`, `venta`, `devolucion`.
+ *       **Tipos soportados:** `entrada`, `salida`, `venta`, `devolucion`.
  *
  *       **Reglas:**
- *       - `ajuste` requiere `cantidadNueva`
  *       - `entrada`, `salida`, `venta`, `devolucion` requieren `cantidad`
  *       - `venta` y `devolucion` requieren `ordenId`
+ *       - Para ajustes por conteo físico usa `POST /api/inventario/ajustes`
  *       - Solo ADMIN/EMPLEADO pueden registrar manualmente
  *     tags: [Inventory]
  *     security:
@@ -47,14 +48,6 @@ const router = Router();
  *                 tallaId: "m"
  *                 cantidad: 10
  *                 motivo: "Recepción de proveedor"
- *             ajuste:
- *               summary: Ajuste por conteo físico
- *               value:
- *                 tipo: "ajuste"
- *                 productoId: "prod_123"
- *                 cantidadNueva: 15
- *                 motivo: "Conteo físico"
- *                 referencia: "INV-2026-001"
  *     responses:
  *       201:
  *         description: Movimiento registrado exitosamente
@@ -88,6 +81,104 @@ router.post(
   requireAdmin,
   validateBody(registerInventoryMovementSchema),
   commandController.registerMovement,
+);
+
+/**
+ * @swagger
+ * /api/inventario/ajustes:
+ *   post:
+ *     summary: Registrar ajuste de inventario por conteo físico
+ *     description: |
+ *       Registra un ajuste de inventario usando `cantidadFisica` como fuente de verdad.
+ *
+ *       El servidor calcula la diferencia contra el stock actual del sistema y actualiza el inventario.
+ *
+ *       **Reglas:**
+ *       - Requiere `productoId`, `cantidadFisica` y `motivo`
+ *       - Si el producto maneja inventario por talla, `tallaId` es obligatorio
+ *       - Solo ADMIN/EMPLEADO pueden ajustar inventario
+ *       - Soporta idempotencia opcional vía header `Idempotency-Key`
+ *     tags: [Inventory]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: header
+ *         name: Idempotency-Key
+ *         required: false
+ *         description: Clave opcional para deduplicar reintentos de ajuste
+ *         schema:
+ *           type: string
+ *           minLength: 8
+ *           maxLength: 255
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RegisterInventoryAdjustment'
+ *           examples:
+ *             ajusteGeneral:
+ *               summary: Ajuste de stock general
+ *               value:
+ *                 productoId: "prod_123"
+ *                 cantidadFisica: 20
+ *                 motivo: "Conteo físico semanal"
+ *                 referencia: "INV-2026-067"
+ *             ajustePorTalla:
+ *               summary: Ajuste de stock por talla
+ *               value:
+ *                 productoId: "prod_123"
+ *                 tallaId: "m"
+ *                 cantidadFisica: 8
+ *                 motivo: "Conteo físico en almacén"
+ *     responses:
+ *       201:
+ *         description: Ajuste registrado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Ajuste de inventario registrado exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/InventoryMovement'
+ *       200:
+ *         description: Ajuste reutilizado por idempotencia
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Ajuste de inventario reutilizado por idempotencia"
+ *                 data:
+ *                   $ref: '#/components/schemas/InventoryMovement'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/ajustes",
+  authMiddleware,
+  requireAdmin,
+  validateBody(registerInventoryAdjustmentSchema),
+  commandController.registerAdjustment,
 );
 
 /**
