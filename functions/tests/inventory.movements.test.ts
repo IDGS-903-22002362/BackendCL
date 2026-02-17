@@ -286,6 +286,20 @@ describe("TASK-065 - Movimientos de inventario", () => {
     ).rejects.toThrow("ordenId es requerido");
   });
 
+  it("rechaza registrar tipo ajuste desde registerMovement", async () => {
+    await expect(
+      inventoryService.registerMovement({
+        tipo: TipoMovimientoInventario.AJUSTE,
+        productoId: "prod_1",
+        cantidadNueva: 12,
+      }),
+    ).rejects.toThrow(
+      "Los ajustes de inventario deben registrarse mediante POST /api/inventario/ajustes",
+    );
+
+    expect(updateStockMock).not.toHaveBeenCalled();
+  });
+
   it("registra venta relacionada con orden", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_2",
