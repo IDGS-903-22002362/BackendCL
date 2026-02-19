@@ -1,4 +1,4 @@
-import * as functions from "firebase-functions";
+import * as functions from "firebase-functions/v1";
 import inventoryService from "./services/inventory.service";
 import stockAlertService from "./services/stock-alert.service";
 
@@ -12,6 +12,5 @@ export const sendLowStockDailyDigest = functions.pubsub
     });
 
     await stockAlertService.notifyDailyDigest(dashboard.alertas);
-
     return null;
   });
