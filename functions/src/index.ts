@@ -19,6 +19,7 @@ import { sendLowStockDailyDigest } from "./stock-alert.cron";
 export const api = onRequest(
   {
     secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+    invoker: "public",
   },
   app,
 );
