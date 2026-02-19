@@ -1,7 +1,7 @@
-import { firestoreApp } from "../config/app.firebase";
-import { admin } from "../config/firebase.admin";
+import { authAppOficial, firestoreApp } from "../config/app.firebase";
 import { Request, Response, NextFunction } from "express";
 import { RolUsuario } from "../models/usuario.model";
+import { mapFirebaseError } from "./firebase-error.util";
 
 //Middleware de autenticacion
 export const authMiddleware = async (
@@ -17,7 +17,7 @@ export const authMiddleware = async (
   }
 
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await authAppOficial.verifyIdToken(token);
 
     const snapshot = await firestoreApp
       .collection("usuariosApp")
@@ -37,8 +37,21 @@ export const authMiddleware = async (
 
     next();
     return;
-  } catch {
-    res.status(401).json({ message: "Token inválido" });
+  } catch (error) {
+    const mapped = mapFirebaseError(error, {
+      unauthorizedMessage: "Token inválido o expirado",
+      forbiddenMessage: "No autorizado para acceder a app-oficial-leon",
+      notFoundMessage: "Usuario no encontrado",
+      internalMessage: "Error de autenticación",
+    });
+
+    console.error("❌ authMiddleware error", {
+      code: mapped.code,
+      status: mapped.status,
+      route: req.originalUrl,
+    });
+
+    res.status(mapped.status).json({ message: mapped.message });
     return;
   }
 };
@@ -63,7 +76,7 @@ export const optionalAuthMiddleware = async (
   }
 
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
+    const decoded = await authAppOficial.verifyIdToken(token);
 
     const snapshot = await firestoreApp
       .collection("usuariosApp")
