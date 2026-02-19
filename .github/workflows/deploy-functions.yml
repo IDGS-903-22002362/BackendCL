@@ -31,7 +31,6 @@ jobs:
       - name: Create Service Account Files
         run: |
           echo '${{ secrets.SERVICE_ACCOUNT_KEY }}' > serviceAccountKey.json
-          echo '${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}' > serviceAccountAppOficial.json
 
       - name: Verify Service Account Files
         run: |
@@ -39,17 +38,10 @@ jobs:
             echo "Error: serviceAccountKey.json is empty or missing"
             exit 1
           fi
-          if [ ! -s serviceAccountAppOficial.json ]; then
-            echo "Error: serviceAccountAppOficial.json is empty or missing"
-            exit 1
-          fi
           echo "✓ Service account files created successfully"
-          ls -lh serviceAccount*.json
+          ls -lh serviceAccountKey.json
 
       - name: Build Functions
-        env:
-          SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
-          SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           cd functions
           npm run build
@@ -57,11 +49,10 @@ jobs:
       - name: Deploy to Firebase
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
-          SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
-          SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
-        run: firebase deploy --only functions
+        run: firebase deploy --only functions --project e-comerce-leon --non-interactive
 
   notify:
+    needs: deploy
     runs-on: ubuntu-latest
     steps:
       - name: Send notification to Discord
