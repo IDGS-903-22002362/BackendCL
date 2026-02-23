@@ -9,7 +9,7 @@
     "lint": "echo \"Lint disabled\"",
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "dev": "cross-env NODE_ENV=development IS_LOCAL=true STORAGE_BUCKET=e-comerce-leon.appspot.com PORT=3000 ts-node-dev --respawn --transpile-only src/dev.ts",
+    "dev": "cross-env NODE_ENV=development IS_LOCAL=true STORAGE_BUCKET=e-comerce-leon.firebasestorage.app PORT=3000 ts-node-dev --respawn --transpile-only src/dev.ts",
     "dev:watch": "cross-env NODE_ENV=development PORT=3000 nodemon --watch src --ext ts --exec \"npm run build && node lib/index.js\"",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
@@ -19,7 +19,9 @@
     "logs": "firebase functions:log"
   },
   "dependencies": {
+    "@types/busboy": "^1.5.4",
     "axios": "^1.13.5",
+    "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
