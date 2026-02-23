@@ -5,6 +5,7 @@
 
 import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
+import { ActualizarNoticiaDTO, CrearNoticiaDTO } from "../models/noticias.dto";
 import { Noticia } from "../models/noticias.model";
 import iaService from "./ai.service";
 
@@ -18,95 +19,67 @@ const NOTICIAS_COLLECTION = "noticias";
  * Encapsula las operaciones CRUD y consultas de productos
  */
 export class NewService {
+    private collection = firestoreApp.collection(NOTICIAS_COLLECTION);
+
+    // ===============================
+    // 🔹 Helpers privados
+    // ===============================
+
+    private mapDocToNoticia(doc: FirebaseFirestore.DocumentSnapshot): Noticia {
+        const data = doc.data()!;
+
+        return {
+            id: doc.id,
+            titulo: data.titulo,
+            descripcion: data.descripcion,
+            contenido: data.contenido,
+            imagenes: data.imagenes ?? [],
+            origen: data.origen,
+            usuarioId: data.usuarioId,
+            autorNombre: data.autorNombre,
+            estatus: data.estatus,
+            createdAt: data.createdAt.toDate(),
+            updatedAt: data.updatedAt.toDate(),
+        };
+    }
+
+    private convertDatesToTimestamp(data: any) {
+        const converted = { ...data };
+
+        if (data.createdAt instanceof Date) {
+            converted.createdAt = admin.firestore.Timestamp.fromDate(data.createdAt);
+        }
+
+        if (data.updatedAt instanceof Date) {
+            converted.updatedAt = admin.firestore.Timestamp.fromDate(data.updatedAt);
+        }
+
+        return converted;
+    }
+
     /**
      * Obtiene todos los productos activos
      * @returns Promise con array de productos activos ordenados alfabéticamente
      */
     async getAllNews(): Promise<Noticia[]> {
-        try {
-            // Consultar colección de productos (sin orderBy para evitar índice compuesto)
-            const snapshot = await firestoreApp
-                .collection(NOTICIAS_COLLECTION)
-                .where("estatus", "==", true) // Filtrar solo productos activos
-                .get();
+        const snapshot = await this.collection
+            .where("estatus", "==", true)
+            .get();
 
-            // Si no hay productos, retornar array vacío
-            if (snapshot.empty) {
-                console.log("No se encontraron noticias activas");
-                return [];
-            }
-
-            // Mapear documentos a objetos Producto
-            const noticias: Noticia[] = snapshot.docs.map((doc) => {
-                const data = doc.data();
-
-                return {
-                    id: doc.id,
-                    titulo: data.titulo,
-                    descripcion: data.descripcion,
-                    contenido: data.contenido,
-                    usuarioId: data.usuarioId,
-                    autorNombre: data.autorNombre,
-                    imagenes: data.imagenes || [],
-                    likes: data.likes || 0,
-                    enlaceExterno: data.enlaceExterno,
-                    origen: data.origen,
-                    ia: data.ia,
-                    estatus: data.estatus,
-                    createdAt: data.createdAt.toDate().toISOString(),
-                    updatedAt: data.updatedAt.toDate().toISOString(),
-                } as Noticia;
-            });
-
-            // Ordenar alfabéticamente en memoria
-            noticias.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
-
-            console.log(`Se obtuvieron ${noticias.length} productos activos`);
-            return noticias;
-        } catch (error) {
-            console.error("Error al obtener productos:", error);
-            throw new Error("Error al obtener productos de la base de datos");
-        }
+        return snapshot.docs.map(doc => this.mapDocToNoticia(doc));
     }
 
     /**
-     * Obtiene un producto por su ID
+     * Obtiene una noticia por su ID
      * @param id - ID del documento en Firestore
-     * @returns Promise con el producto o null si no existe
+     * @returns Promise con la noticia o null si no existe
      */
     async getNewsById(id: string): Promise<Noticia | null> {
-        try {
-            const doc = await firestoreApp
-                .collection(NOTICIAS_COLLECTION)
-                .doc(id)
-                .get();
+        const doc = await this.collection.doc(id).get();
 
-            if (!doc.exists) {
-                console.log(`Noticia con ID ${id} no encontrada`);
-                return null;
-            }
+        if (!doc.exists) return null;
 
-            const data = doc.data()!;
-            return {
-                id: doc.id,
-                titulo: data.titulo,
-                descripcion: data.descripcion,
-                contenido: data.contenido,
-                usuarioId: data.usuarioId,
-                autorNombre: data.autorNombre,
-                imagenes: data.imagenes || [],
-                likes: data.likes || 0,
-                enlaceExterno: data.enlaceExterno,
-                origen: data.origen,
-                ia: data.ia,
-                estatus: data.estatus,
-                createdAt: data.createdAt.toDate().toISOString(),
-                updatedAt: data.updatedAt.toDate().toISOString(),
-            } as Noticia;
-        } catch (error) {
-            console.error(`❌ Error al obtener noticia ${id}:`, error);
-            throw new Error("Error al obtener la noticia");
-        }
+        return this.mapDocToNoticia(doc);
     }
 
 
@@ -114,7 +87,7 @@ export class NewService {
     /**
      * Busca noticias por texto en descripción o clave
      * @param searchTerm - Término de búsqueda
-     * @returns Promise con array de productos que coinciden
+     * @returns Promise con array de noticias que coinciden
      */
     async searchNews(searchTerm: string): Promise<Noticia[]> {
         try {
@@ -153,30 +126,31 @@ export class NewService {
     /**
      * Crea una nueva noticia
      * @param noticiaData - Datos de la noticia a crear
-     * @returns Promise con el producto creado incluyendo su ID
+     * @returns Promise con la noticia creado incluyendo su ID
      */
-    async createNew(
-        noticiaData: Omit<Noticia, "id" | "createdAt" | "updatedAt">
-    ): Promise<Noticia> {
-        try {
-            const now = admin.firestore.Timestamp.now();
+    async createNew(dto: CrearNoticiaDTO): Promise<Noticia> {
+        const now = new Date();
 
-            const docRef = await firestoreApp.collection(NOTICIAS_COLLECTION).add({
-                ...noticiaData,
-                createdAt: now,
-                updatedAt: now,
-            });
+        const noticia: Noticia = {
+            id: "",
+            titulo: dto.titulo,
+            descripcion: dto.descripcion,
+            contenido: dto.contenido,
+            imagenes: dto.imagenes ?? [],
+            origen: "app",
+            estatus: true,
+            createdAt: now,
+            updatedAt: now,
+        };
 
-            const docSnapshot = await docRef.get();
+        const docRef = await this.collection.add(
+            this.convertDatesToTimestamp(noticia)
+        );
 
-            return {
-                id: docRef.id,
-                ...(docSnapshot.data() as Omit<Noticia, "id">),
-            };
-        } catch (error) {
-            console.error("❌ Error al crear noticia:", error);
-            throw new Error("Error al crear la noticia");
-        }
+        return {
+            ...noticia,
+            id: docRef.id,
+        };
     }
 
 
@@ -188,40 +162,28 @@ export class NewService {
  */
     async updateNew(
         id: string,
-        updateData: Partial<Omit<Noticia, "id" | "createdAt" | "updatedAt">>
+        dto: ActualizarNoticiaDTO
     ): Promise<Noticia> {
-        try {
-            const docRef = firestoreApp
-                .collection(NOTICIAS_COLLECTION)
-                .doc(id);
 
-            const snapshot = await docRef.get();
+        const docRef = this.collection.doc(id);
+        const snapshot = await docRef.get();
 
-            if (!snapshot.exists) {
-                throw new Error(`Noticia con ID ${id} no encontrada`);
-            }
-
-            const now = admin.firestore.Timestamp.now();
-
-            await docRef.update({
-                ...updateData,
-                updatedAt: now,
-            });
-
-            const updatedSnapshot = await docRef.get();
-
-            return {
-                id: updatedSnapshot.id,
-                ...(updatedSnapshot.data() as Omit<Noticia, "id">),
-            };
-        } catch (error) {
-            console.error("❌ Error al actualizar noticia:", error);
-            throw new Error(
-                error instanceof Error
-                    ? error.message
-                    : "Error al actualizar la noticia"
-            );
+        if (!snapshot.exists) {
+            throw new Error(`Noticia con ID ${id} no encontrada`);
         }
+
+        const updateData = {
+            ...dto,
+            updatedAt: new Date(),
+        };
+
+        await docRef.update(
+            this.convertDatesToTimestamp(updateData)
+        );
+
+        const updatedDoc = await docRef.get();
+
+        return this.mapDocToNoticia(updatedDoc);
     }
 
 
@@ -231,48 +193,34 @@ export class NewService {
      * @returns Promise<void>
      */
     async deleteNew(id: string): Promise<void> {
-        try {
-            const docRef = firestoreApp.collection(NOTICIAS_COLLECTION).doc(id);
-            const doc = await docRef.get();
+        const docRef = this.collection.doc(id);
+        const snapshot = await docRef.get();
 
-            if (!doc.exists) {
-                throw new Error(`Noticia con ID ${id} no encontrado`);
-            }
-
-            // Soft delete: marcar como inactivo
-            const now = admin.firestore.Timestamp.now();
-            await docRef.update({
-                estatus: false,
-                updatedAt: now,
-            });
-
-            console.log(`Noticia eliminada (inactivo): ID ${id}`);
-        } catch (error) {
-            console.error("Error al eliminar noticia:", error);
-            throw new Error(
-                error instanceof Error ? error.message : "Error al eliminar la noticia"
-            );
+        if (!snapshot.exists) {
+            throw new Error(`Noticia con ID ${id} no encontrada`);
         }
+
+        await docRef.update({
+            estatus: false,
+            updatedAt: admin.firestore.Timestamp.now(),
+        });
     }
 
     async generarIAParaNoticia(id: string): Promise<void> {
-        const docRef = firestoreApp
-            .collection(NOTICIAS_COLLECTION)
-            .doc(id);
-
+        const docRef = this.collection.doc(id);
         const snapshot = await docRef.get();
 
         if (!snapshot.exists) {
             throw new Error("Noticia no encontrada");
         }
 
-        const data = snapshot.data() as Noticia;
+        const noticia = this.mapDocToNoticia(snapshot);
 
-        if (!data.contenido) {
+        if (!noticia.contenido) {
             throw new Error("La noticia no tiene contenido");
         }
 
-        const ia = await iaService.generarContenidoIA(data.contenido);
+        const ia = await iaService.generarContenidoIA(noticia.contenido);
 
         await docRef.update({
             ia,

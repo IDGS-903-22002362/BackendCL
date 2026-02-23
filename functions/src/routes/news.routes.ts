@@ -12,14 +12,14 @@ import {
     validateParams,
 } from "../middleware/validation.middleware";
 import {
-    createNewSchema,
-    updateNewSchema,
-    deleteImageSchema,
-} from "../middleware/validators/new.validator";
-import {
     idParamSchema,
     searchTermSchema,
 } from "../middleware/validators/common.validator";
+import {
+    createNewSchema,
+    updateNewSchema,
+    deleteImageSchema as deleteNewsImageSchema,
+} from "../middleware/validators/new.validator";
 
 // Configurar multer para almacenar archivos en memoria
 const upload = multer({
@@ -113,6 +113,20 @@ router.get(
     validateParams(searchTermSchema),
     queryController.search
 );
+/**
+ * @swagger
+ * /api/noticias/sync-instagram:
+ *   post:
+ *     summary: Sincroniza publicaciones de Instagram como noticias
+ *     tags: [News]
+ *     responses:
+ *       200:
+ *         description: Noticias sincronizadas correctamente
+ */
+router.post(
+    "/sync-instagram",
+    commandController.syncInstagramNoticias
+);
 
 // 3. Rutas con ID genérico (van AL FINAL)
 /**
@@ -137,20 +151,7 @@ router.post(
     validateParams(idParamSchema),
     commandController.generarIA
 );
-/**
- * @swagger
- * /api/noticias/sync-instagram:
- *   post:
- *     summary: Sincroniza publicaciones de Instagram como noticias
- *     tags: [News]
- *     responses:
- *       200:
- *         description: Noticias sincronizadas correctamente
- */
-router.post(
-    "/sync-instagram",
-    commandController.syncInstagramNoticias
-);
+
 
 
 /**
@@ -190,6 +191,35 @@ router.put(
  */
 router.delete("/:id", validateParams(idParamSchema), commandController.remove);
 
+/**
+ * @swagger
+ * /api/noticias/{id}/imagenes:
+ *   post:
+ *     summary: Subir imágenes a una noticia
+ *     tags: [News]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               imagenes:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Imágenes subidas correctamente
+ */
+
 // 4. Rutas de imágenes
 router.post(
     "/:id/imagenes",
@@ -198,10 +228,36 @@ router.post(
     commandController.uploadImages
 );
 
+/**
+ * @swagger
+ * /api/noticias/{id}/imagenes:
+ *   delete:
+ *     summary: Eliminar imagen de una noticia
+ *     tags: [News]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               imageUrl:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Imagen eliminada correctamente
+ */
+
 router.delete(
     "/:id/imagenes",
     validateParams(idParamSchema),
-    validateBody(deleteImageSchema),
+    validateBody(deleteNewsImageSchema),
     commandController.deleteImage
 );
 

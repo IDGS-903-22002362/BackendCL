@@ -30,7 +30,9 @@ export interface UsuarioApp {
   puntosActuales: number; // Saldo actual de puntos
   nivel?: string; // Nivel de lealtad (ej: "Bronce", "Plata", "Oro", "Platino")
   fechaNacimiento?: Date; // Para promociones de cumpleaños
-  perfilCompleto: boolean;
+  perfilCompleto: boolean; // Status que indica si el perfil está completado o no
+  edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
+  genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
@@ -42,6 +44,9 @@ export interface CrearUsuarioAppDTO {
   rol?: RolUsuario; // Opcional, por defecto CLIENTE
   telefono?: string;
   fechaNacimiento?: Date;
+  edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
+  genero: string // sexo de la persona.
+
 }
 
 /**

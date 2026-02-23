@@ -6,7 +6,7 @@ import { admin } from "../../config/firebase.admin";
 //auth funcionando
 export const registerOrLogin = async (req: Request, res: Response) => {
     try {
-        const { idToken, nombre, telefono, fechaNacimiento } = req.body;
+        const { idToken, nombre, telefono, fechaNacimiento, genero } = req.body;
 
         if (!idToken) {
             return res.status(400).json({
@@ -60,7 +60,18 @@ export const registerOrLogin = async (req: Request, res: Response) => {
             !!telefono &&
             !!fechaNacimiento;
 
-        //Crear usuario si no existe
+
+        const hoy = new Date();
+        const nacimiento = new Date(fechaNacimiento);
+
+        // Calcula la diferencia de años
+        let edad = hoy.getFullYear() - nacimiento.getFullYear();
+
+        // Ajusta si el cumpleaños no ha pasado aún en el año actual
+        const mes = hoy.getMonth() - nacimiento.getMonth();
+        if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) {
+            edad--;
+        }
         if (snapshot.empty) {
             const now = admin.firestore.Timestamp.now();
 
@@ -74,6 +85,8 @@ export const registerOrLogin = async (req: Request, res: Response) => {
                 puntosActuales: 0,
                 nivel: "Bronce",
                 perfilCompleto,
+                edad: edad ?? null,
+                genero: genero ?? null,
                 activo: true,
                 createdAt: now,
                 updatedAt: now,
@@ -103,11 +116,27 @@ export const registerOrLogin = async (req: Request, res: Response) => {
         });
     }
 };
+const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
+    if (!fechaNacimiento) return null;
+
+    const nacimiento = new Date(fechaNacimiento);
+    if (isNaN(nacimiento.getTime())) return null;
+
+    const hoy = new Date();
+    let edad = hoy.getFullYear() - nacimiento.getFullYear();
+
+    const mes = hoy.getMonth() - nacimiento.getMonth();
+    if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) {
+        edad--;
+    }
+
+    return edad;
+};
 
 export const socialLogin = async (req: Request, res: Response) => {
     try {
         //Solo recibimos el token
-        const { idToken } = req.body;
+        const { idToken, genero, fechaNacimiento } = req.body;
 
         if (!idToken) {
             return res.status(400).json({
@@ -167,7 +196,8 @@ export const socialLogin = async (req: Request, res: Response) => {
 
         let usuario;
 
-        //Crear usuario si no existe
+        const edad = calcularEdad(fechaNacimiento);
+
         if (snapshot.empty) {
             const now = admin.firestore.Timestamp.now();
 
@@ -179,6 +209,9 @@ export const socialLogin = async (req: Request, res: Response) => {
                 puntosActuales: 0,
                 nivel: "Bronce",
                 perfilCompleto: false,
+                fechaNacimiento: fechaNacimiento ?? null,
+                edad,
+                genero: genero ?? null,
                 activo: true,
                 createdAt: now,
                 updatedAt: now,
