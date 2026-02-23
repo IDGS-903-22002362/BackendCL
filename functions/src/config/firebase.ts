@@ -31,7 +31,7 @@ let tiendaApp = admin.apps.find((app) => app?.name === "TIENDA_APP");
 if (!tiendaApp) {
   const config: any = {
     projectId: "e-comerce-leon",
-    storageBucket: "e-comerce-leon.appspot.com",
+    storageBucket: "e-comerce-leon.firebasestorage.app",
   };
 
   // Solo agregar credenciales si no estamos en Cloud Functions

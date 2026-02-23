@@ -46,6 +46,11 @@ import {
   registerInventoryMovementSchema,
   listInventoryMovementsQuerySchema,
 } from "../middleware/validators/inventory.validator";
+import {
+  createNewSchema,
+  updateNewSchema,
+  deleteImageSchema as deleteNewsImageSchema,
+} from "../middleware/validators/new.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -107,6 +112,10 @@ const swaggerDefinition = {
     {
       name: "Sizes",
       description: "Gestión de tallas",
+    },
+    {
+      name: "News",
+      description: "Gestión de noticias del sistema",
     },
     {
       name: "Users",
@@ -236,6 +245,10 @@ const swaggerDefinition = {
       UpdateProduct: zodToJsonSchema(updateProductSchema),
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
+
+      CreateNews: zodToJsonSchema(createNewSchema),
+      UpdateNews: zodToJsonSchema(updateNewSchema),
+      DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
 
       CreateCategory: zodToJsonSchema(createCategorySchema),
       UpdateCategory: zodToJsonSchema(updateCategorySchema),
@@ -472,6 +485,38 @@ const swaggerDefinition = {
             type: "string",
             format: "date-time",
             example: "2024-01-20T14:20:00Z",
+          },
+        },
+      },
+      News: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "news_12345" },
+          titulo: { type: "string", example: "Nuevo fichaje del Club León" },
+          descripcion: { type: "string", example: "El club anuncia nuevo jugador" },
+          contenido: { type: "string", example: "Contenido completo de la noticia..." },
+          imagenes: {
+            type: "array",
+            items: { type: "string", format: "uri" },
+            example: ["https://storage.googleapis.com/.../imagen.jpg"],
+          },
+          origen: {
+            type: "string",
+            enum: ["app", "instagram", "facebook", "x", "youtube"],
+            example: "app",
+          },
+          usuarioId: { type: "string", nullable: true },
+          autorNombre: { type: "string", nullable: true },
+          estatus: { type: "boolean", example: true },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-02-23T15:00:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-02-23T15:10:00Z",
           },
         },
       },

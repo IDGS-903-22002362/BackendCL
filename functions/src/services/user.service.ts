@@ -55,7 +55,10 @@ export class UserAppService {
           nivel: data.nivel,
           fechaNacimiento: data.fechaNacimiento,
           perfilCompleto: data.perfilCompleto,
+          edad: data.edad,
+          genero: data.genero,
           activo: data.activo,
+
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         } as UsuarioApp;
@@ -127,12 +130,14 @@ export class UserAppService {
         nivel: data.nivel,
         fechaNacimiento: data.fechaNacimiento,
         perfilCompleto: data.perfilCompleto,
+        edad: data.edad,
+        genero: data.genero,
         activo: data.activo,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       } as UsuarioApp;
     } catch (error) {
-      console.error(`❌ Error al obtener usuario ${id}:`, error);
+      console.error(`Error al obtener usuario ${id}:`, error);
       throw new Error("Error al obtener el usuario");
     }
   }
@@ -246,7 +251,7 @@ export class UserAppService {
 
       return usuarios;
     } catch (error) {
-      console.error("❌ Error al buscar usuarios:", error);
+      console.error("Error al buscar usuarios:", error);
       throw new Error("Error al buscar usuarios");
     }
   }
@@ -271,6 +276,8 @@ export class UserAppService {
         puntosActuales: 0,
         nivel: "Bronce",
         perfilCompleto: true,
+        edad: usuarioData.edad,
+        genero: usuarioData.genero,
         activo: true,
         createdAt: now,
         updatedAt: now,
@@ -282,7 +289,7 @@ export class UserAppService {
       }
       console.log("CREANDO USUARIO CON UID:", usuarioData.uid);
 
-      // 🔥 AQUÍ EL CAMBIO IMPORTANTE
+      // Aqui se hace la asignación del mismo uid en el id
       const docRef = firestoreApp
         .collection(USUARIOSAPP_COLLECTION)
         .doc(usuarioData.uid);
@@ -295,7 +302,7 @@ export class UserAppService {
       } as UsuarioApp;
 
     } catch (error) {
-      console.error("❌ Error al crear usuario:", error);
+      console.error(" Error al crear usuario:", error);
       throw new Error(
         error instanceof Error ? error.message : "Error al crear el usuario",
       );

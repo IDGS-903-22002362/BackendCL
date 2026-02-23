@@ -107,15 +107,61 @@ export const update = async (req: Request, res: Response) => {
         });
     }
 };
-export const completarPerfil = async (req: Request, res: Response) => {
-    try {
 
-        const uid = (req as any).user.uid; // viene del middleware auth
-        const data = req.body;
+
+export const actualizarPerfil = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const { telefono } = req.body;
 
         const usuario = await userAppService.updateByUid(uid, {
-            telefono: data.telefono,
-            fechaNacimiento: data.fechaNacimiento,
+            telefono
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: usuario
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Error actualizando perfil"
+        });
+    }
+};
+
+
+
+const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
+    if (!fechaNacimiento) return null;
+
+    const nacimiento = new Date(fechaNacimiento);
+    if (isNaN(nacimiento.getTime())) return null;
+
+    const hoy = new Date();
+    let edad = hoy.getFullYear() - nacimiento.getFullYear();
+
+    const mes = hoy.getMonth() - nacimiento.getMonth();
+    if (mes < 0 || (mes === 0 && hoy.getDate() < nacimiento.getDate())) {
+        edad--;
+    }
+
+    return edad;
+};
+
+export const completarPerfil = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const { telefono, fechaNacimiento, genero } = req.body;
+
+        const edad = calcularEdad(fechaNacimiento);
+
+        const usuario = await userAppService.updateByUid(uid, {
+            telefono,
+            fechaNacimiento,
+            genero,
+            edad,
             perfilCompleto: true
         });
 
@@ -131,6 +177,7 @@ export const completarPerfil = async (req: Request, res: Response) => {
         });
     }
 };
+
 
 
 export const remove = async (req: Request, res: Response) => {

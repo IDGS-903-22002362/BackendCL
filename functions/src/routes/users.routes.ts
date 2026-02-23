@@ -451,6 +451,12 @@ router.put(
   commandController.completarPerfil,
 );
 
+router.put(
+  "/actualizar-perfil",
+  authMiddleware,
+  commandController.actualizarPerfil,
+)
+
 /**
  * @swagger
  * /api/usuarios/{id}:
