@@ -29,9 +29,13 @@ if (!isCloudFunction) {
 let tiendaApp = admin.apps.find((app) => app?.name === "TIENDA_APP");
 
 if (!tiendaApp) {
+  const projectId = process.env.FIREBASE_PROJECT_ID || "e-comerce-leon";
+  const storageBucket =
+    process.env.STORAGE_BUCKET || `${projectId}.firebasestorage.app`;
+
   const config: any = {
-    projectId: "e-comerce-leon",
-    storageBucket: "e-comerce-leon.firebasestorage.app",
+    projectId,
+    storageBucket,
   };
 
   // Solo agregar credenciales si no estamos en Cloud Functions
