@@ -10,16 +10,18 @@
  * del entorno de Firebase.
  */
 
-import * as functions from "firebase-functions";
+import { onRequest } from "firebase-functions/v2/https";
 import app from "./app";
 import { sendLowStockDailyDigest } from "./stock-alert.cron";
 
 // Exportar la API de Express como una Cloud Function HTTPS
 // Los secrets se inyectan automáticamente como process.env.* en runtime
-export const api = functions
-  .runWith({
+export const api = onRequest(
+  {
     secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
-  })
-  .https.onRequest(app);
+    invoker: "public",
+  },
+  app,
+);
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;

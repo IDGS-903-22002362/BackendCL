@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
 import ordenService from "../../services/orden.service";
 import { RolUsuario } from "../../models/usuario.model";
+import { mapFirebaseError } from "../../utils/firebase-error.util";
 
 /**
  * Controller: Products Query (Lectura)
@@ -16,11 +17,22 @@ export const getAll = async (_req: Request, res: Response) => {
       data: usuarios,
     });
   } catch (error) {
-    console.error("Error en GET /api/usuarios:", error);
-    res.status(500).json({
+    const mapped = mapFirebaseError(error, {
+      unauthorizedMessage: "No autorizado",
+      forbiddenMessage:
+        "Sin permisos para acceder a usuarios de app-oficial-leon",
+      notFoundMessage: "Usuarios no encontrados",
+      internalMessage: "Error al obtener los usuarios",
+    });
+
+    console.error("Error en GET /api/usuarios:", {
+      code: mapped.code,
+      status: mapped.status,
+    });
+
+    res.status(mapped.status).json({
       success: false,
-      message: "Error al obtener los usuarios",
-      error: error instanceof Error ? error.message : "Error desconocido",
+      message: mapped.message,
     });
   }
 };
@@ -42,11 +54,21 @@ export const getById = async (req: Request, res: Response) => {
       data: usuario,
     });
   } catch (error) {
-    console.error("Error en GET /api/usuarios/:id:", error);
-    return res.status(500).json({
+    const mapped = mapFirebaseError(error, {
+      unauthorizedMessage: "No autorizado",
+      forbiddenMessage: "Sin permisos para acceder a este usuario",
+      notFoundMessage: `Usuario con ID ${req.params.id} no encontrado`,
+      internalMessage: "Error al obtener el usuario",
+    });
+
+    console.error("Error en GET /api/usuarios/:id:", {
+      code: mapped.code,
+      status: mapped.status,
+    });
+
+    return res.status(mapped.status).json({
       success: false,
-      message: "Error al obtener el usuario",
-      error: error instanceof Error ? error.message : "Error desconocido",
+      message: mapped.message,
     });
   }
 };
@@ -104,11 +126,21 @@ export const search = async (req: Request, res: Response) => {
       data: usuarios,
     });
   } catch (error) {
-    console.error("Error en GET /api/usuarios/buscar/:termino:", error);
-    res.status(500).json({
+    const mapped = mapFirebaseError(error, {
+      unauthorizedMessage: "No autorizado",
+      forbiddenMessage: "Sin permisos para buscar usuarios",
+      notFoundMessage: "No se encontraron usuarios",
+      internalMessage: "Error al buscar usuarios",
+    });
+
+    console.error("Error en GET /api/usuarios/buscar/:termino:", {
+      code: mapped.code,
+      status: mapped.status,
+    });
+
+    res.status(mapped.status).json({
       success: false,
-      message: "Error al buscar usuarios",
-      error: error instanceof Error ? error.message : "Error desconocido",
+      message: mapped.message,
     });
   }
 };
@@ -224,11 +256,21 @@ export const getOrderHistory = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    console.error("Error en GET /api/usuarios/:id/ordenes:", error);
-    return res.status(500).json({
+    const mapped = mapFirebaseError(error, {
+      unauthorizedMessage: "No autorizado",
+      forbiddenMessage: "Sin permisos para ver historial de órdenes",
+      notFoundMessage: "Órdenes no encontradas",
+      internalMessage: "Error al obtener el historial de órdenes",
+    });
+
+    console.error("Error en GET /api/usuarios/:id/ordenes:", {
+      code: mapped.code,
+      status: mapped.status,
+    });
+
+    return res.status(mapped.status).json({
       success: false,
-      message: "Error al obtener el historial de órdenes",
-      error: error instanceof Error ? error.message : "Error desconocido",
+      message: mapped.message,
     });
   }
 };

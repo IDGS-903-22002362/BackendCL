@@ -5,7 +5,6 @@
  */
 
 import { Router } from "express";
-import multer from "multer";
 import * as queryController from "../controllers/products/products.query.controller";
 import * as commandController from "../controllers/products/products.command.controller";
 import * as debugController from "../controllers/products/products.debug.controller";
@@ -25,23 +24,8 @@ import {
   categoriaIdParamSchema,
   lineaIdParamSchema,
 } from "../middleware/validators/common.validator";
+import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
-
-// Configurar multer para almacenar archivos en memoria
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 5 * 1024 * 1024, // Límite de 5MB por archivo
-  },
-  fileFilter: (_req, file, cb) => {
-    // Aceptar solo imágenes
-    if (file.mimetype.startsWith("image/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Solo se permiten archivos de imagen"));
-    }
-  },
-});
 
 const router = Router();
 
@@ -635,7 +619,11 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
 router.post(
   "/:id/imagenes",
   validateParams(idParamSchema),
-  upload.array("imagenes", 5),
+  parseMultipartImages({
+    fieldName: "imagenes",
+    maxFiles: 5,
+    maxFileSizeBytes: 5 * 1024 * 1024,
+  }),
   commandController.uploadImages,
 );
 
