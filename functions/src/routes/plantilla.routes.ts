@@ -1,25 +1,25 @@
 import { Router } from "express";
 import * as queryController from "../controllers/plantilla/plantilla.query.controller";
 import { validateParams } from "../middleware/validation.middleware";
-import { jugadorParamSchema } from "../middleware/validators/common.validator";
+import { idParamSchema } from "../middleware/validators/common.validator";
 
 const router = Router();
 
 /**
  * @swagger
- * /api/plantilla/{jugador}:
+ * /api/plantilla/{id}:
  *   get:
- *     summary: Obtener fotos de un jugador de la plantilla
- *     description: Lista las imágenes almacenadas en Firebase Storage bajo plantilla/{jugador}/ y retorna un objeto agrupado por nombre de jugador.
+ *     summary: Obtener fotos de un jugador de la plantilla por ID
+ *     description: Lista las imágenes almacenadas en Firebase Storage bajo plantilla/{id}/ y retorna un objeto agrupado por el ID del jugador.
  *     tags: [Plantilla]
  *     parameters:
  *       - in: path
- *         name: jugador
+ *         name: id
  *         required: true
- *         description: Nombre de carpeta del jugador en Storage
+ *         description: ID del jugador
  *         schema:
  *           type: string
- *           example: "barreiro"
+ *           example: "117808"
  *     responses:
  *       200:
  *         description: Fotos obtenidas exitosamente
@@ -39,18 +39,18 @@ const router = Router();
  *                       type: string
  *                       format: uri
  *                   example:
- *                     barreiro:
- *                       - https://storage.googleapis.com/e-comerce-leon.firebasestorage.app/plantilla/barreiro/foto1.jpg
- *                       - https://storage.googleapis.com/e-comerce-leon.firebasestorage.app/plantilla/barreiro/foto2.jpg
+ *                     "117808":
+ *                       - https://storage.googleapis.com/e-comerce-leon.firebasestorage.app/plantilla/117808/foto1.jpg
+ *                       - https://storage.googleapis.com/e-comerce-leon.firebasestorage.app/plantilla/117808/foto2.jpg
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
 router.get(
-  "/:jugador",
-  validateParams(jugadorParamSchema),
-  queryController.getFotosPorJugador,
+  "/:id",
+  validateParams(idParamSchema),
+  queryController.getFotosPorId,
 );
 
 export default router;
