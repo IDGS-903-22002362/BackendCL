@@ -13,15 +13,16 @@ export const syncInstagramPosts = onSchedule("every 30 minutes", async () => {
     if ((await ref.get()).exists) continue;
 
     await ref.set({
+      id: `ig_${post.id}`,
       titulo: post.caption?.slice(0, 80) ?? "Publicación de Instagram",
       descripcion: "Publicación de Instagram",
       contenido: post.caption ?? "",
-      imagenes: post.media_url ? [post.media_url] : [],
+      imagenes: post.mediaUrl ? [post.mediaUrl] : [],
       enlaceExterno: post.permalink,
       origen: "instagram",
       estatus: true,
-      createdAt: firestore.Timestamp.now(),
-      updatedAt: firestore.Timestamp.now(),
+      createdAt: post.timestamp,
+      updatedAt: new Date().toISOString(),
     });
     await newService.generarIAParaNoticia(ref.id);
   }

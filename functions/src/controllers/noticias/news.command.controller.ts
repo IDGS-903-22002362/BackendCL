@@ -231,40 +231,36 @@ export const generarIA = async (req: Request, res: Response) => {
 
 export const syncInstagramNoticias = async (_req: Request, res: Response) => {
   try {
-    const posts = await instagramService.obtenerPublicaciones();
+    // 1. Usamos el servicio centralizado que ya mapea todo a STRING
+    const postsMapeados = await instagramService.obtenerPublicaciones();
 
     const batch = firestoreApp.batch();
     const noticiasRef = firestoreApp.collection("noticias");
 
-    for (const post of posts) {
-      if (!post.caption) continue;
+    for (const data of postsMapeados) {
+      // Omitimos si no hay contenido (por seguridad)
+      if (!data.contenido) continue;
 
-      const ia = await iaService.generarContenidoIA(post.caption);
+      const docRef = noticiasRef.doc(data.id);
 
-      const docRef = noticiasRef.doc(`ig_${post.id}`);
-
-      batch.set(docRef, {
-        titulo: ia?.tituloIA ?? "Publicación de Instagram",
-        descripcion: "Instagram",
-        contenido: post.caption,
-        imagenes: post.media_url ? [post.media_url] : [],
-        origen: "instagram",
-        enlaceExterno: post.permalink,
-        ia,
-        estatus: true,
-        createdAt: admin.firestore.Timestamp.fromDate(new Date(post.timestamp)),
-        updatedAt: admin.firestore.Timestamp.now(),
-      });
+      // 2. Insertamos el objeto 'data' tal cual viene del servicio
+      // Esto asegura que createdAt sea String y existan todos los campos
+      batch.set(docRef, data, { merge: true });
     }
 
     await batch.commit();
 
-    res.json({ success: true, count: posts.length });
+    return res.json({
+      success: true,
+      message: "Sincronización completada con formato unificado",
+      count: postsMapeados.length
+    });
   } catch (error) {
+    // Agregamos todas las propiedades que tu interfaz ErrorMappingOptions exige
     const mapped = mapFirebaseError(error, {
-      unauthorizedMessage: "No autorizado",
-      forbiddenMessage: "Sin permisos para sincronizar noticias",
-      notFoundMessage: "No se encontraron publicaciones para sincronizar",
+      unauthorizedMessage: "No autorizado para sincronizar",
+      forbiddenMessage: "Sin permisos para esta operación",
+      notFoundMessage: "No se encontraron publicaciones",
       internalMessage: "Error en sincronización de Instagram",
     });
 
@@ -273,7 +269,7 @@ export const syncInstagramNoticias = async (_req: Request, res: Response) => {
       status: mapped.status,
     });
 
-    res.status(mapped.status).json({
+    return res.status(mapped.status).json({
       success: false,
       message: mapped.message,
     });
