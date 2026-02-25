@@ -16,11 +16,11 @@ class PlantillaService {
 
   /**
    * Obtiene las fotos de un jugador desde Firebase Storage
-   * en la carpeta plantilla/{jugador}/
+   * en la carpeta plantilla/{id}/
    */
-  async getFotosPorJugador(jugador: string): Promise<Record<string, string[]>> {
-    const jugadorNormalizado = jugador.trim().toLowerCase();
-    const prefix = `plantilla/${jugadorNormalizado}/`;
+  async getFotosPorId(id: string): Promise<Record<string, string[]>> {
+    const idNormalizado = id.trim();
+    const prefix = `plantilla/${idNormalizado}/`;
 
     const [files] = await this.bucket.getFiles({ prefix });
 
@@ -39,7 +39,7 @@ class PlantillaService {
       );
 
     return {
-      [jugadorNormalizado]: fotos,
+      [idNormalizado]: fotos,
     };
   }
 
