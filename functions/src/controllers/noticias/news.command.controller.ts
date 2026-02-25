@@ -231,6 +231,7 @@ export const generarIA = async (req: Request, res: Response) => {
 
 export const syncInstagramNoticias = async (_req: Request, res: Response) => {
   try {
+    //Cambio con respecto a la nueva API
     // 1. Usamos el servicio centralizado que ya mapea todo a STRING
     const postsMapeados = await instagramService.obtenerPublicaciones();
 
