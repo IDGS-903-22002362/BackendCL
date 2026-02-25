@@ -2,8 +2,6 @@ import { Request, Response } from "express";
 import newService from "../../services/new.service";
 import storageService from "../../services/storage.service";
 import instagramService from "../../services/instagram.service";
-import iaService from "../../services/ai.service";
-import { admin } from "../../config/firebase.admin";
 import { firestoreApp } from "../../config/app.firebase";
 import { mapFirebaseError } from "../../utils/firebase-error.util";
 
