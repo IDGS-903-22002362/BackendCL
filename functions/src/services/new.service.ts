@@ -28,6 +28,17 @@ export class NewService {
     private mapDocToNoticia(doc: FirebaseFirestore.DocumentSnapshot): Noticia {
         const data = doc.data()!;
 
+        // Función interna para normalizar la fecha sin que truene
+        const normalizarFecha = (fecha: any): Date => {
+            if (!fecha) return new Date();
+            // Si es un Timestamp de Firebase (tiene el método toDate)
+            if (typeof fecha.toDate === 'function') return fecha.toDate();
+            // Si ya es un objeto Date
+            if (fecha instanceof Date) return fecha;
+            // Si es un String (como los de Instagram) o un número
+            return new Date(fecha);
+        };
+
         return {
             id: doc.id,
             titulo: data.titulo,
@@ -38,29 +49,24 @@ export class NewService {
             usuarioId: data.usuarioId,
             autorNombre: data.autorNombre,
             estatus: data.estatus,
-            createdAt: data.createdAt.toDate(),
-            updatedAt: data.updatedAt.toDate(),
-        };
+            createdAt: normalizarFecha(data.createdAt),
+            updatedAt: normalizarFecha(data.updatedAt),
+            // Asegúrate de incluir los campos nuevos si los necesitas en el modelo
+            ...data
+        } as Noticia;
     }
 
     private convertDatesToTimestamp(data: any) {
         const converted = { ...data };
-
         if (data.createdAt instanceof Date) {
             converted.createdAt = admin.firestore.Timestamp.fromDate(data.createdAt);
         }
-
         if (data.updatedAt instanceof Date) {
             converted.updatedAt = admin.firestore.Timestamp.fromDate(data.updatedAt);
         }
-
         return converted;
     }
 
-    /**
-     * Obtiene todos los productos activos
-     * @returns Promise con array de productos activos ordenados alfabéticamente
-     */
     async getAllNews(): Promise<Noticia[]> {
         const snapshot = await this.collection
             .where("estatus", "==", true)
@@ -69,57 +75,30 @@ export class NewService {
         return snapshot.docs.map(doc => this.mapDocToNoticia(doc));
     }
 
-    /**
-     * Obtiene una noticia por su ID
-     * @param id - ID del documento en Firestore
-     * @returns Promise con la noticia o null si no existe
-     */
     async getNewsById(id: string): Promise<Noticia | null> {
         const doc = await this.collection.doc(id).get();
-
         if (!doc.exists) return null;
-
         return this.mapDocToNoticia(doc);
     }
 
-
-
-    /**
-     * Busca noticias por texto en descripción o clave
-     * @param searchTerm - Término de búsqueda
-     * @returns Promise con array de noticias que coinciden
-     */
     async searchNews(searchTerm: string): Promise<Noticia[]> {
         try {
-            // Nota: Firestore no tiene búsqueda full-text nativa
-            // Esta es una implementación básica que busca por inicio de descripción
-            // Para búsqueda más avanzada, considerar usar Algolia o similar
-
             const searchTermLower = searchTerm.toLowerCase();
-
-            const snapshot = await firestoreApp
-                .collection(NOTICIAS_COLLECTION)
+            const snapshot = await this.collection // Usar this.collection es más limpio
                 .where("estatus", "==", true)
                 .get();
 
-            const noticias: Noticia[] = snapshot.docs
-                .map(
-                    (doc) =>
-                    ({
-                        id: doc.id,
-                        ...doc.data(),
-                    } as Noticia)
-                )
+            // CORRECCIÓN AQUÍ: Usamos mapDocToNoticia para que las fechas no rompan
+            return snapshot.docs
+                .map(doc => this.mapDocToNoticia(doc))
                 .filter(
-                    (producto) =>
-                        producto.descripcion.toLowerCase().includes(searchTermLower) ||
-                        producto.titulo.toLowerCase().includes(searchTermLower)
+                    (noticia) =>
+                        noticia.descripcion?.toLowerCase().includes(searchTermLower) ||
+                        noticia.titulo?.toLowerCase().includes(searchTermLower)
                 );
-
-            return noticias;
         } catch (error) {
-            console.error("❌ Error al buscar productos:", error);
-            throw new Error("Error al buscar productos");
+            console.error("❌ Error al buscar noticias:", error);
+            throw new Error("Error al buscar noticias");
         }
     }
 

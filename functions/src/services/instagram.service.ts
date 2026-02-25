@@ -1,32 +1,48 @@
 import axios from "axios";
 
-const IG_BASE = "https://graph.facebook.com/v24.0";
-
-const IG_USER_ID = process.env.INSTAGRAM_USER_ID!;
-const ACCESS_TOKEN = process.env.INSTAGRAM_ACCESS_TOKEN!;
+const BEHOLD_URL = "https://feeds.behold.so/v9y2eum5P47QF0IYseVb";
 
 class InstagramService {
     async obtenerPublicaciones() {
-        console.log("IG_USER_ID:", IG_USER_ID);
-        console.log("ACCESS_TOKEN:", ACCESS_TOKEN ? "OK" : "MISSING");
-
         try {
-            const response = await axios.get(
-                `${IG_BASE}/${IG_USER_ID}/media`,
-                {
-                    params: {
-                        fields: "id,caption,media_type,media_url,permalink,timestamp",
-                        access_token: ACCESS_TOKEN,
-                    },
+            const response = await axios.get(BEHOLD_URL);
+            const posts = response.data.posts || [];
+
+            // Retornamos los posts ya mapeados al formato de tu DB
+            return posts.map((post: any) => {
+                const noticiaId = `ig_${post.id}`;
+
+                // Lógica de imágenes centralizada
+                let listaImagenes: string[] = [];
+                if (post.mediaType === "CAROUSEL_ALBUM" && Array.isArray(post.children)) {
+                    listaImagenes = post.children.map((child: any) => String(child.mediaUrl));
+                } else {
+                    const urlPrincipal = post.mediaUrl || post.thumbnailUrl;
+                    if (urlPrincipal) listaImagenes.push(String(urlPrincipal));
                 }
-            );
 
-            console.log("Instagram response OK");
-            return response.data.data;
-
+                return {
+                    id: noticiaId,
+                    titulo: post.caption?.split('\n')[0].slice(0, 80) || "Publicación de Instagram",
+                    descripcion: "Instagram",
+                    contenido: post.caption || "",
+                    tipo: String(post.mediaType || "IMAGE"),
+                    esReel: post.isReel === true,
+                    imagenes: listaImagenes,
+                    videoUrl: post.mediaType === "VIDEO" ? (post.mediaUrl || "") : "",
+                    thumbnail: post.thumbnailUrl || post.mediaUrl || "",
+                    enlaceExterno: post.permalink || "",
+                    origen: "instagram",
+                    estatus: true,
+                    // Forzamos String para evitar el objeto Timestamp de Firebase
+                    createdAt: String(post.timestamp),
+                    updatedAt: new Date().toISOString(),
+                    ia: null
+                };
+            });
         } catch (error: any) {
-            console.error("Instagram API ERROR FULL:", error.response?.data);
-            throw error;
+            console.error("Behold API ERROR:", error.message);
+            return [];
         }
     }
 }
