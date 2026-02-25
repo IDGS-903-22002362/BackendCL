@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BEHOLD_URL = "https://feeds.behold.so/v9y2eum5P47QF0IYseVb";
+const BEHOLD_URL = "https://feeds.behold.so/NzIdedricsSrXPcg3VKG";
 
 class InstagramService {
     async obtenerPublicaciones() {
