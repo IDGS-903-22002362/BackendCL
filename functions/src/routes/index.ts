@@ -23,6 +23,7 @@ import newsRoutes from "./news.routes";
 import carritoRoutes from "./carrito.routes";
 import pagosRoutes from "./pagos.routes";
 import inventoryRoutes from "./inventory.routes";
+import plantillaRoutes from "./plantilla.routes";
 
 const router = Router();
 
@@ -42,6 +43,7 @@ router.use("/ordenes", ordenesRoutes);
 router.use("/carrito", carritoRoutes);
 router.use("/pagos", pagosRoutes);
 router.use("/inventario", inventoryRoutes);
+router.use("/plantilla", plantillaRoutes);
 
 // Futuros módulos:
 
