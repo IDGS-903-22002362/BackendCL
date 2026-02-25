@@ -53,3 +53,22 @@ export const categoriaIdParamSchema = z.object({
     .min(1, "El ID de categoría no puede estar vacío")
     .max(100, "El ID de categoría es demasiado largo"),
 });
+
+/**
+ * Schema para validar parámetros de jugador en rutas /plantilla/:jugador
+ * Solo permite letras, números, guiones y guiones bajos
+ */
+export const jugadorParamSchema = z.object({
+  jugador: z
+    .string({
+      required_error: "El nombre del jugador es requerido",
+      invalid_type_error: "El nombre del jugador debe ser una cadena de texto",
+    })
+    .trim()
+    .min(1, "El nombre del jugador no puede estar vacío")
+    .max(100, "El nombre del jugador es demasiado largo")
+    .regex(
+      /^[a-zA-Z0-9_-]+$/,
+      "El nombre del jugador solo puede contener letras, números, guiones y guiones bajos",
+    ),
+});
