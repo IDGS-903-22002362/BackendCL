@@ -139,6 +139,10 @@ const swaggerDefinition = {
       description: "Gestión de movimientos de inventario y trazabilidad",
     },
     {
+      name: "Plantilla",
+      description: "Gestión de fotos de jugadores en Firebase Storage",
+    },
+    {
       name: "Authentication",
       description: "Autenticación y autorización de usuarios",
     },
@@ -493,8 +497,14 @@ const swaggerDefinition = {
         properties: {
           id: { type: "string", example: "news_12345" },
           titulo: { type: "string", example: "Nuevo fichaje del Club León" },
-          descripcion: { type: "string", example: "El club anuncia nuevo jugador" },
-          contenido: { type: "string", example: "Contenido completo de la noticia..." },
+          descripcion: {
+            type: "string",
+            example: "El club anuncia nuevo jugador",
+          },
+          contenido: {
+            type: "string",
+            example: "Contenido completo de la noticia...",
+          },
           imagenes: {
             type: "array",
             items: { type: "string", format: "uri" },
