@@ -48,15 +48,23 @@ jobs:
 
       - name: Build Functions
         env:
+          # Definimos variables intermedias para mayor seguridad
+          JWT_SECRET_VAL: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_VAL: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           cd functions
+          # Usamos las variables definidas arriba (con $) para crear el archivo .env
+          echo "JWT_SECRET=$JWT_SECRET_VAL" > .env
+          echo "JWT_EXPIRES_IN=$JWT_EXPIRES_VAL" >> .env
           npm run build
 
       - name: Deploy to Firebase
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: firebase deploy --only functions

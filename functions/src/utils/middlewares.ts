@@ -1,24 +1,32 @@
-import { authAppOficial, firestoreApp } from "../config/app.firebase";
 import { Request, Response, NextFunction } from "express";
+import jwt from "jsonwebtoken";
+import { firestoreApp } from "../config/app.firebase";
 import { RolUsuario } from "../models/usuario.model";
-import { mapFirebaseError } from "./firebase-error.util";
 
-//Middleware de autenticacion
+// Middleware de autenticación con JWT propio
 export const authMiddleware = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token = req.headers.authorization?.split("Bearer ")[1];
-
-  if (!token) {
-    res.status(401).json({ message: "No autorizado" });
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ message: "No autorizado. Token requerido" });
     return;
   }
 
-  try {
-    const decoded = await authAppOficial.verifyIdToken(token);
+  const token = authHeader.split(" ")[1];
 
+  try {
+    // Verificar el token JWT propio con la clave secreta
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      uid: string;
+      email: string;
+      rol: RolUsuario;
+      nombre: string;
+    };
+
+    // Buscar el usuario en Firestore para obtener datos adicionales
     const snapshot = await firestoreApp
       .collection("usuariosApp")
       .where("uid", "==", decoded.uid)
@@ -26,57 +34,59 @@ export const authMiddleware = async (
       .get();
 
     if (snapshot.empty) {
-      res.status(404).json({ message: "Usuario no registrado" });
+      res.status(404).json({ message: "Usuario no registrado en la base de datos" });
       return;
     }
 
+    // Combinar datos del token y de Firestore
     req.user = {
       ...decoded,
       ...snapshot.docs[0].data(),
+      uid: decoded.uid, // Asegurar que uid esté presente
     };
 
     next();
-    return;
   } catch (error) {
-    const mapped = mapFirebaseError(error, {
-      unauthorizedMessage: "Token inválido o expirado",
-      forbiddenMessage: "No autorizado para acceder a app-oficial-leon",
-      notFoundMessage: "Usuario no encontrado",
-      internalMessage: "Error de autenticación",
-    });
+    // Mapear errores de JWT
+    let status = 401;
+    let message = "Token inválido o expirado";
 
-    console.error("❌ authMiddleware error", {
-      code: mapped.code,
-      status: mapped.status,
+    if (error instanceof jwt.TokenExpiredError) {
+      message = "Token expirado";
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      message = "Token inválido";
+    }
+
+    console.error("❌ authMiddleware error:", {
+      error: error instanceof Error ? error.message : error,
       route: req.originalUrl,
     });
 
-    res.status(mapped.status).json({ message: mapped.message });
-    return;
+    res.status(status).json({ message });
   }
 };
 
 /**
- * Middleware de autenticación opcional
- * Intenta autenticar al usuario, pero si falla o no hay token,
- * continúa sin req.user (para endpoints que soportan ambos modos).
- * Ideal para carrito de compras que funciona para autenticados y anónimos.
+ * Middleware de autenticación opcional (para endpoints públicos/privados)
+ * Intenta autenticar con JWT propio; si falla o no hay token, continúa sin usuario.
  */
 export const optionalAuthMiddleware = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token = req.headers.authorization?.split("Bearer ")[1];
-
-  if (!token) {
-    // Sin token → continuar como anónimo
-    next();
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    next(); // Sin token → anónimo
     return;
   }
 
+  const token = authHeader.split(" ")[1];
+
   try {
-    const decoded = await authAppOficial.verifyIdToken(token);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      uid: string;
+    };
 
     const snapshot = await firestoreApp
       .collection("usuariosApp")
@@ -88,52 +98,36 @@ export const optionalAuthMiddleware = async (
       req.user = {
         ...decoded,
         ...snapshot.docs[0].data(),
+        uid: decoded.uid,
       };
     }
-
     next();
-    return;
   } catch {
-    // Token inválido → continuar como anónimo (no bloquear)
+    // Token inválido o expirado → anónimo
     next();
-    return;
   }
 };
 
 /**
  * Middleware de autorización para administradores
- * Verifica que el usuario autenticado tenga rol de ADMIN o EMPLEADO
- * IMPORTANTE: Debe usarse DESPUÉS de authMiddleware
- *
- * @throws 401 - Si no hay usuario autenticado
- * @throws 403 - Si el usuario no tiene permisos de administrador
+ * Verifica que el usuario autenticado tenga rol ADMIN o EMPLEADO
+ * (Debe usarse DESPUÉS de authMiddleware)
  */
 export const requireAdmin = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  // Verificar que authMiddleware se ejecutó primero
   if (!req.user) {
-    res.status(401).json({
-      success: false,
-      message: "No autorizado. Se requiere autenticación.",
-    });
+    res.status(401).json({ success: false, message: "No autenticado" });
     return;
   }
 
-  // Verificar rol del usuario
   const userRole = req.user.rol as RolUsuario;
-
   if (userRole !== RolUsuario.ADMIN && userRole !== RolUsuario.EMPLEADO) {
-    res.status(403).json({
-      success: false,
-      message: "Acceso denegado. Se requieren permisos de administrador.",
-    });
+    res.status(403).json({ success: false, message: "Acceso denegado. Se requieren permisos de administrador." });
     return;
   }
 
-  // Usuario tiene permisos, continuar
   next();
-  return;
 };
