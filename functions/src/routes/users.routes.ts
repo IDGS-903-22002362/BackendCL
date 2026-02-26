@@ -15,7 +15,7 @@ import {
 } from "../middleware/validation.middleware";
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
-
+import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
 const router = Router();
 
 // ==========================================
@@ -526,4 +526,43 @@ router.post(
 
 router.delete("/:id/imagenes", commandController.deleteImage);
  */
+
+/**
+ * @swagger
+ * /api/usuarios/me/racha/checkin:
+ *   post:
+ *     summary: Check-in diario de racha
+ *     description: Incrementa la racha del usuario si es un nuevo día
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Racha actualizada
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ */
+router.post(
+  "/me/racha/checkin",
+  authMiddleware,
+  checkInRacha
+);
+
+/**
+ * @swagger
+ * /api/usuarios/me/racha:
+ *   get:
+ *     summary: Obtener racha actual del usuario
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Racha obtenida
+ */
+router.get(
+  "/me/racha",
+  authMiddleware,
+  getRacha
+);
 export default router;
