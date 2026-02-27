@@ -48,8 +48,8 @@ export class RachaService {
             if (lastDay === prevKey) {
                 streakCount = streakCount + 1;
             } else {
-                // 3) Si no, reinicia
-                streakCount = 1;
+                // 3) Si no, reinicia en 0 (primera marca es día 0)
+                streakCount = 0;
             }
 
             streakBest = Math.max(streakBest, streakCount);
