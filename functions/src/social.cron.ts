@@ -61,7 +61,7 @@ export const syncInstagramPosts = onSchedule(
       });
     } catch (error) {
       logger.error("❌ Error sincronizando publicaciones de Instagram", error);
-      throw error; // IMPORTANTE para que Cloud Scheduler marque retry
+      throw error;
     }
   },
 );
