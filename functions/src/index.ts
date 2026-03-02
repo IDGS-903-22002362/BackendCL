@@ -25,4 +25,3 @@ export const api = onRequest(
 );
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;
-export { syncInstagramPosts } from "./social.cron";
