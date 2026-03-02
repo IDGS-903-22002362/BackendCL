@@ -26,4 +26,5 @@ export const api = onRequest(
 );
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;
+//exportación de funcion
 export const syncInstagramPostsFunction = syncInstagramPosts;
