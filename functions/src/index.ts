@@ -13,6 +13,7 @@
 import { onRequest } from "firebase-functions/v2/https";
 import app from "./app";
 import { sendLowStockDailyDigest } from "./stock-alert.cron";
+import { syncInstagramPosts } from "./social.cron";
 
 // Exportar la API de Express como una Cloud Function HTTPS
 // Los secrets se inyectan automáticamente como process.env.* en runtime
@@ -25,3 +26,4 @@ export const api = onRequest(
 );
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;
+export const syncInstagramPostsFunction = syncInstagramPosts;
