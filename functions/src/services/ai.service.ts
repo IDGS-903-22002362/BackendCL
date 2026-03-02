@@ -1,58 +1,38 @@
-import OpenAI from "openai";
-import { admin } from "../config/firebase.admin";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import dotenv from "dotenv";
 
-const openai = process.env.OPENAI_API_KEY
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-    : null;
+dotenv.config();
 
-export class IAService {
-    async generarContenidoIA(contenido: string) {
-        if (!openai) {
-            console.warn("IA desactivada: falta OPENAI_API_KEY");
-            return null;
-        }
+// Accedemos a la API KEY desde las variables de entorno
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0.4,
-            messages: [
-                {
-                    role: "system",
-                    content: `
-Eres el editor oficial de noticias de un club profesional de fútbol.
+class AIService {
+    // Usamos el modelo flash que es más rápido y económico para resúmenes
+    private model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-Responde ÚNICAMENTE en JSON válido con esta estructura:
-
-{
-  "tituloIA": string,
-  "resumenCorto": string,
-  "resumenLargo": string
-}
-          `,
-                },
-                {
-                    role: "user",
-                    content: `Noticia:\n${contenido}`,
-                },
-            ],
-        });
-
-        const raw = response.choices[0].message.content;
-        if (!raw) return null;
-
-        let parsed;
+    async generarContenidoIA(contenido: string): Promise<string> {
         try {
-            parsed = JSON.parse(raw);
-        } catch {
-            console.error("Respuesta IA inválida:", raw);
-            return null;
-        }
+            const prompt = `
+                Actúa como un editor de noticias profesional. 
+                Tu tarea es leer el siguiente contenido y generar un resumen ejecutivo, 
+                conciso y atractivo de máximo 3 párrafos. 
+                
+                Contenido a resumir:
+                "${contenido}"
+                
+                Resumen:
+            `;
 
-        return {
-            ...parsed,
-            generadoAt: admin.firestore.Timestamp.now(),
-        };
+            const result = await this.model.generateContent(prompt);
+            const response = await result.response;
+            const text = response.text();
+
+            return text;
+        } catch (error) {
+            console.error("❌ Error en Gemini AI Service:", error);
+            throw new Error("No se pudo generar el resumen con Inteligencia Artificial.");
+        }
     }
 }
 
-export default new IAService();
+export default new AIService();
