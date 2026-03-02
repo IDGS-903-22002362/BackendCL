@@ -5,7 +5,7 @@ import newService from "./services/new.service";
 
 export const syncInstagramPosts = onSchedule(
   {
-    //tiempo
+    //tiempo de actualizacion
     schedule: "every 1 hours",
     timeZone: "America/Mexico_City",
   },
