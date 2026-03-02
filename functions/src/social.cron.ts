@@ -1,37 +1,67 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { logger } from "firebase-functions";
 import { firestore } from "firebase-admin";
+
 import instagramService from "./services/instagram.service";
 import newService from "./services/new.service";
 
+const SCHEDULE_CONFIG = {
+  schedule: "every 1 hours",
+  timeZone: "America/Mexico_City",
+} as const;
+
 export const syncInstagramPosts = onSchedule(
-  {
-    //tiempo de actualizacion
-    schedule: "every 1 hours",
-    timeZone: "America/Mexico_City",
-  },
-  async () => {
-    const posts = await instagramService.obtenerPublicaciones();
+  SCHEDULE_CONFIG,
+  async (): Promise<void> => {
     const db = firestore();
 
-    for (const post of posts) {
-      const ref = db.collection("noticias").doc(`ig_${post.id}`);
+    try {
+      logger.info("🔄 Iniciando sincronización de Instagram");
 
-      if ((await ref.get()).exists) continue;
+      const posts = await instagramService.obtenerPublicaciones();
 
-      await ref.set({
-        id: `ig_${post.id}`,
-        titulo: post.caption?.slice(0, 80) ?? "Publicación de Instagram",
-        descripcion: "Publicación de Instagram",
-        contenido: post.caption ?? "",
-        imagenes: post.mediaUrl ? [post.mediaUrl] : [],
-        enlaceExterno: post.permalink,
-        origen: "instagram",
-        estatus: true,
-        createdAt: post.timestamp,
-        updatedAt: new Date().toISOString(),
+      if (!posts.length) {
+        logger.info("No se encontraron publicaciones nuevas");
+        return;
+      }
+
+      for (const post of posts) {
+        const docId = `ig_${post.id}`;
+        const ref = db.collection("noticias").doc(docId);
+
+        const snapshot = await ref.get();
+
+        if (snapshot.exists) {
+          continue;
+        }
+
+        const noticia = {
+          id: docId,
+          titulo:
+            post.caption?.slice(0, 80) ??
+            "Publicación de Instagram",
+          descripcion: "Publicación de Instagram",
+          contenido: post.caption ?? "",
+          imagenes: post.mediaUrl ? [post.mediaUrl] : [],
+          enlaceExterno: post.permalink,
+          origen: "instagram",
+          estatus: true,
+          createdAt: post.timestamp,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await ref.set(noticia);
+
+        // Generación IA desacoplada del insert principal
+        await newService.generarIAParaNoticia(docId);
+      }
+
+      logger.info("✅ Sincronización finalizada correctamente", {
+        totalProcesados: posts.length,
       });
-
-      await newService.generarIAParaNoticia(ref.id);
+    } catch (error) {
+      logger.error("❌ Error sincronizando publicaciones de Instagram", error);
+      throw error; // IMPORTANTE para que Cloud Scheduler marque retry
     }
-  }
+  },
 );
