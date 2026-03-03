@@ -3,7 +3,6 @@ import { logger } from "firebase-functions";
 import { firestore } from "firebase-admin";
 
 import instagramService from "./services/instagram.service";
-import newService from "./services/new.service";
 
 const SCHEDULE_CONFIG = {
   schedule: "every 1 hours",
@@ -16,52 +15,32 @@ export const syncInstagramPosts = onSchedule(
     const db = firestore();
 
     try {
-      logger.info("🔄 Iniciando sincronización de Instagram");
+      logger.info("Iniciando sincronización de Instagram");
 
       const posts = await instagramService.obtenerPublicaciones();
 
       if (!posts.length) {
-        logger.info("No se encontraron publicaciones nuevas");
+        logger.info("No se encontraron publicaciones");
         return;
       }
 
+      const batch = db.batch();
+
       for (const post of posts) {
-        const docId = `ig_${post.id}`;
-        const ref = db.collection("noticias").doc(docId);
+        const ref = db.collection("noticias").doc(post.id);
 
-        const snapshot = await ref.get();
-
-        if (snapshot.exists) {
-          continue;
-        }
-
-        const noticia = {
-          id: docId,
-          titulo:
-            post.caption?.slice(0, 80) ??
-            "Publicación de Instagram",
-          descripcion: "Publicación de Instagram",
-          contenido: post.caption ?? "",
-          imagenes: post.mediaUrl ? [post.mediaUrl] : [],
-          enlaceExterno: post.permalink,
-          origen: "instagram",
-          estatus: true,
-          createdAt: post.timestamp,
-          updatedAt: new Date().toISOString(),
-        };
-
-        await ref.set(noticia);
-
-        // Generación IA desacoplada del insert principal
-        await newService.generarIAParaNoticia(docId);
+        batch.set(ref, post, { merge: true });
       }
 
-      logger.info("✅ Sincronización finalizada correctamente", {
+      await batch.commit();
+
+      logger.info("✅ Sincronización finalizada", {
         totalProcesados: posts.length,
       });
+
     } catch (error) {
-      logger.error("❌ Error sincronizando publicaciones de Instagram", error);
+      logger.error("Error sincronizando Instagram", error);
       throw error;
     }
-  },
+  }
 );
