@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { firestoreApp } from "../config/app.firebase";
 import { RolUsuario } from "../models/usuario.model";
-import { admin } from "../config/firebase.admin";
 
 // Middleware de autenticación con JWT propio
 export const authMiddleware = async (
