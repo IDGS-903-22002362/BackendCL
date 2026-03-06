@@ -73,11 +73,16 @@ export class RachaService {
     /**
      * Solo para mostrar info sin modificar (útil para el perfil)
      */
-    async getRacha(uid: string) {
+    async getRacha(uid: string, timeZone = "America/Mexico_City") {
         const doc = await this.usersCollection.doc(uid).get();
         if (!doc.exists) return null;
         const data = doc.data() || {};
+
+        const nowTs = admin.firestore.Timestamp.now();
+        const todayKey = toDayKey(nowTs.toDate(), timeZone);
+
         return {
+            todayKey,
             streakCount: Number(data.streakCount ?? 0),
             streakBest: Number(data.streakBest ?? 0),
             streakLastDay: data.streakLastDay ?? null,
