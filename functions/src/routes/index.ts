@@ -22,6 +22,7 @@ import ordenesRoutes from "./ordenes.routes";
 import newsRoutes from "./news.routes";
 import carritoRoutes from "./carrito.routes";
 import pagosRoutes from "./pagos.routes";
+import stripeRoutes from "./stripe.routes";
 import inventoryRoutes from "./inventory.routes";
 import plantillaRoutes from "./plantilla.routes";
 
@@ -42,6 +43,7 @@ router.use("/auth", authRoutes);
 router.use("/ordenes", ordenesRoutes);
 router.use("/carrito", carritoRoutes);
 router.use("/pagos", pagosRoutes);
+router.use("/stripe", stripeRoutes);
 router.use("/inventario", inventoryRoutes);
 router.use("/plantilla", plantillaRoutes);
 

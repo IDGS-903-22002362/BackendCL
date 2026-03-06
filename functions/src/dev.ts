@@ -1,7 +1,3 @@
-import * as dotenv from "dotenv";
-// Cargar variables de entorno desde el archivo .env una sola vez
-dotenv.config();
-
 import app from "./app";
 
 // Verificar el entorno

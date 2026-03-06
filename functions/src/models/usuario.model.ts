@@ -27,6 +27,7 @@ export interface UsuarioApp {
   email: string; // Correo electrónico
   rol: RolUsuario; // Rol del usuario en el sistema (default: CLIENTE)
   telefono?: string; // Teléfono de contacto (opcional)
+  stripeCustomerId?: string; // Mapeo persistente con Stripe Customer
   puntosActuales: number; // Saldo actual de puntos
   nivel?: string; // Nivel de lealtad (ej: "Bronce", "Plata", "Oro", "Platino")
   fechaNacimiento?: Date; // Para promociones de cumpleaños

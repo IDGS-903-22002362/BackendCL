@@ -1,9 +1,9 @@
 import Stripe from "stripe";
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
+import { firestoreApp } from "../config/app.firebase";
 import { EstadoOrden, MetodoPago, Orden } from "../models/orden.model";
 import {
-  CURRENCY_DEFAULT,
   COLECCION_PAGOS,
   EstadoPago,
   Pago,
@@ -11,8 +11,17 @@ import {
 } from "../models/pago.model";
 import { RolUsuario } from "../models/usuario.model";
 import { ApiError } from "../utils/error-handler";
+import {
+  buildStripeIdempotencyKey,
+  getAppUrl,
+  getStripeClient,
+  getStripeCurrency,
+  getStripePublishableKey,
+  getStripeWebhookSecret,
+} from "../lib/stripe";
 
 const ORDENES_COLLECTION = "ordenes";
+const USERS_APP_COLLECTION = "usuariosApp";
 const STRIPE_WEBHOOK_EVENTS_COLLECTION = "stripe_webhook_events";
 const STRIPE_PAYMENT_START_LOCKS_COLLECTION = "stripe_payment_start_locks";
 
@@ -29,6 +38,7 @@ type IniciarPagoResult = {
   clientSecret: string;
   status: EstadoPago;
   created: boolean;
+  stripeCustomerId?: string;
 };
 
 type ProcesarReembolsoInput = {
@@ -46,6 +56,81 @@ type ProcesarReembolsoResult = {
   refundId: string;
   refundAmount: number;
   refundReason?: string;
+};
+
+type ShippingInput = {
+  name: string;
+  phone?: string;
+  address: {
+    line1: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    postal_code?: string;
+    country?: string;
+  };
+};
+
+export type CreateStripePaymentIntentInput = {
+  orderId: string;
+  userId: string;
+  currency?: string;
+  customerId?: string;
+  savePaymentMethod?: boolean;
+  shipping?: ShippingInput;
+  idempotencyKey?: string;
+};
+
+export type CreateStripePaymentIntentResult = {
+  clientSecret: string;
+  paymentIntentId: string;
+  pagoId: string;
+  status: EstadoPago;
+  stripeCustomerId?: string;
+  created: boolean;
+};
+
+export type CreateStripeCheckoutSessionInput = {
+  orderId: string;
+  userId: string;
+  successUrl?: string;
+  cancelUrl?: string;
+  idempotencyKey?: string;
+};
+
+export type CreateStripeCheckoutSessionResult = {
+  sessionId: string;
+  url?: string | null;
+  pagoId: string;
+  stripeCustomerId?: string;
+  created: boolean;
+};
+
+export type CreateStripeSetupIntentInput = {
+  userId: string;
+  customerId?: string;
+};
+
+export type CreateStripeSetupIntentResult = {
+  setupIntentId: string;
+  clientSecret: string;
+  stripeCustomerId?: string;
+};
+
+export type CreateStripeBillingPortalInput = {
+  userId: string;
+  returnUrl?: string;
+};
+
+export type CreateStripeBillingPortalResult = {
+  url: string;
+  stripeCustomerId?: string;
+};
+
+export type CreateStripeRefundByOrderInput = {
+  orderId: string;
+  reason?: string;
+  requestedByUid: string;
 };
 
 export type StripeWebhookOutcome =
@@ -77,6 +162,7 @@ type PagoConsultaResult = {
   provider: ProveedorPago;
   paymentIntentId?: string;
   checkoutSessionId?: string;
+  stripeCustomerId?: string;
   fechaPago?: FirebaseFirestore.Timestamp;
   failureCode?: string;
   failureMessage?: string;
@@ -85,30 +171,6 @@ type PagoConsultaResult = {
     estado: EstadoOrden;
     total: number;
   };
-};
-
-const getStripeClient = (): Stripe => {
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeSecretKey) {
-    throw new ApiError(
-      500,
-      "La configuracion de pagos no esta disponible en este entorno",
-    );
-  }
-
-  return new Stripe(stripeSecretKey);
-};
-
-const getStripeWebhookSecret = (): string => {
-  const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!stripeWebhookSecret) {
-    throw new ApiError(
-      500,
-      "La configuracion del webhook de Stripe no esta disponible",
-    );
-  }
-
-  return stripeWebhookSecret;
 };
 
 const mapPaymentIntentStatusToEstadoPago = (
@@ -302,6 +364,7 @@ class PagoService {
         clientSecret: paymentIntent.client_secret,
         status: mapPaymentIntentStatusToEstadoPago(paymentIntent.status),
         created: false,
+        stripeCustomerId: pago.stripeCustomerId,
       };
     } catch (error) {
       console.error("Error al recuperar pago reutilizable", {
@@ -344,35 +407,33 @@ class PagoService {
     return undefined;
   }
 
-  private async generateServerIdempotencyKey(
-    ordenId: string,
-    userId: string,
-  ): Promise<string> {
-    const pagosSnapshot = await firestoreTienda
-      .collection(COLECCION_PAGOS)
-      .where("ordenId", "==", ordenId)
-      .where("userId", "==", userId)
-      .get();
+  private resolveCurrency(inputCurrency?: string): string {
+    const normalized = inputCurrency?.trim().toLowerCase();
+    if (normalized && normalized.length > 0) {
+      return normalized;
+    }
 
-    const attempt = pagosSnapshot.size + 1;
-    return `pay_${ordenId}_${userId}_${attempt}`;
+    return getStripeCurrency();
   }
 
-  async iniciarPago(input: IniciarPagoInput): Promise<IniciarPagoResult> {
-    const { ordenId, userId, metodoPago, idempotencyKey } = input;
-    const stripe = getStripeClient();
-
+  private async getOrderForPayment(
+    orderId: string,
+    userId: string,
+  ): Promise<{
+    ordenDoc: FirebaseFirestore.DocumentSnapshot;
+    ordenData: Orden;
+    amount: number;
+  }> {
     const ordenDoc = await firestoreTienda
       .collection(ORDENES_COLLECTION)
-      .doc(ordenId)
+      .doc(orderId)
       .get();
 
     if (!ordenDoc.exists) {
-      throw new ApiError(404, `Orden con ID "${ordenId}" no encontrada`);
+      throw new ApiError(404, `Orden con ID "${orderId}" no encontrada`);
     }
 
     const ordenData = ordenDoc.data() as Orden;
-
     if (ordenData.usuarioId !== userId) {
       throw new ApiError(403, "No tienes permisos para iniciar este pago");
     }
@@ -384,14 +445,7 @@ class PagoService {
       );
     }
 
-    if (metodoPago !== ordenData.metodoPago) {
-      throw new ApiError(
-        400,
-        "El metodo de pago no coincide con el metodo configurado en la orden",
-      );
-    }
-
-    if (metodoPago !== MetodoPago.TARJETA) {
+    if (ordenData.metodoPago !== MetodoPago.TARJETA) {
       throw new ApiError(
         400,
         "Metodo de pago no valido para Stripe en este endpoint. Usa TARJETA",
@@ -407,26 +461,175 @@ class PagoService {
       throw new ApiError(409, "La orden tiene un monto invalido para pago");
     }
 
+    return { ordenDoc, ordenData, amount };
+  }
+
+  private async getOrCreateStripeCustomerId(
+    stripe: Stripe,
+    userId: string,
+    preferredCustomerId?: string,
+  ): Promise<string> {
+    const directUserRef = firestoreApp
+      .collection(USERS_APP_COLLECTION)
+      .doc(userId);
+    const directUserDoc = await directUserRef.get();
+
+    let userRef = directUserRef;
+    let userData: Record<string, unknown> | undefined = directUserDoc.data() as
+      | Record<string, unknown>
+      | undefined;
+
+    if (!directUserDoc.exists) {
+      const snapshot = await firestoreApp
+        .collection(USERS_APP_COLLECTION)
+        .where("uid", "==", userId)
+        .limit(1)
+        .get();
+
+      if (!snapshot.empty) {
+        userRef = snapshot.docs[0].ref;
+        userData = snapshot.docs[0].data() as Record<string, unknown>;
+      }
+    }
+
+    if (!userData) {
+      throw new ApiError(
+        404,
+        "No se encontro el usuario para mapear stripeCustomerId",
+      );
+    }
+
+    const existingCustomerId =
+      typeof userData.stripeCustomerId === "string"
+        ? userData.stripeCustomerId
+        : undefined;
+    if (existingCustomerId && existingCustomerId.trim().length > 0) {
+      return existingCustomerId.trim();
+    }
+
+    const resolvedPreferred =
+      preferredCustomerId && preferredCustomerId.trim().length > 0
+        ? preferredCustomerId.trim()
+        : undefined;
+
+    if (resolvedPreferred) {
+      await userRef.set(
+        {
+          stripeCustomerId: resolvedPreferred,
+          updatedAt: admin.firestore.Timestamp.now(),
+        },
+        { merge: true },
+      );
+      return resolvedPreferred;
+    }
+
+    const customer = await stripe.customers.create({
+      email: typeof userData.email === "string" ? userData.email : undefined,
+      name: typeof userData.nombre === "string" ? userData.nombre : undefined,
+      metadata: { userId },
+    });
+
+    await userRef.set(
+      {
+        stripeCustomerId: customer.id,
+        updatedAt: admin.firestore.Timestamp.now(),
+      },
+      { merge: true },
+    );
+
+    return customer.id;
+  }
+
+  private async generateServerIdempotencyKey(
+    ordenId: string,
+    userId: string,
+    amount: number,
+    currency: string,
+    operation: "payment_intent" | "checkout_session",
+  ): Promise<string> {
+    const pagosSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .where("userId", "==", userId)
+      .get();
+
+    const attempt = pagosSnapshot.size + 1;
+    return buildStripeIdempotencyKey({
+      operation,
+      orderId: ordenId,
+      userId,
+      amount,
+      currency,
+      extra: String(attempt),
+    });
+  }
+
+  async createStripePaymentIntent(
+    input: CreateStripePaymentIntentInput,
+  ): Promise<CreateStripePaymentIntentResult> {
+    const stripe = getStripeClient();
+    const {
+      orderId,
+      userId,
+      currency: inputCurrency,
+      customerId,
+      savePaymentMethod,
+      shipping,
+      idempotencyKey,
+    } = input;
+    const currency = this.resolveCurrency(inputCurrency);
+
+    const { ordenDoc, ordenData, amount } = await this.getOrderForPayment(
+      orderId,
+      userId,
+    );
+    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+      stripe,
+      userId,
+      customerId,
+    );
+
+    const reusable = await this.findLatestActivePagoDoc(orderId, userId);
+    if (reusable) {
+      const reused = await this.buildReusedPaymentResult(stripe, reusable, {
+        ordenId: orderId,
+        userId,
+        reason: "existing_active_payment",
+      });
+      return {
+        ...reused,
+        stripeCustomerId:
+          (reusable.data() as Pago).stripeCustomerId || stripeCustomerId,
+      };
+    }
+
     return this.withStartPaymentLock(
-      ordenId,
+      orderId,
       userId,
       async () => {
-        const pagoActivoDoc = await this.findLatestActivePagoDoc(
-          ordenId,
-          userId,
-        );
-
-        if (pagoActivoDoc) {
-          return this.buildReusedPaymentResult(stripe, pagoActivoDoc, {
-            ordenId,
+        const existing = await this.findLatestActivePagoDoc(orderId, userId);
+        if (existing) {
+          const reused = await this.buildReusedPaymentResult(stripe, existing, {
+            ordenId: orderId,
             userId,
-            reason: "active_payment_found",
+            reason: "existing_active_payment",
           });
+          return {
+            ...reused,
+            stripeCustomerId:
+              (existing.data() as Pago).stripeCustomerId || stripeCustomerId,
+          };
         }
 
         const resolvedIdempotencyKey =
           idempotencyKey ||
-          (await this.generateServerIdempotencyKey(ordenId, userId));
+          (await this.generateServerIdempotencyKey(
+            orderId,
+            userId,
+            amount,
+            currency,
+            "payment_intent",
+          ));
 
         const idemSnapshot = await firestoreTienda
           .collection(COLECCION_PAGOS)
@@ -439,7 +642,7 @@ class PagoService {
           const pagoExistente = pagoExistenteDoc.data() as Pago;
 
           if (
-            pagoExistente.ordenId !== ordenId ||
+            pagoExistente.ordenId !== orderId ||
             pagoExistente.userId !== userId
           ) {
             throw new ApiError(
@@ -448,22 +651,24 @@ class PagoService {
             );
           }
 
-          if (pagoExistente.estado === EstadoPago.FALLIDO) {
-            throw new ApiError(
-              409,
-              "La idempotency key corresponde a un intento fallido. Usa una nueva",
-            );
-          }
-
           if (
             pagoExistente.paymentIntentId &&
             isEstadoReutilizable(pagoExistente.estado)
           ) {
-            return this.buildReusedPaymentResult(stripe, pagoExistenteDoc, {
-              ordenId,
-              userId,
-              reason: "existing_idempotency_key",
-            });
+            const reused = await this.buildReusedPaymentResult(
+              stripe,
+              pagoExistenteDoc,
+              {
+                ordenId: orderId,
+                userId,
+                reason: "existing_idempotency_key",
+              },
+            );
+            return {
+              ...reused,
+              stripeCustomerId:
+                pagoExistente.stripeCustomerId || stripeCustomerId,
+            };
           }
 
           throw new ApiError(
@@ -473,15 +678,26 @@ class PagoService {
         }
 
         const now = admin.firestore.Timestamp.now();
+        const cartId =
+          typeof ordenData.paymentMetadata?.cartId === "string"
+            ? (ordenData.paymentMetadata.cartId as string)
+            : undefined;
+
+        const paymentMetadata = cartId
+          ? { orderId, userId, cartId }
+          : { orderId, userId };
+
         const pagoDraft: Omit<Pago, "id"> = {
-          ordenId,
+          ordenId: orderId,
           userId,
           provider: ProveedorPago.STRIPE,
-          metodoPago,
+          metodoPago: MetodoPago.TARJETA,
           monto: ordenData.total,
-          currency: CURRENCY_DEFAULT,
+          currency,
           estado: EstadoPago.PROCESANDO,
           idempotencyKey: resolvedIdempotencyKey,
+          stripeCustomerId,
+          metadata: paymentMetadata,
           createdAt: now,
           updatedAt: now,
         };
@@ -494,13 +710,19 @@ class PagoService {
           const paymentIntent = await stripe.paymentIntents.create(
             {
               amount,
-              currency: CURRENCY_DEFAULT,
+              currency,
+              customer: stripeCustomerId,
               automatic_payment_methods: { enabled: true },
+              setup_future_usage: savePaymentMethod ? "off_session" : undefined,
+              shipping: shipping as
+                | Stripe.PaymentIntentCreateParams.Shipping
+                | undefined,
               metadata: {
-                ordenId,
+                ordenId: orderId,
                 userId,
-                metodoPago,
+                metodoPago: MetodoPago.TARJETA,
                 pagoId: pagoRef.id,
+                cartId: cartId || "",
               },
             },
             { idempotencyKey: resolvedIdempotencyKey },
@@ -513,8 +735,19 @@ class PagoService {
             paymentIntentId: paymentIntent.id,
             providerStatus: paymentIntent.status,
             estado: estadoPago,
+            stripeCustomerId,
             updatedAt: admin.firestore.Timestamp.now(),
           });
+
+          await ordenDoc.ref.set(
+            {
+              stripePaymentIntentId: paymentIntent.id,
+              stripeCustomerId,
+              paymentMetadata,
+              updatedAt: admin.firestore.Timestamp.now(),
+            },
+            { merge: true },
+          );
 
           if (!paymentIntent.client_secret) {
             throw new ApiError(
@@ -529,6 +762,7 @@ class PagoService {
             clientSecret: paymentIntent.client_secret,
             status: estadoPago,
             created: true,
+            stripeCustomerId,
           };
         } catch (error) {
           const stripeError = error as {
@@ -546,11 +780,12 @@ class PagoService {
             failureCode,
             failureMessage,
             providerStatus,
+            stripeCustomerId,
             updatedAt: admin.firestore.Timestamp.now(),
           });
 
           console.error("Error al crear PaymentIntent", {
-            ordenId,
+            orderId,
             userId,
             pagoId: pagoRef.id,
             failureCode,
@@ -564,8 +799,399 @@ class PagoService {
           throw new ApiError(502, "Error al iniciar el pago con Stripe");
         }
       },
-      () => this.waitForReusableActivePayment(stripe, ordenId, userId),
+      () => this.waitForReusableActivePayment(stripe, orderId, userId),
     );
+  }
+
+  async iniciarPago(input: IniciarPagoInput): Promise<IniciarPagoResult> {
+    const { ordenId, userId, metodoPago, idempotencyKey } = input;
+
+    const ordenDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(ordenId)
+      .get();
+
+    if (!ordenDoc.exists) {
+      throw new ApiError(404, `Orden con ID "${ordenId}" no encontrada`);
+    }
+
+    const ordenData = ordenDoc.data() as Orden;
+    if (metodoPago !== ordenData.metodoPago) {
+      throw new ApiError(
+        400,
+        "El metodo de pago no coincide con el metodo configurado en la orden",
+      );
+    }
+
+    if (metodoPago !== MetodoPago.TARJETA) {
+      throw new ApiError(
+        400,
+        "Metodo de pago no valido para Stripe en este endpoint. Usa TARJETA",
+      );
+    }
+
+    return this.createStripePaymentIntent({
+      orderId: ordenId,
+      userId,
+      idempotencyKey,
+    });
+  }
+
+  getPublicStripeConfig(): { publishableKey?: string } {
+    return {
+      publishableKey: getStripePublishableKey(),
+    };
+  }
+
+  async getStripePaymentIntentById(
+    paymentIntentId: string,
+    user: AuthUser,
+  ): Promise<{
+    id: string;
+    status: string;
+    amount: number;
+    currency: string;
+    orderId?: string;
+    paymentId?: string;
+  }> {
+    const stripe = getStripeClient();
+    const pagoMatch = await this.findPagoByField(
+      "paymentIntentId",
+      paymentIntentId,
+    );
+
+    if (!pagoMatch) {
+      throw new ApiError(404, "PaymentIntent no encontrado en la base interna");
+    }
+
+    const pagoDoc = await pagoMatch.pagoRef.get();
+    const pagoData = pagoDoc.data() as Pago;
+    if (!isAdminOrEmpleado(user.rol) && pagoData.userId !== user.uid) {
+      throw new ApiError(
+        403,
+        "No tienes permisos para consultar este PaymentIntent",
+      );
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    return {
+      id: paymentIntent.id,
+      status: paymentIntent.status,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      orderId: pagoMatch.ordenId,
+      paymentId: pagoMatch.pagoId,
+    };
+  }
+
+  async createStripeCheckoutSession(
+    input: CreateStripeCheckoutSessionInput,
+  ): Promise<CreateStripeCheckoutSessionResult> {
+    const stripe = getStripeClient();
+    const { orderId, userId, successUrl, cancelUrl, idempotencyKey } = input;
+    const currency = getStripeCurrency();
+
+    const { ordenDoc, ordenData, amount } = await this.getOrderForPayment(
+      orderId,
+      userId,
+    );
+    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+      stripe,
+      userId,
+    );
+
+    return this.withStartPaymentLock(orderId, userId, async () => {
+      const activePagoDoc = await this.findLatestActivePagoDoc(orderId, userId);
+      if (activePagoDoc) {
+        const activePago = activePagoDoc.data() as Pago;
+        if (activePago.checkoutSessionId) {
+          const existingSession = await stripe.checkout.sessions.retrieve(
+            activePago.checkoutSessionId,
+          );
+          return {
+            sessionId: existingSession.id,
+            url: existingSession.url,
+            pagoId: activePagoDoc.id,
+            stripeCustomerId: activePago.stripeCustomerId || stripeCustomerId,
+            created: false,
+          };
+        }
+      }
+
+      const resolvedIdempotencyKey =
+        idempotencyKey ||
+        (await this.generateServerIdempotencyKey(
+          orderId,
+          userId,
+          amount,
+          currency,
+          "checkout_session",
+        ));
+
+      const idemSnapshot = await firestoreTienda
+        .collection(COLECCION_PAGOS)
+        .where("idempotencyKey", "==", resolvedIdempotencyKey)
+        .limit(1)
+        .get();
+
+      if (!idemSnapshot.empty) {
+        const existingDoc = idemSnapshot.docs[0];
+        const existingPago = existingDoc.data() as Pago;
+        if (
+          existingPago.ordenId === orderId &&
+          existingPago.userId === userId &&
+          existingPago.checkoutSessionId &&
+          isEstadoReutilizable(existingPago.estado)
+        ) {
+          const existingSession = await stripe.checkout.sessions.retrieve(
+            existingPago.checkoutSessionId,
+          );
+          return {
+            sessionId: existingSession.id,
+            url: existingSession.url,
+            pagoId: existingDoc.id,
+            stripeCustomerId: existingPago.stripeCustomerId || stripeCustomerId,
+            created: false,
+          };
+        }
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const cartId =
+        typeof ordenData.paymentMetadata?.cartId === "string"
+          ? (ordenData.paymentMetadata.cartId as string)
+          : undefined;
+
+      const paymentMetadata = cartId
+        ? { orderId, userId, cartId }
+        : { orderId, userId };
+
+      const pagoDraft: Omit<Pago, "id"> = {
+        ordenId: orderId,
+        userId,
+        provider: ProveedorPago.STRIPE,
+        metodoPago: MetodoPago.TARJETA,
+        monto: ordenData.total,
+        currency,
+        estado: EstadoPago.PROCESANDO,
+        idempotencyKey: resolvedIdempotencyKey,
+        stripeCustomerId,
+        metadata: paymentMetadata,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const pagoRef = await firestoreTienda
+        .collection(COLECCION_PAGOS)
+        .add(pagoDraft);
+      const baseUrl = getAppUrl();
+      const resolvedSuccessUrl =
+        successUrl ||
+        `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
+      const resolvedCancelUrl = cancelUrl || `${baseUrl}/checkout/cancel`;
+
+      const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
+        ordenData.items.map((item) => ({
+          quantity: item.cantidad,
+          price_data: {
+            currency,
+            unit_amount: Math.round(item.precioUnitario * 100),
+            product_data: {
+              name: `Producto ${item.productoId}`,
+              metadata: {
+                productoId: item.productoId,
+                tallaId: item.tallaId || "",
+              },
+            },
+          },
+        }));
+
+      const session = await stripe.checkout.sessions.create(
+        {
+          mode: "payment",
+          customer: stripeCustomerId,
+          line_items: lineItems,
+          success_url: resolvedSuccessUrl,
+          cancel_url: resolvedCancelUrl,
+          metadata: {
+            ordenId: orderId,
+            userId,
+            pagoId: pagoRef.id,
+            cartId: cartId || "",
+          },
+          payment_intent_data: {
+            metadata: {
+              ordenId: orderId,
+              userId,
+              pagoId: pagoRef.id,
+              cartId: cartId || "",
+            },
+          },
+        },
+        { idempotencyKey: resolvedIdempotencyKey },
+      );
+
+      const checkoutUpdate: Record<string, unknown> = {
+        checkoutSessionId: session.id,
+        providerStatus: session.payment_status || "open",
+        stripeCustomerId,
+        updatedAt: admin.firestore.Timestamp.now(),
+      };
+
+      if (typeof session.payment_intent === "string") {
+        checkoutUpdate.paymentIntentId = session.payment_intent;
+      }
+
+      await pagoRef.update(checkoutUpdate);
+
+      await ordenDoc.ref.set(
+        {
+          stripeCheckoutSessionId: session.id,
+          stripeCustomerId,
+          paymentMetadata,
+          updatedAt: admin.firestore.Timestamp.now(),
+        },
+        { merge: true },
+      );
+
+      return {
+        sessionId: session.id,
+        url: session.url,
+        pagoId: pagoRef.id,
+        stripeCustomerId,
+        created: true,
+      };
+    });
+  }
+
+  async getStripeCheckoutSessionById(
+    sessionId: string,
+    user: AuthUser,
+  ): Promise<{
+    id: string;
+    paymentStatus: string | null;
+    status: string | null;
+    orderId?: string;
+    paymentIntentId?: string;
+    paymentId?: string;
+  }> {
+    const stripe = getStripeClient();
+    const pagoMatch = await this.findPagoByField(
+      "checkoutSessionId",
+      sessionId,
+    );
+    if (!pagoMatch) {
+      throw new ApiError(
+        404,
+        "Checkout Session no encontrada en la base interna",
+      );
+    }
+
+    const pagoDoc = await pagoMatch.pagoRef.get();
+    const pagoData = pagoDoc.data() as Pago;
+    if (!isAdminOrEmpleado(user.rol) && pagoData.userId !== user.uid) {
+      throw new ApiError(
+        403,
+        "No tienes permisos para consultar esta Checkout Session",
+      );
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["payment_intent"],
+    });
+
+    return {
+      id: session.id,
+      paymentStatus: session.payment_status,
+      status: session.status,
+      orderId: pagoMatch.ordenId,
+      paymentIntentId:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : session.payment_intent?.id,
+      paymentId: pagoMatch.pagoId,
+    };
+  }
+
+  async createStripeSetupIntent(
+    input: CreateStripeSetupIntentInput,
+  ): Promise<CreateStripeSetupIntentResult> {
+    const stripe = getStripeClient();
+    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+      stripe,
+      input.userId,
+      input.customerId,
+    );
+
+    const setupIntent = await stripe.setupIntents.create({
+      customer: stripeCustomerId,
+      payment_method_types: ["card"],
+      metadata: {
+        userId: input.userId,
+      },
+    });
+
+    if (!setupIntent.client_secret) {
+      throw new ApiError(
+        502,
+        "Stripe no devolvio client secret para SetupIntent",
+      );
+    }
+
+    return {
+      setupIntentId: setupIntent.id,
+      clientSecret: setupIntent.client_secret,
+      stripeCustomerId,
+    };
+  }
+
+  async createStripeBillingPortal(
+    input: CreateStripeBillingPortalInput,
+  ): Promise<CreateStripeBillingPortalResult> {
+    const stripe = getStripeClient();
+    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+      stripe,
+      input.userId,
+    );
+
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: input.returnUrl || getAppUrl(),
+    });
+
+    return {
+      url: portalSession.url,
+      stripeCustomerId,
+    };
+  }
+
+  async procesarReembolsoPorOrden(
+    input: CreateStripeRefundByOrderInput,
+  ): Promise<ProcesarReembolsoResult> {
+    const snapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", input.orderId)
+      .orderBy("createdAt", "desc")
+      .limit(20)
+      .get();
+
+    const pagoCompletado = snapshot.docs.find((doc) => {
+      const pago = doc.data() as Pago;
+      return pago.estado === EstadoPago.COMPLETADO;
+    });
+
+    if (!pagoCompletado) {
+      throw new ApiError(
+        404,
+        "No se encontro un pago completado para reembolsar en esta orden",
+      );
+    }
+
+    return this.procesarReembolso({
+      pagoId: pagoCompletado.id,
+      refundReason: input.reason,
+      requestedByUid: input.requestedByUid,
+    });
   }
 
   async procesarWebhookStripe(
@@ -730,6 +1356,8 @@ class PagoService {
       tx.update(pagoRef, {
         estado: EstadoPago.REEMBOLSADO,
         providerStatus: refund.status,
+        paymentIntentId: pago.paymentIntentId,
+        stripeCustomerId: pago.stripeCustomerId,
         refundId: refund.id,
         refundAmount: refund.amount / 100,
         refundReason:
@@ -744,6 +1372,8 @@ class PagoService {
 
       tx.update(ordenRef, {
         estado: EstadoOrden.CANCELADA,
+        stripePaymentIntentId: pago.paymentIntentId,
+        stripeCustomerId: pago.stripeCustomerId,
         updatedAt: now,
       });
     });
@@ -830,6 +1460,7 @@ class PagoService {
       provider: pago.provider,
       paymentIntentId: pago.paymentIntentId,
       checkoutSessionId: pago.checkoutSessionId,
+      stripeCustomerId: pago.stripeCustomerId,
       fechaPago: pago.fechaPago,
       failureCode: pago.failureCode,
       failureMessage: pago.failureMessage,
@@ -1022,9 +1653,14 @@ class PagoService {
         estado: EstadoPago.COMPLETADO,
         providerStatus: paymentIntent.status,
         paymentIntentId: paymentIntent.id,
+        stripeCustomerId:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : pagoData.stripeCustomerId,
         fechaPago: now,
         failureCode: admin.firestore.FieldValue.delete(),
         failureMessage: admin.firestore.FieldValue.delete(),
+        rawEventId: event.id,
         webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
           event.id,
         ),
@@ -1033,6 +1669,11 @@ class PagoService {
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
+        stripePaymentIntentId: paymentIntent.id,
+        stripeCustomerId:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : undefined,
         updatedAt: now,
       });
     });
@@ -1083,8 +1724,13 @@ class PagoService {
         estado: EstadoPago.FALLIDO,
         providerStatus: paymentIntent.status,
         paymentIntentId: paymentIntent.id,
+        stripeCustomerId:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : pagoData.stripeCustomerId,
         failureCode,
         failureMessage,
+        rawEventId: event.id,
         webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
           event.id,
         ),
@@ -1093,6 +1739,11 @@ class PagoService {
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.PENDIENTE,
+        stripePaymentIntentId: paymentIntent.id,
+        stripeCustomerId:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : undefined,
         updatedAt: now,
       });
     });
@@ -1142,9 +1793,14 @@ class PagoService {
           typeof session.payment_intent === "string"
             ? session.payment_intent
             : pagoData.paymentIntentId,
+        stripeCustomerId:
+          typeof session.customer === "string"
+            ? session.customer
+            : pagoData.stripeCustomerId,
         fechaPago: now,
         failureCode: admin.firestore.FieldValue.delete(),
         failureMessage: admin.firestore.FieldValue.delete(),
+        rawEventId: event.id,
         webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
           event.id,
         ),
@@ -1153,6 +1809,13 @@ class PagoService {
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId:
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : undefined,
+        stripeCustomerId:
+          typeof session.customer === "string" ? session.customer : undefined,
         updatedAt: now,
       });
     });
@@ -1202,8 +1865,13 @@ class PagoService {
           typeof session.payment_intent === "string"
             ? session.payment_intent
             : pagoData.paymentIntentId,
+        stripeCustomerId:
+          typeof session.customer === "string"
+            ? session.customer
+            : pagoData.stripeCustomerId,
         failureCode: "checkout_async_payment_failed",
         failureMessage: "Stripe reporto fallo en el pago async de Checkout",
+        rawEventId: event.id,
         webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
           event.id,
         ),
@@ -1212,6 +1880,13 @@ class PagoService {
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.PENDIENTE,
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId:
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : undefined,
+        stripeCustomerId:
+          typeof session.customer === "string" ? session.customer : undefined,
         updatedAt: now,
       });
     });
@@ -1261,6 +1936,10 @@ class PagoService {
           typeof charge.payment_intent === "string"
             ? charge.payment_intent
             : pagoData.paymentIntentId,
+        stripeCustomerId:
+          typeof charge.customer === "string"
+            ? charge.customer
+            : pagoData.stripeCustomerId,
         refundId: refundData?.id,
         refundAmount:
           typeof charge.amount_refunded === "number"
@@ -1269,6 +1948,7 @@ class PagoService {
         refundReason:
           refundData?.reason ||
           (charge.refunded ? "refund_processed_by_stripe" : undefined),
+        rawEventId: event.id,
         webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
           event.id,
         ),
@@ -1277,6 +1957,12 @@ class PagoService {
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CANCELADA,
+        stripePaymentIntentId:
+          typeof charge.payment_intent === "string"
+            ? charge.payment_intent
+            : undefined,
+        stripeCustomerId:
+          typeof charge.customer === "string" ? charge.customer : undefined,
         updatedAt: now,
       });
     });

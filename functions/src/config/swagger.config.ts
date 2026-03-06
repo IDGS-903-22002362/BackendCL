@@ -41,6 +41,13 @@ import {
   refundPagoSchema,
 } from "../middleware/validators/pago.validator";
 import {
+  createStripeBillingPortalSchema,
+  createStripeCheckoutSessionSchema,
+  createStripePaymentIntentSchema,
+  createStripeRefundByOrderSchema,
+  createStripeSetupIntentSchema,
+} from "../middleware/validators/stripe.validator";
+import {
   listLowStockAlertsQuerySchema,
   registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
@@ -133,6 +140,10 @@ const swaggerDefinition = {
       name: "Payments",
       description:
         "Sistema de pagos con Stripe (PaymentIntent / Checkout Session)",
+    },
+    {
+      name: "Stripe",
+      description: "Endpoints Stripe production-ready (PaymentIntent, Checkout y Webhook)",
     },
     {
       name: "Inventory",
@@ -280,6 +291,15 @@ const swaggerDefinition = {
       IniciarPago: zodToJsonSchema(iniciarPagoSchema),
       UpdateEstadoPago: zodToJsonSchema(updateEstadoPagoSchema),
       RefundPago: zodToJsonSchema(refundPagoSchema),
+      CreateStripePaymentIntent: zodToJsonSchema(createStripePaymentIntentSchema),
+      CreateStripeCheckoutSession: zodToJsonSchema(
+        createStripeCheckoutSessionSchema,
+      ),
+      CreateStripeSetupIntent: zodToJsonSchema(createStripeSetupIntentSchema),
+      CreateStripeBillingPortal: zodToJsonSchema(
+        createStripeBillingPortalSchema,
+      ),
+      CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,
@@ -734,6 +754,11 @@ const swaggerDefinition = {
             example: "cs_test_abc123",
             description: "ID del Checkout Session en Stripe",
           },
+          stripeCustomerId: {
+            type: "string",
+            example: "cus_abc123",
+            description: "ID del customer en Stripe",
+          },
           transaccionId: {
             type: "string",
             example: "TXN-2024-00001",
@@ -780,6 +805,11 @@ const swaggerDefinition = {
             items: { type: "string" },
             example: ["evt_1ABC123", "evt_2DEF456"],
             description: "IDs de eventos de Stripe procesados (deduplicación)",
+          },
+          rawEventId: {
+            type: "string",
+            example: "evt_1ABC123",
+            description: "Último event.id aplicado sobre el pago",
           },
           metadata: {
             type: "object",
