@@ -20,6 +20,8 @@ import {
     updateNewSchema,
     deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
+
 
 // Configurar multer para almacenar archivos en memoria
 const upload = multer({
@@ -67,7 +69,7 @@ const router = Router();
  *                   items:
  *                     $ref: '#/components/schemas/News'
  */
-router.get("/", queryController.getAll);
+router.get("/", optionalAuthMiddleware, queryController.getAll);
 
 /**
  * @swagger
@@ -259,6 +261,14 @@ router.delete(
     validateParams(idParamSchema),
     validateBody(deleteNewsImageSchema),
     commandController.deleteImage
+);
+
+
+router.post(
+    "/:id/like",
+    authMiddleware,
+    validateParams(idParamSchema),
+    commandController.like
 );
 
 

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { firestoreApp } from "../config/app.firebase";
 import { RolUsuario } from "../models/usuario.model";
+import { admin } from "../config/firebase.admin";
 
 // Middleware de autenticación con JWT propio
 export const authMiddleware = async (
@@ -10,12 +11,18 @@ export const authMiddleware = async (
   next: NextFunction,
 ): Promise<void> => {
   const authHeader = req.headers.authorization;
+  console.log("Authorization header recibido:", authHeader);
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     res.status(401).json({ message: "No autorizado. Token requerido" });
     return;
   }
 
   const token = authHeader.split(" ")[1];
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    res.status(500).json({ message: "Error de configuración del servidor" });
+    return;
+  }
 
   try {
     // Verificar el token JWT propio con la clave secreta
@@ -70,42 +77,28 @@ export const authMiddleware = async (
  * Middleware de autenticación opcional (para endpoints públicos/privados)
  * Intenta autenticar con JWT propio; si falla o no hay token, continúa sin usuario.
  */
-export const optionalAuthMiddleware = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
+// En tu archivo de middlewares (ej. utils/middlewares.ts)
+export const optionalAuthMiddleware = (
+  req: any,
+  res: any,
+  next: any
+) => {
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    next(); // Sin token → anónimo
-    return;
+    return next();
   }
 
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      uid: string;
-    };
-
-    const snapshot = await firestoreApp
-      .collection("usuariosApp")
-      .where("uid", "==", decoded.uid)
-      .limit(1)
-      .get();
-
-    if (!snapshot.empty) {
-      req.user = {
-        ...decoded,
-        ...snapshot.docs[0].data(),
-        uid: decoded.uid,
-      };
-    }
-    next();
-  } catch {
-    // Token inválido o expirado → anónimo
-    next();
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!);
+    req.user = decoded;
+  } catch (error) {
+    console.warn("Token opcional inválido");
   }
+
+  next();
 };
 
 /**

@@ -565,4 +565,64 @@ router.get(
   authMiddleware,
   getRacha
 );
+
+
+
+// ==========================================
+// PUNTOS
+// ==========================================
+
+/**
+ * @swagger
+ * /api/usuarios/me/getpuntos:
+ *   get:
+ *     summary: Obtener puntos del usuario actual
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Puntos del usuario
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 puntos:
+ *                   type: number
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get("/me/getpuntos", authMiddleware, queryController.getMisPuntos);
+
+/**
+ * @swagger
+ * /api/usuarios/me/puntos/sumar:
+ *   post:
+ *     summary: Sumar 5 puntos al usuario actual (push)
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Puntos actualizados
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 puntos:
+ *                   type: number
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
 export default router;

@@ -1,23 +1,48 @@
 import { Request, Response } from "express";
 import newService from "../../services/new.service";
+import { firestoreApp } from "../../config/app.firebase";
 
 /**
  * Controller: Products Query (Lectura)
  * Responsabilidad: Manejar operaciones de lectura de datos (GET)
  */
-export const getAll = async (_req: Request, res: Response) => {
+export const getAll = async (req: Request, res: Response) => {
     try {
+        const userId = (req as any).user?.uid; // Obtén el ID del usuario autenticado
+        console.log("ID de usuario detectado en getAll:", userId);
         const noticias = await newService.getAllNews();
+
+        // Para cada noticia, verificar si el usuario actual le ha dado like
+        const noticiasConLike = await Promise.all(
+            noticias.map(async (noticia) => {
+                let liked = false;
+                if (userId) {
+                    const likeRef = firestoreApp
+                        .collection("noticias")
+                        .doc(noticia.id)
+                        .collection("likesUsers")
+                        .doc(userId);
+                    const likeDoc = await likeRef.get();
+                    liked = likeDoc.exists;
+                }
+                return {
+                    ...noticia,
+                    liked,           // ← Nuevo campo
+                    likesCount: noticia.likes, // Opcional: renombrar para consistencia
+                };
+            })
+        );
+
         res.status(200).json({
             success: true,
-            count: noticias.length,
-            data: noticias,
+            count: noticiasConLike.length,
+            data: noticiasConLike,
         });
     } catch (error) {
         console.error("Error en GET /api/noticias:", error);
         res.status(500).json({
             success: false,
-            message: "Error al obtener los noticias",
+            message: "Error al obtener las noticias",
             error: error instanceof Error ? error.message : "Error desconocido",
         });
     }

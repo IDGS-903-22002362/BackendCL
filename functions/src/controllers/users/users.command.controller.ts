@@ -201,3 +201,18 @@ export const remove = async (req: Request, res: Response) => {
         });
     }
 };
+
+export const sumarPuntos = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const puntosASumar = 5;
+        const usuario = await userAppService.addPoints(uid, puntosASumar); // método nuevo
+        return res.status(200).json({
+            success: true,
+            puntos: usuario.puntosActuales,
+        });
+    } catch (error) {
+        console.error("Error al sumar puntos:", error);
+        return res.status(500).json({ success: false, message: "Error interno" });
+    }
+};

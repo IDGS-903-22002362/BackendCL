@@ -10,6 +10,7 @@ export interface Noticia {
     usuarioId?: string;
     autorNombre?: string;
     estatus: boolean;
+    likes: number;
     createdAt: Date;
     updatedAt: Date;
 }

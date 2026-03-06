@@ -215,6 +215,30 @@ export const deleteImage = async (req: Request, res: Response) => {
     });
   }
 };
+export const like = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Usuario no autenticado" });
+    }
+
+    const result = await newService.toggleLikeNoticia(id, userId);
+
+    return res.status(200).json({
+      success: true,
+      liked: result.liked,
+      likes: result.likes,
+    });
+  } catch (error) {
+    console.error("❌ Error en like:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al procesar like",
+    });
+  }
+};
 
 export const generarIA = async (req: Request, res: Response) => {
   const { id } = req.params;

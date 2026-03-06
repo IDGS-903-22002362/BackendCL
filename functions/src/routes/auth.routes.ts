@@ -2,6 +2,9 @@ import { Router } from "express";
 import {
   registerOrLogin,
 } from "../controllers/users/auth.social.controller";
+import { logout } from "../controllers/users/auth.logout.controller";
+import { authMiddleware } from "../utils/middlewares";
+import { refreshToken } from "../controllers/users/auth.refresh.controller";
 
 const router = Router();
 
@@ -71,5 +74,11 @@ const router = Router();
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/register-or-login", registerOrLogin);
+
+
+
+router.post("/logout", authMiddleware, logout);
+
+router.post("/refresh", authMiddleware, refreshToken);
 
 export default router;

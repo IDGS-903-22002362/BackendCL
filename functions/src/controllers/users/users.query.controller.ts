@@ -73,6 +73,23 @@ export const getById = async (req: Request, res: Response) => {
   }
 };
 
+export const getMisPuntos = async (req: Request, res: Response) => {
+  try {
+    const uid = (req as any).user.uid;
+    const usuario = await userAppService.getUserByUid(uid); // Necesitamos este método en el servicio
+    if (!usuario) {
+      return res.status(404).json({ success: false, message: "Usuario no encontrado" });
+    }
+    return res.status(200).json({
+      success: true,
+      puntos: usuario.puntosActuales,
+    });
+  } catch (error) {
+    console.error("Error al obtener puntos:", error);
+    return res.status(500).json({ success: false, message: "Error interno" });
+  }
+};
+
 /** 
 export const getByCategory = async (req: Request, res: Response) => {
     try {
