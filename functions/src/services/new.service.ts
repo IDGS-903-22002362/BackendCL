@@ -49,11 +49,80 @@ export class NewService {
             usuarioId: data.usuarioId,
             autorNombre: data.autorNombre,
             estatus: data.estatus,
+            likes: data.likes ?? 0,
             createdAt: normalizarFecha(data.createdAt),
             updatedAt: normalizarFecha(data.updatedAt),
             // Asegúrate de incluir los campos nuevos si los necesitas en el modelo
             ...data
         } as Noticia;
+    }
+    async toggleLikeNoticia(
+        noticiaId: string,
+        userId: string
+    ): Promise<{ liked: boolean; likes: number }> {
+
+        console.log(noticiaId);
+        const noticiaRef = this.collection.doc(noticiaId);
+        const likeRef = noticiaRef
+            .collection("likesUsers")
+            .doc(userId);
+
+        return firestoreApp.runTransaction(async (transaction) => {
+
+            const noticiaSnap = await transaction.get(noticiaRef);
+
+            if (!noticiaSnap.exists) {
+                throw new Error("Noticia no encontrada");
+            }
+
+            const likeSnap = await transaction.get(likeRef);
+
+            let liked: boolean;
+            let newLikes: number;
+
+            const currentLikes = noticiaSnap.data()?.likes ?? 0;
+
+            // ===============================
+            // UNLIKE
+            // ===============================
+            if (likeSnap.exists) {
+
+                transaction.delete(likeRef);
+
+                newLikes = Math.max(0, currentLikes - 1);
+
+                transaction.update(noticiaRef, {
+                    likes: newLikes,
+                    updatedAt: admin.firestore.Timestamp.now(),
+                });
+
+                liked = false;
+
+            } else {
+
+                // ===============================
+                // LIKE
+                // ===============================
+
+                transaction.set(likeRef, {
+                    createdAt: admin.firestore.Timestamp.now(),
+                });
+
+                newLikes = currentLikes + 1;
+
+                transaction.update(noticiaRef, {
+                    likes: newLikes,
+                    updatedAt: admin.firestore.Timestamp.now(),
+                });
+
+                liked = true;
+            }
+
+            return {
+                liked,
+                likes: newLikes,
+            };
+        });
     }
 
     private convertDatesToTimestamp(data: any) {
@@ -118,6 +187,7 @@ export class NewService {
             imagenes: dto.imagenes ?? [],
             origen: "app",
             estatus: true,
+            likes: 0,
             createdAt: now,
             updatedAt: now,
         };

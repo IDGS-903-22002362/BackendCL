@@ -3,6 +3,7 @@ export interface CrearNoticiaDTO {
     descripcion: string;
     contenido: string;
     imagenes?: string[];
+
 }
 
 export interface ActualizarNoticiaDTO {

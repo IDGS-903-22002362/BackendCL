@@ -398,6 +398,35 @@ export class UserAppService {
       );
     }
   }
+
+  async getUserByUid(uid: string): Promise<UsuarioApp | null> {
+    const snapshot = await firestoreApp
+      .collection(USUARIOSAPP_COLLECTION)
+      .where("uid", "==", uid)
+      .limit(1)
+      .get();
+    if (snapshot.empty) return null;
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...doc.data() } as UsuarioApp;
+  }
+
+  async addPoints(uid: string, points: number): Promise<UsuarioApp> {
+    const snapshot = await firestoreApp
+      .collection(USUARIOSAPP_COLLECTION)
+      .where("uid", "==", uid)
+      .limit(1)
+      .get();
+    if (snapshot.empty) throw new Error("Usuario no encontrado");
+    const doc = snapshot.docs[0];
+    const userData = doc.data();
+    const nuevosPuntos = (userData.puntosActuales || 0) + points;
+    await doc.ref.update({
+      puntosActuales: nuevosPuntos,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    const updatedDoc = await doc.ref.get();
+    return { id: updatedDoc.id, ...updatedDoc.data() } as UsuarioApp;
+  }
 }
 
 // Exportar instancia única del servicio (Singleton)

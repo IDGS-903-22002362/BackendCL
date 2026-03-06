@@ -49,7 +49,7 @@ export class RachaService {
                 streakCount = streakCount + 1;
             } else {
                 // 3) Si no, reinicia en 0 (primera marca es día 0)
-                streakCount = 0;
+                streakCount = 1;
             }
 
             streakBest = Math.max(streakBest, streakCount);
