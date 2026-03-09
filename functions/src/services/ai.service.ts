@@ -7,34 +7,37 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 class AIService {
 
+    //ia
+
     private model = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash"
+        model: "gemini-pro-latest"
     });
 
     async generarContenidoIA(contenido: string): Promise<string> {
 
-        try {
+        if (!contenido) throw new Error("Contenido nulo");
 
-            if (!contenido) throw new Error("Contenido nulo");
+        try {
 
             const prompt = `
 Actúa como un editor profesional de noticias.
 
 Resume el siguiente contenido en máximo 3 párrafos.
+Mantén un tono informativo y objetivo.
 
 Contenido:
-"""
 ${contenido}
-"""
 
 Resumen:
 `;
 
             const result = await this.model.generateContent(prompt);
 
-            const text = result.response.text();
+            if (!result.response) {
+                throw new Error("Respuesta vacía de Gemini");
+            }
 
-            return text;
+            return result.response.text();
 
         } catch (error) {
             console.error("❌ Error en Gemini AI Service:", error);
