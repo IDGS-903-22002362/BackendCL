@@ -19,7 +19,15 @@ import { syncInstagramPosts } from "./social.cron";
 // Los secrets se inyectan automáticamente como process.env.* en runtime
 export const api = onRequest(
   {
-    secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "GEMINI_API_KEY"],
+    secrets: [
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_PUBLISHABLE_KEY",
+      "STRIPE_CURRENCY",
+      "APP_URL",
+      "JWT_SECRET",
+      "GEMINI_API_KEY"
+    ],
     invoker: "public",
   },
   app,

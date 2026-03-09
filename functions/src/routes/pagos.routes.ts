@@ -9,8 +9,14 @@ import {
   refundPagoSchema,
 } from "../middleware/validators/pago.validator";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
+const pagosRateLimit = createSimpleRateLimiter({
+  keyPrefix: "pagos:critical",
+  windowMs: 60_000,
+  maxRequests: 25,
+});
 
 /**
  * @swagger
@@ -223,6 +229,7 @@ router.post("/webhook", commandController.webhook);
 router.post(
   "/iniciar",
   authMiddleware,
+  pagosRateLimit,
   validateBody(iniciarPagoSchema),
   commandController.iniciar,
 );
@@ -291,6 +298,7 @@ router.post(
   "/:id/reembolso",
   authMiddleware,
   requireAdmin,
+  pagosRateLimit,
   validateParams(pagoIdParamSchema),
   validateBody(refundPagoSchema),
   commandController.reembolso,

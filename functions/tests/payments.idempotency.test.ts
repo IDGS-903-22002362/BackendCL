@@ -6,12 +6,16 @@ type QueryFilter = { field: string; op: string; value: unknown };
 type DocData = Record<string, any>;
 
 let fakeFirestore: ReturnType<typeof createFakeFirestore>;
+let fakeFirestoreApp: ReturnType<typeof createFakeFirestore>;
 
 const stripeMocks = {
   createPaymentIntent: jest.fn(),
   retrievePaymentIntent: jest.fn(),
+  createCheckoutSession: jest.fn(),
+  retrieveCheckoutSession: jest.fn(),
   constructWebhookEvent: jest.fn(),
   createRefund: jest.fn(),
+  createCustomer: jest.fn(),
 };
 
 jest.mock("stripe", () => {
@@ -22,8 +26,17 @@ jest.mock("stripe", () => {
         create: stripeMocks.createPaymentIntent,
         retrieve: stripeMocks.retrievePaymentIntent,
       };
+      checkout = {
+        sessions: {
+          create: stripeMocks.createCheckoutSession,
+          retrieve: stripeMocks.retrieveCheckoutSession,
+        },
+      };
       refunds = {
         create: stripeMocks.createRefund,
+      };
+      customers = {
+        create: stripeMocks.createCustomer,
       };
       webhooks = {
         constructEvent: stripeMocks.constructWebhookEvent,
@@ -58,6 +71,12 @@ jest.mock("../src/config/firebase", () => ({
   firestoreTienda: {
     collection: (name: string) => fakeFirestore.collection(name),
     runTransaction: (cb: any) => fakeFirestore.runTransaction(cb),
+  },
+}));
+
+jest.mock("../src/config/app.firebase", () => ({
+  firestoreApp: {
+    collection: (name: string) => fakeFirestoreApp.collection(name),
   },
 }));
 
@@ -277,11 +296,30 @@ describe("TASK-063 idempotency and dedupe", () => {
   beforeEach(() => {
     process.env.STRIPE_SECRET_KEY = "sk_test_123";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_123";
+    process.env.APP_URL = "http://localhost:3000";
+    process.env.STRIPE_CURRENCY = "mxn";
 
     stripeMocks.createPaymentIntent.mockReset();
     stripeMocks.retrievePaymentIntent.mockReset();
+    stripeMocks.createCheckoutSession.mockReset();
+    stripeMocks.retrieveCheckoutSession.mockReset();
     stripeMocks.constructWebhookEvent.mockReset();
     stripeMocks.createRefund.mockReset();
+    stripeMocks.createCustomer.mockReset();
+
+    fakeFirestoreApp = createFakeFirestore({
+      usuariosApp: {
+        user_1: {
+          uid: "user_1",
+          email: "test@example.com",
+          nombre: "Test User",
+        },
+      },
+    });
+
+    stripeMocks.createCustomer.mockResolvedValue({
+      id: "cus_1",
+    });
   });
 
   it("reuses active payment on two consecutive iniciar calls without header key", async () => {
@@ -506,5 +544,97 @@ describe("TASK-063 idempotency and dedupe", () => {
     expect(eventDoc!.retryCount).toBe(1);
     expect(pago!.estado).toBe(EstadoPago.COMPLETADO);
     expect(orden!.estado).toBe(EstadoOrden.CONFIRMADA);
+  });
+
+  it("creates payment intent using amount computed from DB order total", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_2: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.TARJETA,
+          total: 12.34,
+          items: [],
+        },
+      },
+      pagos: {},
+    });
+
+    stripeMocks.createPaymentIntent.mockResolvedValue({
+      id: "pi_amount_db",
+      client_secret: "secret_amount_db",
+      status: "requires_payment_method",
+      customer: "cus_1",
+    });
+
+    await pagoService.createStripePaymentIntent({
+      orderId: "orden_2",
+      userId: "user_1",
+    });
+
+    expect(stripeMocks.createPaymentIntent).toHaveBeenCalledTimes(1);
+    expect(stripeMocks.createPaymentIntent.mock.calls[0][0].amount).toBe(1234);
+  });
+
+  it("reuses checkout session on repeated creation attempts", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_checkout: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.TARJETA,
+          total: 1500,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 1500,
+              subtotal: 1500,
+            },
+          ],
+        },
+      },
+      pagos: {},
+    });
+
+    stripeMocks.createCheckoutSession.mockResolvedValue({
+      id: "cs_1",
+      url: "https://checkout.stripe/cs_1",
+      payment_status: "unpaid",
+      payment_intent: "pi_cs_1",
+      customer: "cus_1",
+    });
+    stripeMocks.retrieveCheckoutSession.mockResolvedValue({
+      id: "cs_1",
+      url: "https://checkout.stripe/cs_1",
+      payment_status: "unpaid",
+      payment_intent: "pi_cs_1",
+      customer: "cus_1",
+      status: "open",
+    });
+
+    const first = await pagoService.createStripeCheckoutSession({
+      orderId: "orden_checkout",
+      userId: "user_1",
+    });
+
+    const second = await pagoService.createStripeCheckoutSession({
+      orderId: "orden_checkout",
+      userId: "user_1",
+    });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(stripeMocks.createCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails webhook processing when signature is invalid", async () => {
+    stripeMocks.constructWebhookEvent.mockImplementation(() => {
+      throw new Error("invalid signature");
+    });
+
+    await expect(
+      pagoService.procesarWebhookStripe(Buffer.from("{}"), "bad_sig"),
+    ).rejects.toThrow("Firma de webhook invalida");
   });
 });

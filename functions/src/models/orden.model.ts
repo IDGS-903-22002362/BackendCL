@@ -93,6 +93,10 @@ export interface Orden {
   // Campos opcionales para integración futura
   transaccionId?: string; // ID de transacción de la pasarela de pago
   referenciaPago?: string; // Referencia adicional del pago
+  stripePaymentIntentId?: string; // ID del PaymentIntent en Stripe
+  stripeCheckoutSessionId?: string; // ID de Checkout Session en Stripe
+  stripeCustomerId?: string; // Stripe Customer asociado al usuario
+  paymentMetadata?: Record<string, unknown>; // Metadata usada para conciliación
   numeroGuia?: string; // Número de guía de envío
   transportista?: string; // Nombre del transportista
   costoEnvio?: number; // Costo de envío (si aplica)

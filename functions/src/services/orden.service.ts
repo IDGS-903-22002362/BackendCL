@@ -103,13 +103,12 @@ export class OrdenService {
         const precioUnitario = producto.precioPublico;
         const subtotalItem = precioUnitario * item.cantidad;
 
-        // Construcción del item validado con precios del servidor
         const itemValidado: ItemOrden = {
           productoId: item.productoId,
           cantidad: item.cantidad,
           precioUnitario: precioUnitario, // Precio del servidor
           subtotal: subtotalItem, // Cálculo del servidor
-          tallaId: item.tallaId, // Opcional
+          ...(item.tallaId ? { tallaId: item.tallaId } : {}), // Opcional
         };
 
         itemsValidados.push(itemValidado);
