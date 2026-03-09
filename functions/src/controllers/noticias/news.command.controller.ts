@@ -12,10 +12,22 @@ import { mapFirebaseError } from "../../utils/firebase-error.util";
 
 export const create = async (req: Request, res: Response) => {
   try {
-    // Body ya validado por middleware de Zod
     const noticiaData = req.body;
+    const usuarioId = req.user?.uid;
+    const autorNombre = req.user?.nombre; // Asegúrate que el token incluya 'nombre'
+    console.log("Usuario autenticado en create:", {
+      uid: usuarioId,
+      nombre: autorNombre,
+    });
 
-    const nuevaNoticia = await newService.createNew(noticiaData);
+    if (!usuarioId) {
+      return res.status(401).json({
+        success: false,
+        message: "Usuario no autenticado",
+      });
+    }
+
+    const nuevaNoticia = await newService.createNew(noticiaData, usuarioId, autorNombre);
 
     return res.status(201).json({
       success: true,
@@ -25,16 +37,14 @@ export const create = async (req: Request, res: Response) => {
   } catch (error) {
     const mapped = mapFirebaseError(error, {
       unauthorizedMessage: "No autorizado",
-      forbiddenMessage: "Sin permisos para crear noticias en app-oficial-leon",
+      forbiddenMessage: "Sin permisos para crear noticias",
       notFoundMessage: "Recurso relacionado no encontrado",
-      internalMessage: "Error al crear el noticia",
+      internalMessage: "Error al crear la noticia",
     });
-
     console.error("Error en POST /api/noticias:", {
       code: mapped.code,
       status: mapped.status,
     });
-
     return res.status(mapped.status).json({
       success: false,
       message: mapped.message,
@@ -241,14 +251,23 @@ export const like = async (req: Request, res: Response) => {
 };
 
 export const generarIA = async (req: Request, res: Response) => {
-  const { id } = req.params;
+  try {
+    const { id } = req.params;
+    // Agregamos un retorno de la data generada para que el front sepa qué pasó
+    const resultado = await newService.generarIAParaNoticia(id);
 
-  await newService.generarIAParaNoticia(id);
-
-  res.status(200).json({
-    success: true,
-    message: "Contenido IA generado correctamente",
-  });
+    return res.status(200).json({
+      success: true,
+      message: "Contenido IA generado correctamente",
+      data: resultado // Opcional: enviar el resumen generado
+    });
+  } catch (error: any) {
+    console.error("Error en generarIA:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Error al procesar con IA",
+    });
+  }
 };
 
 export const syncInstagramNoticias = async (_req: Request, res: Response) => {
