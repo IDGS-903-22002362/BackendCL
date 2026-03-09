@@ -6,29 +6,25 @@ import swaggerUi from "swagger-ui-express";
 import routes from "./routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
-import type { Request as ExpressRequest } from "express";
 import dotenv from "dotenv";
 import path from "path";
 
-
+// Base env file (safe for deploy tooling) + local override for development.
 dotenv.config({
   path: path.resolve(__dirname, "../.env"),
+});
+dotenv.config({
+  path: path.resolve(__dirname, "../.env.local"),
+  override: true,
 });
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: true }));
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      const expressReq = req as ExpressRequest;
-      if (expressReq.originalUrl.startsWith("/api/pagos/webhook")) {
-        expressReq.rawBody = Buffer.from(buf);
-      }
-    },
-  }),
-);
+app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
+app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
+app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Morgan: Logger de peticiones HTTP (solo en desarrollo)

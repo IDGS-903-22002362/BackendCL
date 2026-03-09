@@ -82,6 +82,7 @@ export interface Pago {
   providerStatus?: string; // Status crudo de Stripe (ej. "succeeded", "requires_action")
   paymentIntentId?: string; // ID del PaymentIntent en Stripe (pi_xxx)
   checkoutSessionId?: string; // ID del Checkout Session en Stripe (cs_xxx)
+  stripeCustomerId?: string; // ID del customer en Stripe (cus_xxx)
 
   // Referencias internas
   transaccionId?: string; // ID interno o referencia legible para el cliente
@@ -101,6 +102,7 @@ export interface Pago {
 
   // Deduplicación de webhooks
   webhookEventIdsProcesados?: string[]; // IDs de eventos de Stripe ya procesados
+  rawEventId?: string; // Último event.id aplicado al pago
 
   // Datos adicionales
   metadata?: Record<string, unknown>; // Datos extra (flexible, sin estructura fija)

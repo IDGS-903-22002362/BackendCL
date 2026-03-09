@@ -1,6 +1,6 @@
 # Compiled JavaScript files
-lib/
-lib-esm/
+/lib/
+/lib-esm/
 
 # Node.js dependencies
 node_modules/

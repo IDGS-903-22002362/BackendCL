@@ -59,6 +59,7 @@ export const iniciar = async (req: Request, res: Response) => {
         paymentIntentId: result.paymentIntentId,
         clientSecret: result.clientSecret,
         status: result.status,
+        stripeCustomerId: result.stripeCustomerId,
       },
     });
   } catch (error) {
@@ -87,7 +88,12 @@ export const webhook = async (req: Request, res: Response) => {
       );
     }
 
-    if (!req.rawBody || req.rawBody.length === 0) {
+    const rawBody =
+      Buffer.isBuffer(req.body) && req.body.length > 0
+        ? req.body
+        : req.rawBody;
+
+    if (!rawBody || rawBody.length === 0) {
       throw new ApiError(
         400,
         "No fue posible obtener el raw body del webhook para validar la firma",
@@ -95,7 +101,7 @@ export const webhook = async (req: Request, res: Response) => {
     }
 
     const result = await pagoService.procesarWebhookStripe(
-      req.rawBody,
+      rawBody,
       stripeSignature,
     );
 
