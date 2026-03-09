@@ -7,47 +7,28 @@ import { z } from "zod";
 export const createNewSchema = z
     .object({
         titulo: z
-            .string({
-                required_error: "El titulo de la noticia es requerida",
-                invalid_type_error: "El titulo debe ser una cadena de texto",
-            })
+            .string()
             .trim()
-            .min(1, "El titulo no puede estar vacío")
-            .max(100, "El titulo no puede exceder los 100 caracteres"),
-
+            .min(1, "El título no puede estar vacío")
+            .max(100, "El título no puede exceder 100 caracteres"),
         descripcion: z
-            .string({
-                required_error: "La descripción de la noticia es requerida",
-                invalid_type_error: "La descripción debe ser una cadena de texto",
-            })
+            .string()
             .trim()
             .min(1, "La descripción no puede estar vacía")
             .max(500, "La descripción no puede exceder 500 caracteres"),
-
-        usuarioId: z
-            .string({
-                required_error: "El ID de usuario es requerido",
-                invalid_type_error: "El ID del autor de la noticia debe ser una cadena de texto",
-            })
-            .optional(),
-
-        imagenes: z
-            .array(z.string().url("Las URLs de imágenes deben ser válidas"), {
-                invalid_type_error: "Las imágenes deben ser un array de URLs",
-            })
-            .max(10, "No se pueden asignar más de 10 imágenes")
-            .optional()
-            .default([]),
-
-        estatus: z
-            .boolean({
-                invalid_type_error: "El campo estatus debe ser un booleano",
-            })
-            .optional()
-            .default(true),
         contenido: z
             .string()
             .min(1, "El contenido no puede estar vacío"),
+        imagenes: z
+            .array(z.string().url("URL de imagen inválida"))
+            .max(10, "Máximo 10 imágenes")
+            .optional()
+            .default([]),
+        categoria: z
+            .enum(["femenil", "varonil", "mixto"], {
+                required_error: "La categoría es obligatoria",
+                invalid_type_error: "Categoría no válida",
+            }),
     })
     .strict(); // Rechaza campos extra (prevención de mass assignment)
 
@@ -57,45 +38,12 @@ export const createNewSchema = z
  */
 export const updateNewSchema = z
     .object({
-        titulo: z
-            .string({
-                required_error: "El titulo de la noticia es requerida",
-                invalid_type_error: "El titulo debe ser una cadena de texto",
-            })
-            .trim()
-            .min(1, "El titulo no puede estar vacío")
-            .max(100, "El titulo no puede exceder los 100 caracteres"),
-
-        descripcion: z
-            .string({
-                required_error: "La descripción de la noticia es requerida",
-                invalid_type_error: "La descripción debe ser una cadena de texto",
-            })
-            .trim()
-            .min(1, "La descripción no puede estar vacía")
-            .max(500, "La descripción no puede exceder 500 caracteres"),
-
-        usuarioId: z
-            .string({
-                required_error: "El ID de usuario es requerido",
-                invalid_type_error: "El ID del autor de la noticia debe ser una cadena de texto",
-            })
-            .min(1, "El ID del autor no puede estar vacío"),
-
-        imagenes: z
-            .array(z.string().url("Las URLs de imágenes deben ser válidas"), {
-                invalid_type_error: "Las imágenes deben ser un array de URLs",
-            })
-            .max(10, "No se pueden asignar más de 10 imágenes")
-            .optional()
-            .default([]),
-
-        estatus: z
-            .boolean({
-                invalid_type_error: "El campo estatus debe ser un booleano",
-            })
-            .optional()
-            .default(true),
+        titulo: z.string().trim().min(1).max(100).optional(),
+        descripcion: z.string().trim().min(1).max(500).optional(),
+        contenido: z.string().min(1).optional(),
+        imagenes: z.array(z.string().url()).max(10).optional(),
+        estatus: z.boolean().optional(),
+        categoria: z.enum(["femenil", "varonil", "mixto"]).optional(),
     })
     .strict(); // Rechaza campos extra
 

@@ -71,13 +71,16 @@ const router = Router();
  */
 router.get("/", optionalAuthMiddleware, queryController.getAll);
 
+// POST / (protegido) - Crear noticia
 /**
  * @swagger
  * /api/noticias:
  *   post:
  *     summary: Crear nueva noticia
- *     description: Crea una nueva noticia en el sistema
+ *     description: Crea una nueva noticia (requiere autenticación)
  *     tags: [News]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -89,10 +92,10 @@ router.get("/", optionalAuthMiddleware, queryController.getAll);
  *         description: Noticia creada exitosamente
  *       400:
  *         description: Error de validación
- *       500:
- *         description: Error del servidor
+ *       401:
+ *         description: No autorizado
  */
-router.post("/", validateBody(createNewSchema), commandController.create);
+router.post("/", authMiddleware, validateBody(createNewSchema), commandController.create);
 
 // 2. Rutas con parámetros específicas
 /**
@@ -147,7 +150,28 @@ router.post(
  */
 router.get("/:id", validateParams(idParamSchema), queryController.getById);
 
-// 5. Ruta especial de IA
+/**
+ * @swagger
+ * /api/noticias/{id}/generar-ia:
+ *   post:
+ *     summary: Generar resumen de la noticia usando Gemini IA
+ *     description: Toma el contenido de una noticia existente y genera un resumen automático.
+ *     tags: [News]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la noticia a resumir
+ *     responses:
+ *       200:
+ *         description: Resumen generado y guardado exitosamente
+ *       404:
+ *         description: Noticia no encontrada
+ *       500:
+ *         description: Error en el servicio de IA
+ */
 router.post(
     "/:id/generar-ia",
     validateParams(idParamSchema),
@@ -155,7 +179,7 @@ router.post(
 );
 
 
-
+// PUT /:id (actualizar)
 /**
  * @swagger
  * /api/noticias/{id}:
@@ -166,16 +190,23 @@ router.post(
  *       - in: path
  *         name: id
  *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateNews'
  *     responses:
  *       200:
  *         description: Noticia actualizada
+ *       400:
+ *         description: Error de validación
+ *       404:
+ *         description: Noticia no encontrada
  */
-router.put(
-    "/:id",
-    validateParams(idParamSchema),
-    validateBody(updateNewSchema),
-    commandController.update
-);
+router.put("/:id", validateParams(idParamSchema), validateBody(updateNewSchema), commandController.update);
 
 /**
  * @swagger

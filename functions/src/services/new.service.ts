@@ -176,30 +176,31 @@ export class NewService {
      * @param noticiaData - Datos de la noticia a crear
      * @returns Promise con la noticia creado incluyendo su ID
      */
-    async createNew(dto: CrearNoticiaDTO): Promise<Noticia> {
+    async createNew(dto: CrearNoticiaDTO, usuarioId: string, autorNombre?: string): Promise<Noticia> {
         const now = new Date();
 
+        //Generar referencia primero (aquí Firebase crea el ID)
+        const docRef = this.collection.doc();
+
         const noticia: Noticia = {
-            id: "",
-            titulo: dto.titulo,
-            descripcion: dto.descripcion,
-            contenido: dto.contenido,
+            id: docRef.id, //mismo ID de Firebase
+            ...dto,
             imagenes: dto.imagenes ?? [],
             origen: "app",
+            usuarioId,
+            autorNombre,
             estatus: true,
             likes: 0,
             createdAt: now,
             updatedAt: now,
         };
 
-        const docRef = await this.collection.add(
+        //Guardar con set()
+        await docRef.set(
             this.convertDatesToTimestamp(noticia)
         );
 
-        return {
-            ...noticia,
-            id: docRef.id,
-        };
+        return noticia;
     }
 
 
