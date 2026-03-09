@@ -603,7 +603,7 @@ class PagoService {
       };
     }
 
-    return this.withStartPaymentLock(
+    return this.withStartPaymentLock<CreateStripePaymentIntentResult>(
       orderId,
       userId,
       async () => {
