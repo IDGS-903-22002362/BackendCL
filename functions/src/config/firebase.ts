@@ -47,4 +47,6 @@ if (!tiendaApp) {
 }
 
 export const firestoreTienda = getFirestore(tiendaApp, "tiendacl");
+// Permitir valores undefined en lugar de lanzar errores (ej. notas, costoEnvio)
+firestoreTienda.settings({ ignoreUndefinedProperties: true });
 export const storageTienda = tiendaApp.storage();
