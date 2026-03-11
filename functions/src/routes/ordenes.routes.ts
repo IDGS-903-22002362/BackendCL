@@ -39,7 +39,7 @@ const router = Router();
  *       - Valida existencia y stock de cada producto
  *       - IVA = 0% (temporal)
  *       - Estado inicial: PENDIENTE
- *       - NO reduce stock automáticamente (funcionalidad futura)
+ *       - Reduce stock automáticamente al crear la orden
  *       - NO requiere autenticación por ahora (agregar en versión futura)
  *     tags: [Orders]
  *     requestBody:

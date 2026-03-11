@@ -21,6 +21,13 @@ jest.mock("../src/config/firebase.admin", () => ({
   },
 }));
 
+jest.mock("../src/services/stock-alert.service", () => ({
+  __esModule: true,
+  default: {
+    notifyRealtime: jest.fn(),
+  },
+}));
+
 import productService from "../src/services/product.service";
 
 function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
@@ -153,6 +160,14 @@ describe("TASK-064 - Actualizar stock de producto", () => {
           ],
           activo: true,
         },
+        prod_tallas_sin_inventario: {
+          clave: "TAL-002",
+          descripcion: "Producto con tallas sin inventario",
+          existencias: 12,
+          tallaIds: ["s", "m", "l"],
+          inventarioPorTalla: [],
+          activo: true,
+        },
       },
       movimientosInventario: {},
     });
@@ -228,6 +243,64 @@ describe("TASK-064 - Actualizar stock de producto", () => {
         cantidadNueva: 9,
       }),
     ).rejects.toThrow("Se requiere tallaId");
+  });
+
+  it("requiere tallaId aunque inventarioPorTalla esté vacío cuando tallaIds existe", async () => {
+    await expect(
+      productService.updateStock("prod_tallas_sin_inventario", {
+        cantidadNueva: 6,
+      }),
+    ).rejects.toThrow("Se requiere tallaId");
+  });
+
+  it("autocompleta tallas faltantes y actualiza talla válida desde 0", async () => {
+    const result = await productService.updateStock("prod_tallas_sin_inventario", {
+      tallaId: "m",
+      cantidadNueva: 6,
+      tipo: "ajuste",
+    });
+
+    expect(result).toMatchObject({
+      productoId: "prod_tallas_sin_inventario",
+      tallaId: "m",
+      cantidadAnterior: 0,
+      cantidadNueva: 6,
+      diferencia: 6,
+      existencias: 6,
+    });
+
+    const productos = fakeFirestore.getCollectionData("productos");
+    expect(productos.prod_tallas_sin_inventario.inventarioPorTalla).toEqual([
+      { tallaId: "s", cantidad: 0 },
+      { tallaId: "m", cantidad: 6 },
+      { tallaId: "l", cantidad: 0 },
+    ]);
+  });
+
+  it("reemplaza inventario por talla en modo masivo", async () => {
+    const result = await productService.replaceSizeInventory("prod_tallas", {
+      inventarioPorTalla: [{ tallaId: "m", cantidad: 9 }],
+      motivo: "Conteo semanal",
+      usuarioId: "admin_2",
+    });
+
+    expect(result).toMatchObject({
+      productoId: "prod_tallas",
+      tallaIds: ["s", "m"],
+      existencias: 9,
+    });
+    expect(result.inventarioPorTalla).toEqual([
+      { tallaId: "s", cantidad: 0 },
+      { tallaId: "m", cantidad: 9 },
+    ]);
+    expect(result.cambios).toHaveLength(2);
+
+    const productos = fakeFirestore.getCollectionData("productos");
+    expect(productos.prod_tallas.existencias).toBe(9);
+    expect(productos.prod_tallas.inventarioPorTalla).toEqual([
+      { tallaId: "s", cantidad: 0 },
+      { tallaId: "m", cantidad: 9 },
+    ]);
   });
 
   it("falla cuando la cantidad es negativa", async () => {

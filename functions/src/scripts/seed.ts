@@ -282,6 +282,13 @@ async function seedProductos() {
       existencias: 50,
       proveedorId: proveedorId,
       tallaIds: ["s", "m", "l", "xl", "xxl"],
+      inventarioPorTalla: [
+        { tallaId: "s", cantidad: 10 },
+        { tallaId: "m", cantidad: 12 },
+        { tallaId: "l", cantidad: 10 },
+        { tallaId: "xl", cantidad: 9 },
+        { tallaId: "xxl", cantidad: 9 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/jersey-local-2024.jpg",
       ],
@@ -299,6 +306,13 @@ async function seedProductos() {
       existencias: 45,
       proveedorId: proveedorId,
       tallaIds: ["s", "m", "l", "xl", "xxl"],
+      inventarioPorTalla: [
+        { tallaId: "s", cantidad: 9 },
+        { tallaId: "m", cantidad: 10 },
+        { tallaId: "l", cantidad: 9 },
+        { tallaId: "xl", cantidad: 9 },
+        { tallaId: "xxl", cantidad: 8 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/jersey-visitante-2024.jpg",
       ],
@@ -316,6 +330,12 @@ async function seedProductos() {
       existencias: 80,
       proveedorId: proveedorId,
       tallaIds: ["s", "m", "l", "xl"],
+      inventarioPorTalla: [
+        { tallaId: "s", cantidad: 20 },
+        { tallaId: "m", cantidad: 22 },
+        { tallaId: "l", cantidad: 20 },
+        { tallaId: "xl", cantidad: 18 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/playera-verde.jpg",
       ],
@@ -333,6 +353,12 @@ async function seedProductos() {
       existencias: 60,
       proveedorId: proveedorId,
       tallaIds: ["xs", "s", "m", "l"],
+      inventarioPorTalla: [
+        { tallaId: "xs", cantidad: 15 },
+        { tallaId: "s", cantidad: 15 },
+        { tallaId: "m", cantidad: 15 },
+        { tallaId: "l", cantidad: 15 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/playera-dama.jpg",
       ],
@@ -350,6 +376,7 @@ async function seedProductos() {
       existencias: 100,
       proveedorId: proveedorId,
       tallaIds: [],
+      inventarioPorTalla: [],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/gorra-verde.jpg",
       ],
@@ -367,6 +394,13 @@ async function seedProductos() {
       existencias: 35,
       proveedorId: proveedorId,
       tallaIds: ["s", "m", "l", "xl", "xxl"],
+      inventarioPorTalla: [
+        { tallaId: "s", cantidad: 7 },
+        { tallaId: "m", cantidad: 8 },
+        { tallaId: "l", cantidad: 8 },
+        { tallaId: "xl", cantidad: 6 },
+        { tallaId: "xxl", cantidad: 6 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/sudadera-negra.jpg",
       ],
@@ -384,6 +418,7 @@ async function seedProductos() {
       existencias: 25,
       proveedorId: proveedorId,
       tallaIds: [],
+      inventarioPorTalla: [],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/balon-oficial.jpg",
       ],
@@ -401,6 +436,11 @@ async function seedProductos() {
       existencias: 55,
       proveedorId: proveedorId,
       tallaIds: ["ch", "med", "gde"],
+      inventarioPorTalla: [
+        { tallaId: "ch", cantidad: 18 },
+        { tallaId: "med", cantidad: 19 },
+        { tallaId: "gde", cantidad: 18 },
+      ],
       imagenes: [
         "https://firebasestorage.googleapis.com/v0/b/ejemplo/playera-infantil.jpg",
       ],

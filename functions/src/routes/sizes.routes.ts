@@ -75,6 +75,31 @@ router.get("/", queryController.getAll);
 
 /**
  * @swagger
+ * /api/tallas/{id}/inventario:
+ *   get:
+ *     summary: Obtener inventario de productos por talla
+ *     description: Retorna los productos activos que usan la talla y su cantidad disponible para esa talla.
+ *     tags: [Sizes]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID de la talla
+ *         schema:
+ *           type: string
+ *           example: "m"
+ *     responses:
+ *       200:
+ *         description: Inventario por talla obtenido exitosamente
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get("/:id/inventario", validateParams(idParamSchema), queryController.getInventory);
+
+/**
+ * @swagger
  * /api/tallas/{id}:
  *   get:
  *     summary: Obtener talla por ID
@@ -201,6 +226,8 @@ router.put(
  *     responses:
  *       200:
  *         description: Talla eliminada exitosamente
+ *       409:
+ *         description: Talla en uso por productos
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  *       500:

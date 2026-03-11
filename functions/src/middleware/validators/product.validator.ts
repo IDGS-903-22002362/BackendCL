@@ -43,6 +43,11 @@ const hasUniqueTallaIds = (items: Array<{ tallaId: string }>): boolean => {
   return uniqueIds.size === items.length;
 };
 
+const hasUniqueStringValues = (items: string[]): boolean => {
+  const unique = new Set(items);
+  return unique.size === items.length;
+};
+
 /**
  * Schema para crear un nuevo producto
  * Valida todos los campos requeridos según el modelo Producto
@@ -115,6 +120,7 @@ export const createProductSchema = z
         invalid_type_error: "Los IDs de talla deben ser un array",
       })
       .max(50, "No se pueden asignar más de 50 tallas")
+      .refine(hasUniqueStringValues, "No se permiten tallas duplicadas")
       .optional()
       .default([]),
 
@@ -238,6 +244,7 @@ export const updateProductSchema = z
     tallaIds: z
       .array(z.string().min(1, "Los IDs de talla no pueden estar vacíos"))
       .max(50, "No se pueden asignar más de 50 tallas")
+      .refine(hasUniqueStringValues, "No se permiten tallas duplicadas")
       .optional(),
 
     inventarioPorTalla: z
@@ -322,6 +329,37 @@ export const updateProductStockSchema = z
       })
       .optional()
       .default("ajuste"),
+
+    motivo: z
+      .string({
+        invalid_type_error: "El motivo debe ser una cadena de texto",
+      })
+      .trim()
+      .max(200, "El motivo no puede exceder 200 caracteres")
+      .optional(),
+
+    referencia: z
+      .string({
+        invalid_type_error: "La referencia debe ser una cadena de texto",
+      })
+      .trim()
+      .max(120, "La referencia no puede exceder 120 caracteres")
+      .optional(),
+  })
+  .strict();
+
+export const replaceSizeInventorySchema = z
+  .object({
+    inventarioPorTalla: z
+      .array(inventarioPorTallaItemSchema, {
+        required_error: "El inventario por talla es requerido",
+        invalid_type_error: "El inventario por talla debe ser un array",
+      })
+      .max(50, "No se pueden asignar más de 50 tallas de inventario")
+      .refine(
+        hasUniqueTallaIds,
+        "No se permiten tallas duplicadas en inventarioPorTalla",
+      ),
 
     motivo: z
       .string({

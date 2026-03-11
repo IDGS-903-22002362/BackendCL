@@ -15,6 +15,11 @@ import {
   AlertaStockTalla,
   ListarAlertasStockQuery,
 } from "../models/inventario.model";
+import {
+  completeInventarioPorTalla,
+  deriveExistenciasFromSizeInventory,
+  normalizeTallaIds,
+} from "../utils/size-inventory.util";
 import stockAlertService from "./stock-alert.service";
 
 /**
@@ -53,6 +58,27 @@ export interface ProductStockUpdateResult {
   createdAt: Date;
 }
 
+export interface ReplaceProductSizeInventoryDTO {
+  inventarioPorTalla: InventarioPorTalla[];
+  motivo?: string;
+  referencia?: string;
+  usuarioId?: string;
+}
+
+export interface ReplaceProductSizeInventoryResult {
+  productoId: string;
+  tallaIds: string[];
+  inventarioPorTalla: InventarioPorTalla[];
+  existencias: number;
+  cambios: Array<{
+    tallaId: string;
+    cantidadAnterior: number;
+    cantidadNueva: number;
+    diferencia: number;
+    movimientoId: string;
+  }>;
+}
+
 /**
  * Clase ProductService
  * Encapsula las operaciones CRUD y consultas de productos
@@ -60,30 +86,66 @@ export interface ProductStockUpdateResult {
 export class ProductService {
   private normalizeInventoryBySize(
     inventarioPorTalla: unknown,
+    tallaIds: unknown = [],
+    strict = false,
   ): InventarioPorTalla[] {
-    if (!Array.isArray(inventarioPorTalla)) {
-      return [];
-    }
+    return completeInventarioPorTalla(tallaIds, inventarioPorTalla, {
+      failOnUnknownSize: strict,
+      failWhenNoSizes: strict,
+    });
+  }
 
-    return inventarioPorTalla
-      .filter(
-        (item): item is { tallaId: unknown; cantidad: unknown } =>
-          typeof item === "object" && item !== null,
-      )
-      .map((item) => {
-        const tallaId = String(item.tallaId ?? "").trim();
-        const cantidadRaw = Number(item.cantidad ?? 0);
-        const cantidad =
-          Number.isFinite(cantidadRaw) && cantidadRaw > 0
-            ? Math.floor(cantidadRaw)
-            : 0;
+  private getDerivedExistencias(
+    tallaIds: unknown,
+    inventarioPorTalla: unknown,
+    fallbackExistencias?: number,
+  ): number {
+    return deriveExistenciasFromSizeInventory(
+      tallaIds,
+      inventarioPorTalla,
+      fallbackExistencias,
+    );
+  }
 
-        return {
-          tallaId,
-          cantidad,
-        };
-      })
-      .filter((item) => item.tallaId.length > 0);
+  private normalizeProduct(
+    id: string,
+    data: FirebaseFirestore.DocumentData,
+  ): Producto {
+    const tallaIds = normalizeTallaIds(data.tallaIds);
+    const inventarioPorTalla = this.normalizeInventoryBySize(
+      data.inventarioPorTalla,
+      tallaIds,
+      false,
+    );
+    const existencias = this.getDerivedExistencias(
+      tallaIds,
+      inventarioPorTalla,
+      data.existencias,
+    );
+
+    return {
+      id,
+      clave: data.clave,
+      descripcion: data.descripcion,
+      lineaId: data.lineaId,
+      categoriaId: data.categoriaId,
+      precioPublico: data.precioPublico,
+      precioCompra: data.precioCompra,
+      existencias,
+      proveedorId: data.proveedorId,
+      tallaIds,
+      inventarioPorTalla,
+      stockMinimoGlobal: this.getNormalizedGlobalThreshold(
+        data.stockMinimoGlobal,
+      ),
+      stockMinimoPorTalla: this.normalizeStockThresholdBySize(
+        data.stockMinimoPorTalla,
+      ),
+      imagenes: data.imagenes || [],
+      activo: data.activo,
+      createdAt: data.createdAt,
+      updatedAt: data.updatedAt,
+    } as Producto;
   }
 
   private normalizeStockThresholdBySize(
@@ -142,6 +204,7 @@ export class ProductService {
       | "lineaId"
       | "categoriaId"
       | "existencias"
+      | "tallaIds"
       | "stockMinimoGlobal"
       | "stockMinimoPorTalla"
       | "inventarioPorTalla"
@@ -153,8 +216,10 @@ export class ProductService {
     const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
       producto.stockMinimoPorTalla,
     );
+    const tallaIds = normalizeTallaIds(producto.tallaIds);
     const inventarioPorTalla = this.normalizeInventoryBySize(
       producto.inventarioPorTalla,
+      tallaIds,
     );
 
     const tallasBajoStock: AlertaStockTalla[] = inventarioPorTalla
@@ -180,9 +245,10 @@ export class ProductService {
       .filter((item): item is AlertaStockTalla => item !== null)
       .sort((a, b) => b.deficit - a.deficit);
 
-    const existencias = Math.max(
-      0,
-      Math.floor(Number(producto.existencias ?? 0)),
+    const existencias = this.getDerivedExistencias(
+      tallaIds,
+      inventarioPorTalla,
+      producto.existencias,
     );
     const globalBajoStock = existencias < stockMinimoGlobal;
     const globalDeficit = globalBajoStock ? stockMinimoGlobal - existencias : 0;
@@ -206,26 +272,18 @@ export class ProductService {
     };
   }
 
-  private getDerivedExistencias(
-    inventarioPorTalla: InventarioPorTalla[],
-    fallbackExistencias?: number,
-  ): number {
-    if (inventarioPorTalla.length === 0) {
-      return Math.max(0, Math.floor(Number(fallbackExistencias ?? 0)));
-    }
+  private getValidatedSizeInventory(
+    tallaIdsInput: unknown,
+    inventarioInput: unknown,
+  ): { tallaIds: string[]; inventarioPorTalla: InventarioPorTalla[] } {
+    const tallaIds = normalizeTallaIds(tallaIdsInput);
+    const inventarioPorTalla = this.normalizeInventoryBySize(
+      inventarioInput,
+      tallaIds,
+      true,
+    );
 
-    return inventarioPorTalla.reduce((acc, item) => acc + item.cantidad, 0);
-  }
-
-  private getMergedTallaIds(
-    tallaIds: string[] = [],
-    inventarioPorTalla: InventarioPorTalla[] = [],
-  ): string[] {
-    const ids = [...tallaIds, ...inventarioPorTalla.map((item) => item.tallaId)]
-      .map((id) => id.trim())
-      .filter((id) => id.length > 0);
-
-    return [...new Set(ids)];
+    return { tallaIds, inventarioPorTalla };
   }
 
   /**
@@ -247,35 +305,9 @@ export class ProductService {
       }
 
       // Mapear documentos a objetos Producto
-      const productos: Producto[] = snapshot.docs.map((doc) => {
-        const data = doc.data();
-
-        return {
-          id: doc.id,
-          clave: data.clave,
-          descripcion: data.descripcion,
-          lineaId: data.lineaId,
-          categoriaId: data.categoriaId,
-          precioPublico: data.precioPublico,
-          precioCompra: data.precioCompra,
-          existencias: data.existencias,
-          proveedorId: data.proveedorId,
-          tallaIds: data.tallaIds || [],
-          inventarioPorTalla: this.normalizeInventoryBySize(
-            data.inventarioPorTalla,
-          ),
-          stockMinimoGlobal: this.getNormalizedGlobalThreshold(
-            data.stockMinimoGlobal,
-          ),
-          stockMinimoPorTalla: this.normalizeStockThresholdBySize(
-            data.stockMinimoPorTalla,
-          ),
-          imagenes: data.imagenes || [],
-          activo: data.activo,
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        } as Producto;
-      });
+      const productos: Producto[] = snapshot.docs.map((doc) =>
+        this.normalizeProduct(doc.id, doc.data()),
+      );
 
       // Ordenar alfabéticamente en memoria
       productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
@@ -305,32 +337,7 @@ export class ProductService {
         return null;
       }
 
-      const data = doc.data()!;
-      return {
-        id: doc.id,
-        clave: data.clave,
-        descripcion: data.descripcion,
-        lineaId: data.lineaId,
-        categoriaId: data.categoriaId,
-        precioPublico: data.precioPublico,
-        precioCompra: data.precioCompra,
-        existencias: data.existencias,
-        proveedorId: data.proveedorId,
-        tallaIds: data.tallaIds || [],
-        inventarioPorTalla: this.normalizeInventoryBySize(
-          data.inventarioPorTalla,
-        ),
-        stockMinimoGlobal: this.getNormalizedGlobalThreshold(
-          data.stockMinimoGlobal,
-        ),
-        stockMinimoPorTalla: this.normalizeStockThresholdBySize(
-          data.stockMinimoPorTalla,
-        ),
-        imagenes: data.imagenes || [],
-        activo: data.activo,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      } as Producto;
+      return this.normalizeProduct(doc.id, doc.data()!);
     } catch (error) {
       console.error(`❌ Error al obtener producto ${id}:`, error);
       throw new Error("Error al obtener el producto");
@@ -350,12 +357,8 @@ export class ProductService {
         .where("activo", "==", true)
         .get();
 
-      const productos: Producto[] = snapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          }) as Producto,
+      const productos: Producto[] = snapshot.docs.map((doc) =>
+        this.normalizeProduct(doc.id, doc.data()),
       );
 
       // Ordenar alfabéticamente en memoria
@@ -381,12 +384,8 @@ export class ProductService {
         .where("activo", "==", true)
         .get();
 
-      const productos: Producto[] = snapshot.docs.map(
-        (doc) =>
-          ({
-            id: doc.id,
-            ...doc.data(),
-          }) as Producto,
+      const productos: Producto[] = snapshot.docs.map((doc) =>
+        this.normalizeProduct(doc.id, doc.data()),
       );
 
       // Ordenar alfabéticamente en memoria
@@ -418,13 +417,7 @@ export class ProductService {
         .get();
 
       const productos: Producto[] = snapshot.docs
-        .map(
-          (doc) =>
-            ({
-              id: doc.id,
-              ...doc.data(),
-            }) as Producto,
-        )
+        .map((doc) => this.normalizeProduct(doc.id, doc.data()))
         .filter(
           (producto) =>
             producto.descripcion.toLowerCase().includes(searchTermLower) ||
@@ -448,7 +441,8 @@ export class ProductService {
   ): Promise<Producto> {
     try {
       const now = admin.firestore.Timestamp.now();
-      const inventarioPorTalla = this.normalizeInventoryBySize(
+      const { tallaIds, inventarioPorTalla } = this.getValidatedSizeInventory(
+        productoData.tallaIds,
         productoData.inventarioPorTalla,
       );
       const stockMinimoGlobal = this.getNormalizedGlobalThreshold(
@@ -457,11 +451,8 @@ export class ProductService {
       const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
         productoData.stockMinimoPorTalla,
       );
-      const tallaIds = this.getMergedTallaIds(
-        productoData.tallaIds,
-        inventarioPorTalla,
-      );
       const existencias = this.getDerivedExistencias(
+        tallaIds,
         inventarioPorTalla,
         productoData.existencias,
       );
@@ -495,12 +486,7 @@ export class ProductService {
 
       // Obtener el documento creado
       const docSnapshot = await docRef.get();
-      const data = docSnapshot.data()!;
-
-      const nuevoProducto: Producto = {
-        id: docRef.id,
-        ...data,
-      } as Producto;
+      const nuevoProducto = this.normalizeProduct(docRef.id, docSnapshot.data()!);
 
       console.log(
         `Producto creado: ${nuevoProducto.descripcion} (ID: ${nuevoProducto.id})`,
@@ -549,12 +535,26 @@ export class ProductService {
 
       // Actualizar con timestamp
       const now = admin.firestore.Timestamp.now();
-      const productoActual = doc.data() as Producto;
+      const productoActual = this.normalizeProduct(doc.id, doc.data()!);
 
-      const inventarioPorTalla =
+      const tallaIds =
+        updateData.tallaIds !== undefined
+          ? normalizeTallaIds(updateData.tallaIds)
+          : normalizeTallaIds(productoActual.tallaIds);
+      const inventarioInput =
         updateData.inventarioPorTalla !== undefined
-          ? this.normalizeInventoryBySize(updateData.inventarioPorTalla)
-          : this.normalizeInventoryBySize(productoActual.inventarioPorTalla);
+          ? updateData.inventarioPorTalla
+          : updateData.tallaIds !== undefined && tallaIds.length === 0
+            ? []
+          : productoActual.inventarioPorTalla;
+      const strictInventoryValidation =
+        updateData.inventarioPorTalla !== undefined ||
+        updateData.tallaIds !== undefined;
+      const inventarioPorTalla = this.normalizeInventoryBySize(
+        inventarioInput,
+        tallaIds,
+        strictInventoryValidation,
+      );
 
       const stockMinimoPorTalla =
         updateData.stockMinimoPorTalla !== undefined
@@ -568,19 +568,17 @@ export class ProductService {
           ? this.getNormalizedGlobalThreshold(updateData.stockMinimoGlobal)
           : this.getNormalizedGlobalThreshold(productoActual.stockMinimoGlobal);
 
-      const shouldDeriveFromInventory =
-        updateData.inventarioPorTalla !== undefined ||
-        this.normalizeInventoryBySize(productoActual.inventarioPorTalla)
-          .length > 0;
-
       const payload: Partial<Omit<Producto, "id" | "createdAt">> = {
         ...updateData,
         updatedAt: now,
+        tallaIds,
+        inventarioPorTalla,
+        existencias: this.getDerivedExistencias(
+          tallaIds,
+          inventarioPorTalla,
+          updateData.existencias ?? productoActual.existencias,
+        ),
       };
-
-      if (updateData.inventarioPorTalla !== undefined) {
-        payload.inventarioPorTalla = inventarioPorTalla;
-      }
 
       if (updateData.stockMinimoPorTalla !== undefined) {
         payload.stockMinimoPorTalla = stockMinimoPorTalla;
@@ -590,33 +588,13 @@ export class ProductService {
         payload.stockMinimoGlobal = stockMinimoGlobal;
       }
 
-      if (
-        updateData.tallaIds !== undefined ||
-        updateData.inventarioPorTalla !== undefined
-      ) {
-        payload.tallaIds = this.getMergedTallaIds(
-          updateData.tallaIds ?? productoActual.tallaIds ?? [],
-          inventarioPorTalla,
-        );
-      }
-
-      if (shouldDeriveFromInventory) {
-        payload.existencias = this.getDerivedExistencias(
-          inventarioPorTalla,
-          updateData.existencias ?? productoActual.existencias,
-        );
-      }
-
       await docRef.update({
         ...payload,
       });
 
       // Obtener el documento actualizado
       const updatedDoc = await docRef.get();
-      const updatedProducto: Producto = {
-        id: updatedDoc.id,
-        ...updatedDoc.data(),
-      } as Producto;
+      const updatedProducto = this.normalizeProduct(updatedDoc.id, updatedDoc.data()!);
 
       console.log(`Producto actualizado: ${updatedProducto.descripcion}`);
       return updatedProducto;
@@ -632,6 +610,7 @@ export class ProductService {
 
   async getStockBySize(id: string): Promise<{
     productoId: string;
+    tallaIds: string[];
     existencias: number;
     inventarioPorTalla: InventarioPorTalla[];
   } | null> {
@@ -646,13 +625,17 @@ export class ProductService {
       }
 
       const data = doc.data()!;
+      const tallaIds = normalizeTallaIds(data.tallaIds);
       const inventarioPorTalla = this.normalizeInventoryBySize(
         data.inventarioPorTalla,
+        tallaIds,
       );
 
       return {
         productoId: doc.id,
+        tallaIds,
         existencias: this.getDerivedExistencias(
+          tallaIds,
           inventarioPorTalla,
           data.existencias,
         ),
@@ -698,6 +681,7 @@ export class ProductService {
           lineaId: data.lineaId,
           categoriaId: data.categoriaId,
           existencias: data.existencias,
+          tallaIds: data.tallaIds,
           stockMinimoGlobal: data.stockMinimoGlobal,
           stockMinimoPorTalla: data.stockMinimoPorTalla,
           inventarioPorTalla: data.inventarioPorTalla,
@@ -769,11 +753,13 @@ export class ProductService {
 
           const data = snapshot.data() as Producto;
           const now = admin.firestore.Timestamp.now();
-
+          const tallaIdsProducto = normalizeTallaIds(data.tallaIds);
           const inventarioPorTallaActual = this.normalizeInventoryBySize(
             data.inventarioPorTalla,
+            tallaIdsProducto,
+            false,
           );
-          const usaInventarioPorTalla = inventarioPorTallaActual.length > 0;
+          const usaInventarioPorTalla = tallaIdsProducto.length > 0;
 
           let tallaIdMovimiento: string | null = null;
           let cantidadAnterior = 0;
@@ -792,53 +778,33 @@ export class ProductService {
               );
             }
 
-            const tallaIdsProducto = Array.isArray(data.tallaIds)
-              ? data.tallaIds.map((id) => String(id).trim())
-              : [];
-
-            if (
-              tallaIdsProducto.length > 0 &&
-              !tallaIdsProducto.includes(tallaId)
-            ) {
+            if (!tallaIdsProducto.includes(tallaId)) {
               throw new Error(
                 `La talla \"${tallaId}\" no pertenece al producto ${productoId}`,
               );
             }
 
-            const tallaIndex = inventarioPorTallaActual.findIndex(
-              (item) => item.tallaId === tallaId,
+            const inventarioMap = new Map(
+              inventarioPorTallaActual.map((item) => [item.tallaId, item.cantidad]),
             );
+            cantidadAnterior = inventarioMap.get(tallaId) ?? 0;
+            inventarioMap.set(tallaId, cantidadNueva);
 
             tallaIdMovimiento = tallaId;
-            cantidadAnterior =
-              tallaIndex >= 0
-                ? inventarioPorTallaActual[tallaIndex].cantidad
-                : 0;
-
-            if (tallaIndex >= 0) {
-              inventarioPorTallaActualizado = [...inventarioPorTallaActual];
-              inventarioPorTallaActualizado[tallaIndex] = {
-                ...inventarioPorTallaActualizado[tallaIndex],
-                cantidad: cantidadNueva,
-              };
-            } else {
-              inventarioPorTallaActualizado = [
-                ...inventarioPorTallaActual,
-                { tallaId, cantidad: cantidadNueva },
-              ];
-            }
+            inventarioPorTallaActualizado = tallaIdsProducto.map((id) => ({
+              tallaId: id,
+              cantidad: inventarioMap.get(id) ?? 0,
+            }));
 
             existenciasActualizadas = this.getDerivedExistencias(
+              tallaIdsProducto,
               inventarioPorTallaActualizado,
               data.existencias,
             );
 
             transaction.update(docRef, {
               inventarioPorTalla: inventarioPorTallaActualizado,
-              tallaIds: this.getMergedTallaIds(
-                data.tallaIds || [],
-                inventarioPorTallaActualizado,
-              ),
+              tallaIds: tallaIdsProducto,
               existencias: existenciasActualizadas,
               updatedAt: now,
             });
@@ -853,6 +819,8 @@ export class ProductService {
             existenciasActualizadas = cantidadNueva;
 
             transaction.update(docRef, {
+              tallaIds: [],
+              inventarioPorTalla: [],
               existencias: existenciasActualizadas,
               updatedAt: now,
             });
@@ -872,6 +840,7 @@ export class ProductService {
             lineaId: data.lineaId,
             categoriaId: data.categoriaId,
             existencias: existenciasActualizadas,
+            tallaIds: tallaIdsProducto,
             stockMinimoGlobal,
             stockMinimoPorTalla,
             inventarioPorTalla: inventarioPorTallaActualizado,
@@ -937,6 +906,149 @@ export class ProductService {
         error instanceof Error
           ? error.message
           : "Error al actualizar stock del producto",
+      );
+    }
+  }
+
+  async replaceSizeInventory(
+    productoId: string,
+    payload: ReplaceProductSizeInventoryDTO,
+  ): Promise<ReplaceProductSizeInventoryResult> {
+    const docRef = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .doc(productoId);
+
+    try {
+      const txResult = await firestoreTienda.runTransaction(
+        async (transaction) => {
+          const snapshot = await transaction.get(docRef);
+
+          if (!snapshot.exists) {
+            throw new Error(`Producto con ID ${productoId} no encontrado`);
+          }
+
+          const data = snapshot.data() as Producto;
+          const now = admin.firestore.Timestamp.now();
+          const tallaIds = normalizeTallaIds(data.tallaIds);
+
+          if (tallaIds.length === 0) {
+            throw new Error(
+              "Este producto no maneja inventario por talla; no se puede usar inventario-tallas",
+            );
+          }
+
+          const inventarioActual = this.normalizeInventoryBySize(
+            data.inventarioPorTalla,
+            tallaIds,
+            false,
+          );
+          const inventarioNuevo = this.normalizeInventoryBySize(
+            payload.inventarioPorTalla,
+            tallaIds,
+            true,
+          );
+          const actualMap = new Map(
+            inventarioActual.map((item) => [item.tallaId, item.cantidad]),
+          );
+          const cambios: ReplaceProductSizeInventoryResult["cambios"] = [];
+
+          for (const item of inventarioNuevo) {
+            const cantidadAnterior = actualMap.get(item.tallaId) ?? 0;
+            const cantidadNueva = item.cantidad;
+
+            if (cantidadAnterior === cantidadNueva) {
+              continue;
+            }
+
+            const movimientoRef = firestoreTienda
+              .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+              .doc();
+            const diferencia = cantidadNueva - cantidadAnterior;
+
+            transaction.set(movimientoRef, {
+              productoId,
+              tallaId: item.tallaId,
+              cantidadAnterior,
+              cantidadNueva,
+              diferencia,
+              tipo: "ajuste",
+              motivo: payload.motivo ?? "Ajuste masivo por talla",
+              referencia: payload.referencia,
+              usuarioId: payload.usuarioId,
+              createdAt: now,
+            });
+
+            cambios.push({
+              tallaId: item.tallaId,
+              cantidadAnterior,
+              cantidadNueva,
+              diferencia,
+              movimientoId: movimientoRef.id,
+            });
+          }
+
+          const existencias = this.getDerivedExistencias(
+            tallaIds,
+            inventarioNuevo,
+            data.existencias,
+          );
+
+          transaction.update(docRef, {
+            tallaIds,
+            inventarioPorTalla: inventarioNuevo,
+            existencias,
+            updatedAt: now,
+          });
+
+          const stockMinimoGlobal = this.getNormalizedGlobalThreshold(
+            data.stockMinimoGlobal,
+          );
+          const stockMinimoPorTalla = this.normalizeStockThresholdBySize(
+            data.stockMinimoPorTalla,
+          );
+          const lowStockSnapshot = this.evaluateLowStock({
+            id: productoId,
+            clave: data.clave,
+            descripcion: data.descripcion,
+            lineaId: data.lineaId,
+            categoriaId: data.categoriaId,
+            existencias,
+            tallaIds,
+            stockMinimoGlobal,
+            stockMinimoPorTalla,
+            inventarioPorTalla: inventarioNuevo,
+          });
+
+          return {
+            result: {
+              productoId,
+              tallaIds,
+              inventarioPorTalla: inventarioNuevo,
+              existencias,
+              cambios,
+            } as ReplaceProductSizeInventoryResult,
+            lowStockActive: lowStockSnapshot.totalAlertas > 0,
+          };
+        },
+      );
+
+      if (txResult.lowStockActive) {
+        const alert = await this.getLowStockAlertByProductId(productoId);
+        if (alert) {
+          await stockAlertService.notifyRealtime([alert]);
+        }
+      }
+
+      return txResult.result;
+    } catch (error) {
+      console.error(
+        `❌ Error al reemplazar inventario por talla de producto ${productoId}:`,
+        error,
+      );
+      throw new Error(
+        error instanceof Error
+          ? error.message
+          : "Error al actualizar inventario por talla",
       );
     }
   }

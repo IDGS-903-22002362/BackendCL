@@ -32,6 +32,10 @@ import {
   MetodoPago,
 } from "../models/orden.model";
 import ordenService from "./orden.service";
+import {
+  completeInventarioPorTalla,
+  normalizeTallaIds,
+} from "../utils/size-inventory.util";
 
 /**
  * Nombre de la colección en Firestore
@@ -44,25 +48,6 @@ const PRODUCTOS_COLLECTION = "productos";
  * Encapsula las operaciones de carrito de compras
  */
 export class CarritoService {
-  private normalizeInventoryBySize(
-    inventarioPorTalla: unknown,
-  ): Array<{ tallaId: string; cantidad: number }> {
-    if (!Array.isArray(inventarioPorTalla)) {
-      return [];
-    }
-
-    return inventarioPorTalla
-      .filter(
-        (item): item is { tallaId: unknown; cantidad: unknown } =>
-          typeof item === "object" && item !== null,
-      )
-      .map((item) => ({
-        tallaId: String(item.tallaId ?? "").trim(),
-        cantidad: Math.max(0, Math.floor(Number(item.cantidad ?? 0))),
-      }))
-      .filter((item) => item.tallaId.length > 0);
-  }
-
   private resolveStockContext(
     prodData: Record<string, any>,
     tallaId?: string,
@@ -71,11 +56,16 @@ export class CarritoService {
     tallaId?: string;
     usesInventoryBySize: boolean;
   } {
-    const inventarioPorTalla = this.normalizeInventoryBySize(
-      prodData.inventarioPorTalla,
-    );
+    const tallaIds = normalizeTallaIds(prodData.tallaIds);
+    const usesInventoryBySize = tallaIds.length > 0;
 
-    if (inventarioPorTalla.length === 0) {
+    if (!usesInventoryBySize) {
+      if (tallaId?.trim()) {
+        throw new Error(
+          `El producto "${prodData.descripcion || "seleccionado"}" no maneja inventario por talla`,
+        );
+      }
+
       return {
         available: Math.max(0, Math.floor(Number(prodData.existencias ?? 0))),
         usesInventoryBySize: false,
@@ -89,28 +79,22 @@ export class CarritoService {
       );
     }
 
-    const tallaIds = Array.isArray(prodData.tallaIds)
-      ? prodData.tallaIds.map((id: unknown) => String(id).trim())
-      : [];
-
-    if (tallaIds.length > 0 && !tallaIds.includes(tallaIdNormalizada)) {
+    if (!tallaIds.includes(tallaIdNormalizada)) {
       throw new Error(
         `La talla "${tallaIdNormalizada}" no es válida para "${prodData.descripcion || "el producto"}"`,
       );
     }
 
+    const inventarioPorTalla = completeInventarioPorTalla(
+      tallaIds,
+      prodData.inventarioPorTalla,
+    );
     const inventarioTalla = inventarioPorTalla.find(
       (item) => item.tallaId === tallaIdNormalizada,
     );
 
-    if (!inventarioTalla) {
-      throw new Error(
-        `La talla "${tallaIdNormalizada}" no está disponible para "${prodData.descripcion || "el producto"}"`,
-      );
-    }
-
     return {
-      available: inventarioTalla.cantidad,
+      available: inventarioTalla?.cantidad ?? 0,
       tallaId: tallaIdNormalizada,
       usesInventoryBySize: true,
     };

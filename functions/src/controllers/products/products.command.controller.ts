@@ -21,9 +21,27 @@ export const create = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error en POST /api/productos:", error);
-    return res.status(500).json({
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (
+        msg.includes("ya existe") ||
+        msg.includes("no pertenece al producto") ||
+        msg.includes("no maneja inventario por talla") ||
+        msg.includes("inventarioprotalla")
+      ) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
       success: false,
-      message: "Error al crear el producto",
+      message:
+        statusCode === 400
+          ? error instanceof Error
+            ? error.message
+            : "Error de validación"
+          : "Error al crear el producto",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }
@@ -45,13 +63,29 @@ export const update = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error en PUT /api/productos/:id:", error);
-    const statusCode =
-      error instanceof Error && error.message.includes("no encontrado")
-        ? 404
-        : 500;
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("no encontrado")) {
+        statusCode = 404;
+      } else if (
+        msg.includes("ya existe") ||
+        msg.includes("no pertenece al producto") ||
+        msg.includes("no maneja inventario por talla") ||
+        msg.includes("inventarioprotalla")
+      ) {
+        statusCode = 400;
+      }
+    }
+
     return res.status(statusCode).json({
       success: false,
-      message: "Error al actualizar el producto",
+      message:
+        statusCode === 400
+          ? error instanceof Error
+            ? error.message
+            : "Error de validación"
+          : "Error al actualizar el producto",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }
@@ -223,6 +257,56 @@ export const updateStock = async (req: Request, res: Response) => {
           : statusCode === 404
             ? "Producto no encontrado"
             : "Error al actualizar stock del producto",
+      error:
+        statusCode === 500 && error instanceof Error
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+export const replaceSizeInventory = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const result = await productService.replaceSizeInventory(id, {
+      inventarioPorTalla: req.body.inventarioPorTalla,
+      motivo: req.body.motivo,
+      referencia: req.body.referencia,
+      usuarioId: req.user?.uid,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Inventario por talla actualizado exitosamente",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en PUT /api/productos/:id/inventario-tallas:", error);
+
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("no encontrado")) {
+        statusCode = 404;
+      } else if (
+        msg.includes("no maneja inventario por talla") ||
+        msg.includes("no pertenece al producto") ||
+        msg.includes("inventarioprotalla")
+      ) {
+        statusCode = 400;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 400
+          ? error instanceof Error
+            ? error.message
+            : "Error de validación"
+          : statusCode === 404
+            ? "Producto no encontrado"
+            : "Error al actualizar inventario por talla",
       error:
         statusCode === 500 && error instanceof Error
           ? error.message
