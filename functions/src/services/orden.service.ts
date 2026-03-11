@@ -22,6 +22,10 @@ import { Producto } from "../models/producto.model";
 import { RolUsuario } from "../models/usuario.model";
 import { TipoMovimientoInventario } from "../models/inventario.model";
 import inventoryService from "./inventory.service";
+import {
+  completeInventarioPorTalla,
+  normalizeTallaIds,
+} from "../utils/size-inventory.util";
 
 /**
  * Colección de órdenes en Firestore
@@ -39,6 +43,50 @@ const TASA_IVA = 0; // 0% temporal (cambiar a 0.16 cuando se requiera 16%)
  * Encapsula las operaciones de creación y gestión de órdenes
  */
 export class OrdenService {
+  private resolveStockContextForItem(
+    producto: Producto,
+    item: { cantidad: number; tallaId?: string; productoId: string },
+  ): { available: number; tallaId?: string } {
+    const tallaIds = normalizeTallaIds(producto.tallaIds);
+
+    if (tallaIds.length === 0) {
+      if (item.tallaId?.trim()) {
+        throw new Error(
+          `El producto "${producto.descripcion}" no maneja inventario por talla`,
+        );
+      }
+
+      return {
+        available: Math.max(0, Math.floor(Number(producto.existencias ?? 0))),
+      };
+    }
+
+    const tallaId = item.tallaId?.trim();
+    if (!tallaId) {
+      throw new Error(
+        `Se requiere tallaId para "${producto.descripcion}" al crear la orden`,
+      );
+    }
+
+    if (!tallaIds.includes(tallaId)) {
+      throw new Error(
+        `La talla "${tallaId}" no es válida para "${producto.descripcion}"`,
+      );
+    }
+
+    const inventarioPorTalla = completeInventarioPorTalla(
+      tallaIds,
+      producto.inventarioPorTalla,
+    );
+    const cantidadDisponible =
+      inventarioPorTalla.find((size) => size.tallaId === tallaId)?.cantidad ?? 0;
+
+    return {
+      available: cantidadDisponible,
+      tallaId,
+    };
+  }
+
   /**
    * Crea una nueva orden de compra
    * REGLAS DE NEGOCIO:
@@ -67,6 +115,7 @@ export class OrdenService {
       // PASO 1: Validar y obtener información de todos los productos
       const itemsValidados: ItemOrden[] = [];
       let subtotalCalculado = 0;
+      const requestedByVariant = new Map<string, number>();
 
       for (const item of data.items) {
         // Obtener producto desde Firestore
@@ -91,13 +140,20 @@ export class OrdenService {
           );
         }
 
+        const stockContext = this.resolveStockContextForItem(producto, item);
+        const variantKey = `${item.productoId}::${stockContext.tallaId ?? "__GLOBAL__"}`;
+        const requestedSoFar = requestedByVariant.get(variantKey) ?? 0;
+        const requestedTotal = requestedSoFar + item.cantidad;
+
         // Validar stock disponible
-        if (producto.existencias < item.cantidad) {
+        if (stockContext.available < requestedTotal) {
           throw new Error(
             `Stock insuficiente para "${producto.descripcion}". ` +
-              `Disponible: ${producto.existencias}, Solicitado: ${item.cantidad}`,
+              `${stockContext.tallaId ? `Talla: ${stockContext.tallaId}. ` : ""}` +
+              `Disponible: ${stockContext.available}, Solicitado: ${requestedTotal}`,
           );
         }
+        requestedByVariant.set(variantKey, requestedTotal);
 
         // Recalcular precios desde el servidor (SEGURIDAD: ignorar valores del cliente)
         const precioUnitario = producto.precioPublico;
@@ -108,7 +164,7 @@ export class OrdenService {
           cantidad: item.cantidad,
           precioUnitario: precioUnitario, // Precio del servidor
           subtotal: subtotalItem, // Cálculo del servidor
-          ...(item.tallaId ? { tallaId: item.tallaId } : {}), // Opcional
+          ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}), // Opcional
         };
 
         itemsValidados.push(itemValidado);

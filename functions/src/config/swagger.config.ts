@@ -5,6 +5,7 @@ import {
   updateProductSchema,
   deleteImageSchema,
   updateProductStockSchema,
+  replaceSizeInventorySchema,
 } from "../middleware/validators/product.validator";
 import {
   createCategorySchema,
@@ -260,6 +261,7 @@ const swaggerDefinition = {
       UpdateProduct: zodToJsonSchema(updateProductSchema),
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
+      ReplaceSizeInventory: zodToJsonSchema(replaceSizeInventorySchema),
 
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
@@ -324,10 +326,44 @@ const swaggerDefinition = {
         type: "object",
         properties: {
           productoId: { type: "string", example: "prod_12345" },
+          tallaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["s", "m", "l"],
+          },
           existencias: { type: "integer", example: 18 },
           inventarioPorTalla: {
             type: "array",
             items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+        },
+      },
+      ReplaceSizeInventoryResult: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_12345" },
+          tallaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["s", "m", "l"],
+          },
+          existencias: { type: "integer", example: 15 },
+          inventarioPorTalla: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+          cambios: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tallaId: { type: "string", example: "m" },
+                cantidadAnterior: { type: "integer", example: 5 },
+                cantidadNueva: { type: "integer", example: 9 },
+                diferencia: { type: "integer", example: 4 },
+                movimientoId: { type: "string", example: "mov_abc123" },
+              },
+            },
           },
         },
       },

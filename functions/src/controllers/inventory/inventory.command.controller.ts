@@ -57,7 +57,8 @@ export const registerMovement = async (req: Request, res: Response) => {
         msg.includes("stock insuficiente") ||
         msg.includes("se requiere") ||
         msg.includes("no maneja inventario") ||
-        msg.includes("no puede")
+        msg.includes("no puede") ||
+        msg.includes("no pertenece al producto")
       ) {
         statusCode = 400;
       }
@@ -119,7 +120,8 @@ export const registerAdjustment = async (req: Request, res: Response) => {
         msg.includes("se requiere") ||
         msg.includes("no maneja inventario") ||
         msg.includes("no puede") ||
-        msg.includes("idempotency-key")
+        msg.includes("idempotency-key") ||
+        msg.includes("no pertenece al producto")
       ) {
         statusCode = 400;
       }

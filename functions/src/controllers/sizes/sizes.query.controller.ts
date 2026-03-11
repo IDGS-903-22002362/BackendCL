@@ -4,7 +4,11 @@
  */
 
 import { Request, Response } from "express";
-import { getAllSizes, getSizeById } from "../../services/size.service";
+import {
+  getAllSizes,
+  getSizeById,
+  getSizeInventory,
+} from "../../services/size.service";
 
 /**
  * GET /api/tallas
@@ -57,6 +61,41 @@ export async function getById(req: Request, res: Response): Promise<void> {
       success: false,
       message:
         error instanceof Error ? error.message : "Error al obtener talla",
+    });
+  }
+}
+
+/**
+ * GET /api/tallas/:id/inventario
+ * Obtener inventario de productos para una talla específica
+ */
+export async function getInventory(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const result = await getSizeInventory(id);
+
+    res.status(200).json({
+      success: true,
+      count: result.productos.length,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en getInventory size:", error);
+
+    if (error instanceof Error && error.message.includes("no encontrada")) {
+      res.status(404).json({
+        success: false,
+        message: error.message,
+      });
+      return;
+    }
+
+    res.status(500).json({
+      success: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Error al obtener inventario por talla",
     });
   }
 }

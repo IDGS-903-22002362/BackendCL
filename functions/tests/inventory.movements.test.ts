@@ -232,6 +232,7 @@ describe("TASK-065 - Movimientos de inventario", () => {
   it("registra movimiento de entrada y calcula cantidadNueva", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_1",
+      tallaIds: [],
       existencias: 10,
       inventarioPorTalla: [],
     });
@@ -303,6 +304,7 @@ describe("TASK-065 - Movimientos de inventario", () => {
   it("registra venta relacionada con orden", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_2",
+      tallaIds: ["m"],
       existencias: 8,
       inventarioPorTalla: [{ tallaId: "m", cantidad: 8 }],
     });
