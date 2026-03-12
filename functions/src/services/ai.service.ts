@@ -1,49 +1,33 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import aiConfig from "../config/ai.config";
+import geminiAdapter from "./ai/adapters/gemini.adapter";
 
 class AIService {
-
-    //ia
-
-    private model = genAI.getGenerativeModel({
-        model: "gemini-pro-latest"
-    });
-
-    async generarContenidoIA(contenido: string): Promise<string> {
-
-        if (!contenido) throw new Error("Contenido nulo");
-
-        try {
-
-            const prompt = `
-Actúa como un editor profesional de noticias.
-
-Resume el siguiente contenido en máximo 3 párrafos.
-Mantén un tono informativo y objetivo.
-
-Contenido:
-${contenido}
-
-Resumen:
-`;
-
-            const result = await this.model.generateContent(prompt);
-
-            if (!result.response) {
-                throw new Error("Respuesta vacía de Gemini");
-            }
-
-            return result.response.text();
-
-        } catch (error) {
-            console.error("❌ Error en Gemini AI Service:", error);
-            throw new Error("No se pudo generar el resumen con Inteligencia Artificial.");
-        }
+  async generarContenidoIA(contenido: string): Promise<string> {
+    if (!contenido || !contenido.trim()) {
+      throw new Error("Contenido nulo");
     }
+
+    try {
+      const result = await geminiAdapter.generate({
+        model: aiConfig.gemini.summaryModel,
+        systemInstruction:
+          "Eres un editor profesional de noticias. Resume con tono informativo, objetivo y sin inventar datos.",
+        prompt: [
+          "Resume el siguiente contenido en maximo 3 parrafos.",
+          "Contenido:",
+          contenido.trim(),
+        ].join("\n\n"),
+      });
+
+      if (!result.text.trim()) {
+        throw new Error("Respuesta vacia de Gemini");
+      }
+
+      return result.text.trim();
+    } catch (error) {
+      throw new Error("No se pudo generar el resumen con Inteligencia Artificial.");
+    }
+  }
 }
 
 export default new AIService();
