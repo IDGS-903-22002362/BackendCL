@@ -1,4 +1,6 @@
+import "./config/env.bootstrap";
 import app from "./app";
+import { assertAiConfig, getAiRuntimeSummary } from "./config/ai.config";
 
 // Verificar el entorno
 if (process.env.IS_LOCAL !== "true") {
@@ -8,6 +10,10 @@ if (process.env.IS_LOCAL !== "true") {
 }
 
 const PORT = Number(process.env.PORT) || 3000;
+
+assertAiConfig({ requireTryOn: true });
+
+console.log("AI runtime config validated:", getAiRuntimeSummary());
 
 app.listen(PORT, () => {
   console.log(`

@@ -59,6 +59,10 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
+import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
+import { createTryOnJobSchema } from "../middleware/validators/ai-tryon.validator";
+import { uploadAiFileBodySchema } from "../middleware/validators/ai-file.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -157,6 +161,14 @@ const swaggerDefinition = {
     {
       name: "Authentication",
       description: "Autenticación y autorización de usuarios",
+    },
+    {
+      name: "AI",
+      description: "Chat AI, uploads y try-on para e-commerce",
+    },
+    {
+      name: "AI Admin",
+      description: "Observabilidad y administración del módulo AI",
     },
     {
       name: "Debug",
@@ -266,6 +278,10 @@ const swaggerDefinition = {
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+      CreateAiSession: zodToJsonSchema(createAiSessionSchema),
+      SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
+      CreateTryOnJob: zodToJsonSchema(createTryOnJobSchema),
+      UploadAiFileBody: zodToJsonSchema(uploadAiFileBodySchema),
 
       CreateCategory: zodToJsonSchema(createCategorySchema),
       UpdateCategory: zodToJsonSchema(updateCategorySchema),
