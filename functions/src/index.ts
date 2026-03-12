@@ -18,8 +18,17 @@ import { sendLowStockDailyDigest } from "./stock-alert.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
 
-assertAiConfig({ requireTryOn: true });
-console.log("AI runtime config validated:", getAiRuntimeSummary());
+let apiAiConfigValidated = false;
+
+const validateApiAiConfigOnce = (): void => {
+  if (apiAiConfigValidated) {
+    return;
+  }
+
+  assertAiConfig({ requireGemini: true, requireTryOn: true });
+  console.log("AI runtime config validated:", getAiRuntimeSummary());
+  apiAiConfigValidated = true;
+};
 
 // Exportar la API de Express como una Cloud Function HTTPS
 // Los secrets se inyectan automáticamente como process.env.* en runtime
@@ -44,7 +53,10 @@ export const api = onRequest(
     ],
     invoker: "public",
   },
-  app,
+  (req, res) => {
+    validateApiAiConfigOnce();
+    app(req, res);
+  },
 );
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;
