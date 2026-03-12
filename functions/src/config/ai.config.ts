@@ -1,6 +1,7 @@
 export type GeminiExecutionMode = "apiKey" | "vertexai";
 
 interface AssertAiConfigOptions {
+  requireGemini?: boolean;
   requireTryOn?: boolean;
 }
 
@@ -120,19 +121,27 @@ export const getAiRuntimeSummary = () => ({
 });
 
 export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
-  if (aiConfig.gemini.mode === "apiKey" && !aiConfig.gemini.apiKey) {
-    throw new Error("GEMINI_API_KEY es requerido cuando AI_GEMINI_MODE=apiKey");
-  }
+  const requireGemini = options.requireGemini ?? true;
 
-  if (aiConfig.gemini.mode === "vertexai") {
-    if (!aiConfig.gemini.project) {
+  if (requireGemini) {
+    if (aiConfig.gemini.mode === "apiKey" && !aiConfig.gemini.apiKey) {
       throw new Error(
-        "GCP_PROJECT_ID es requerido cuando AI_GEMINI_MODE=vertexai",
+        "GEMINI_API_KEY es requerido cuando AI_GEMINI_MODE=apiKey",
       );
     }
 
-    if (!aiConfig.gemini.region) {
-      throw new Error("GCP_REGION es requerido cuando AI_GEMINI_MODE=vertexai");
+    if (aiConfig.gemini.mode === "vertexai") {
+      if (!aiConfig.gemini.project) {
+        throw new Error(
+          "GCP_PROJECT_ID es requerido cuando AI_GEMINI_MODE=vertexai",
+        );
+      }
+
+      if (!aiConfig.gemini.region) {
+        throw new Error(
+          "GCP_REGION es requerido cuando AI_GEMINI_MODE=vertexai",
+        );
+      }
     }
   }
 
