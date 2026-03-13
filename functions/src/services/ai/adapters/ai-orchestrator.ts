@@ -1,3 +1,10 @@
+import {
+  Content,
+  FunctionCall,
+  createPartFromFunctionCall,
+  createPartFromFunctionResponse,
+  createPartFromText,
+} from "@google/genai";
 import aiConfig from "../../../config/ai.config";
 import { AiMessageRole, AiToolCallStatus } from "../../../models/ai/ai.model";
 import logger from "../../../utils/logger";
@@ -30,6 +37,7 @@ export interface OrchestrateAiMessageResult {
 }
 
 export const AI_ASSISTANT_USER_ID = "ai-assistant";
+const AI_DIRECT_RESPONSE_INSTRUCTION = `${AI_SYSTEM_INSTRUCTIONS}\nSi ya cuentas con informacion suficiente a partir de los resultados de tools, responde directamente al usuario y no invoques mas tools.`;
 
 const buildAssistantFallbackText = (
   toolCalls: Array<{ id: string; toolName: string; status: string }>,
@@ -53,8 +61,187 @@ const resolveAssistantText = (
   return buildAssistantFallbackText(toolCalls);
 };
 
+const buildConversationPrompt = (
+  sessionSummary: string | undefined,
+  historyText: string,
+  currentMessage: string,
+): string =>
+  `Contexto:\n${sessionSummary || "Sin resumen previo."}\n\nHistorial reciente:\n${historyText}\n\nMensaje actual del usuario:\n${currentMessage}`;
+
+const buildFunctionCallSignature = (functionCalls: FunctionCall[]): string =>
+  functionCalls
+    .map((functionCall) => ({
+      name: functionCall.name || "",
+      args: functionCall.args || {},
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((functionCall) => JSON.stringify(functionCall))
+    .join("|");
+
 class AiOrchestrator {
   private readonly baseLogger = logger.child({ component: "ai-orchestrator" });
+
+  private async finalizeAssistantResponse(input: {
+    sessionId: string;
+    requestId?: string;
+    userMessage: string;
+    sessionSummary?: string;
+    assistantText: string;
+    toolCallSummaries: Array<{ id: string; toolName: string; status: string }>;
+    startedAt: number;
+  }): Promise<OrchestrateAiMessageResult> {
+    const assistantMessage = await aiMessageService.createMessage({
+      sessionId: input.sessionId,
+      userId: AI_ASSISTANT_USER_ID,
+      role: AiMessageRole.ASSISTANT,
+      content: input.assistantText,
+      model: aiConfig.gemini.primaryModel,
+      toolCallIds: input.toolCallSummaries.map((toolCall) => toolCall.id),
+      latencyMs: Date.now() - input.startedAt,
+    });
+
+    const summarySource =
+      `${input.sessionSummary || ""}\nUsuario: ${input.userMessage}\nAsistente: ${input.assistantText}`.slice(
+        -aiConfig.gemini.maxSummaryChars,
+      );
+    await aiSessionService.updateSessionSummary(input.sessionId, summarySource);
+    await aiSessionService.touchSession(input.sessionId);
+
+    this.baseLogger.info("ai_message_completed", {
+      requestId: input.requestId,
+      sessionId: input.sessionId,
+      assistantMessageId: assistantMessage.id,
+      toolCalls: input.toolCallSummaries.length,
+    });
+
+    return {
+      text: input.assistantText,
+      toolCalls: input.toolCallSummaries,
+      model: aiConfig.gemini.primaryModel,
+      latencyMs: Date.now() - input.startedAt,
+    };
+  }
+
+  private async synthesizeFinalAnswer(input: {
+    contents: Content[];
+    toolCallSummaries: Array<{ id: string; toolName: string; status: string }>;
+    sessionId: string;
+    requestId?: string;
+  }): Promise<string> {
+    try {
+      const response = await geminiAdapter.generate({
+        model: aiConfig.gemini.primaryModel,
+        contents: input.contents,
+        systemInstruction: AI_DIRECT_RESPONSE_INSTRUCTION,
+      });
+
+      return resolveAssistantText(response.text, input.toolCallSummaries);
+    } catch (error) {
+      this.baseLogger.warn("ai_final_synthesis_failed", {
+        requestId: input.requestId,
+        sessionId: input.sessionId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return buildAssistantFallbackText(input.toolCallSummaries);
+    }
+  }
+
+  private async executeFunctionCalls(input: {
+    functionCalls: FunctionCall[];
+    sessionId: string;
+    messageId: string;
+    userId: string;
+    role: RolUsuario;
+    requestId?: string;
+    capabilities: string[];
+    toolCallSummaries: Array<{ id: string; toolName: string; status: string }>;
+  }): Promise<Content> {
+    const responseParts = [];
+
+    for (let index = 0; index < input.functionCalls.length; index += 1) {
+      const functionCall = input.functionCalls[index];
+      const toolName = functionCall.name || "unknown_tool";
+      const toolCallId = functionCall.id || `${toolName}-${Date.now()}-${index}`;
+      const rawArgs = (functionCall.args || {}) as Record<string, unknown>;
+      const tool = toolRegistryService.getToolByName(toolName);
+
+      if (!tool) {
+        responseParts.push(
+          createPartFromFunctionResponse(toolCallId, toolName, {
+            error: {
+              code: "TOOL_NOT_FOUND",
+              message: `La tool ${toolName} no esta registrada`,
+            },
+          }),
+        );
+        continue;
+      }
+
+      try {
+        const parsedInput = tool.schema.parse(rawArgs);
+        const toolStartedAt = Date.now();
+        const toolOutput = await tool.execute(parsedInput, {
+          userId: input.userId,
+          role: input.role,
+          requestId: input.requestId,
+          capabilities: input.capabilities,
+        });
+        const toolCall = await aiToolCallService.createToolCall({
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+          userId: input.userId,
+          toolName: tool.name,
+          input: parsedInput,
+          output: toolOutput,
+          status: AiToolCallStatus.SUCCESS,
+          durationMs: Date.now() - toolStartedAt,
+        });
+
+        input.toolCallSummaries.push({
+          id: toolCall.id!,
+          toolName: tool.name,
+          status: toolCall.status,
+        });
+        responseParts.push(
+          createPartFromFunctionResponse(toolCallId, tool.name, toolOutput),
+        );
+      } catch (error) {
+        const toolCall = await aiToolCallService.createToolCall({
+          sessionId: input.sessionId,
+          messageId: input.messageId,
+          userId: input.userId,
+          toolName: tool.name,
+          input: rawArgs,
+          status: AiToolCallStatus.ERROR,
+          errorCode: "TOOL_EXECUTION_FAILED",
+          errorMessage:
+            error instanceof Error ? error.message : "Tool execution failed",
+        });
+
+        input.toolCallSummaries.push({
+          id: toolCall.id!,
+          toolName: tool.name,
+          status: toolCall.status,
+        });
+        responseParts.push(
+          createPartFromFunctionResponse(toolCallId, tool.name, {
+            error: {
+              code: "TOOL_EXECUTION_FAILED",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Tool execution failed",
+            },
+          }),
+        );
+      }
+    }
+
+    return {
+      role: "user",
+      parts: responseParts,
+    };
+  }
 
   async handleMessage(
     input: OrchestrateAiMessageInput,
@@ -93,24 +280,33 @@ class AiOrchestrator {
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n");
 
-    let prompt = `Contexto:\n${session.summary || "Sin resumen previo."}\n\nHistorial reciente:\n${historyText}\n\nMensaje actual del usuario:\n${input.message}`;
+    const prompt = buildConversationPrompt(
+      session.summary,
+      historyText,
+      input.message,
+    );
     const toolCallSummaries: Array<{
       id: string;
       toolName: string;
       status: string;
     }> = [];
     const declaredTools = allowedTools.map(buildFunctionDeclaration);
-    const declaredToolNames = allowedTools.map((tool) => tool.name);
+    const contents: Content[] = [
+      {
+        role: "user",
+        parts: [createPartFromText(prompt)],
+      },
+    ];
+    const seenFunctionCallSignatures = new Set<string>();
 
     for (let step = 0; step < aiConfig.gemini.maxToolSteps; step += 1) {
       let response;
       try {
         response = await geminiAdapter.generate({
           model: aiConfig.gemini.primaryModel,
-          prompt,
+          contents,
           systemInstruction: AI_SYSTEM_INSTRUCTIONS,
           tools: declaredTools,
-          allowedFunctionNames: declaredToolNames,
         });
       } catch (error) {
         const canRetryWithoutTools =
@@ -132,7 +328,7 @@ class AiOrchestrator {
 
         response = await geminiAdapter.generate({
           model: aiConfig.gemini.primaryModel,
-          prompt,
+          contents,
           systemInstruction: AI_SYSTEM_INSTRUCTIONS,
         });
       }
@@ -142,107 +338,102 @@ class AiOrchestrator {
           response.text,
           toolCallSummaries,
         );
-        const assistantMessage = await aiMessageService.createMessage({
+        return this.finalizeAssistantResponse({
           sessionId: input.sessionId,
-          userId: AI_ASSISTANT_USER_ID,
-          role: AiMessageRole.ASSISTANT,
-          content: assistantText,
-          model: aiConfig.gemini.primaryModel,
-          toolCallIds: toolCallSummaries.map((toolCall) => toolCall.id),
-          latencyMs: Date.now() - startedAt,
+          requestId: input.requestId,
+          userMessage: input.message,
+          sessionSummary: session.summary,
+          assistantText,
+          toolCallSummaries,
+          startedAt,
         });
+      }
 
-        const summarySource =
-          `${session.summary || ""}\nUsuario: ${input.message}\nAsistente: ${assistantText}`.slice(
-            -aiConfig.gemini.maxSummaryChars,
-          );
-        await aiSessionService.updateSessionSummary(
-          input.sessionId,
-          summarySource,
-        );
-        await aiSessionService.touchSession(input.sessionId);
-
-        this.baseLogger.info("ai_message_completed", {
+      const signature = buildFunctionCallSignature(response.functionCalls);
+      if (seenFunctionCallSignatures.has(signature)) {
+        this.baseLogger.warn("ai_tool_call_loop_detected", {
           requestId: input.requestId,
           sessionId: input.sessionId,
-          assistantMessageId: assistantMessage.id,
-          toolCalls: toolCallSummaries.length,
+          signature,
+          step,
         });
+        const assistantText = await this.synthesizeFinalAnswer({
+          contents,
+          toolCallSummaries,
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+        });
+        return this.finalizeAssistantResponse({
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          userMessage: input.message,
+          sessionSummary: session.summary,
+          assistantText,
+          toolCallSummaries,
+          startedAt,
+        });
+      }
+      seenFunctionCallSignatures.add(signature);
 
-        return {
-          text: assistantText,
-          toolCalls: toolCallSummaries,
-          model: aiConfig.gemini.primaryModel,
-          latencyMs: Date.now() - startedAt,
-        };
+      contents.push({
+        role: "model",
+        parts: response.functionCalls.map((functionCall) =>
+          createPartFromFunctionCall(
+            functionCall.name || "",
+            (functionCall.args || {}) as Record<string, unknown>,
+          ),
+        ),
+      });
+
+      const functionResponseContent = await this.executeFunctionCalls({
+        functionCalls: response.functionCalls,
+        sessionId: input.sessionId,
+        messageId: userMessage.id!,
+        userId: input.userId,
+        role: input.role,
+        requestId: input.requestId,
+        capabilities,
+        toolCallSummaries,
+      });
+      if (functionResponseContent.parts && functionResponseContent.parts.length) {
+        contents.push(functionResponseContent);
       }
 
-      const toolOutputs: string[] = [];
-      for (const functionCall of response.functionCalls) {
-        const tool = toolRegistryService.getToolByName(functionCall.name || "");
-        if (!tool) {
-          continue;
-        }
-
-        const parsedInput = tool.schema.parse(
-          (functionCall.args || {}) as Record<string, unknown>,
-        );
-
-        try {
-          const toolStartedAt = Date.now();
-          const toolOutput = await tool.execute(parsedInput, {
-            userId: input.userId,
-            role: input.role,
-            requestId: input.requestId,
-            capabilities,
-          });
-          const toolCall = await aiToolCallService.createToolCall({
-            sessionId: input.sessionId,
-            messageId: userMessage.id!,
-            userId: input.userId,
-            toolName: tool.name,
-            input: parsedInput,
-            output: toolOutput,
-            status: AiToolCallStatus.SUCCESS,
-            durationMs: Date.now() - toolStartedAt,
-          });
-
-          toolCallSummaries.push({
-            id: toolCall.id!,
-            toolName: tool.name,
-            status: toolCall.status,
-          });
-          toolOutputs.push(
-            `Tool ${tool.name} output: ${JSON.stringify(toolOutput)}`,
-          );
-        } catch (error) {
-          const toolCall = await aiToolCallService.createToolCall({
-            sessionId: input.sessionId,
-            messageId: userMessage.id!,
-            userId: input.userId,
-            toolName: tool.name,
-            input: parsedInput,
-            status: AiToolCallStatus.ERROR,
-            errorCode: "TOOL_EXECUTION_FAILED",
-            errorMessage:
-              error instanceof Error ? error.message : "Tool execution failed",
-          });
-
-          toolCallSummaries.push({
-            id: toolCall.id!,
-            toolName: tool.name,
-            status: toolCall.status,
-          });
-          toolOutputs.push(
-            `Tool ${tool.name} error: ${error instanceof Error ? error.message : "Error desconocido"}`,
-          );
-        }
+      if (step === aiConfig.gemini.maxToolSteps - 1) {
+        this.baseLogger.warn("ai_tool_call_step_limit_reached", {
+          requestId: input.requestId,
+          sessionId: input.sessionId,
+          step,
+          toolCallCount: toolCallSummaries.length,
+        });
+        const assistantText = await this.synthesizeFinalAnswer({
+          contents,
+          toolCallSummaries,
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+        });
+        return this.finalizeAssistantResponse({
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          userMessage: input.message,
+          sessionSummary: session.summary,
+          assistantText,
+          toolCallSummaries,
+          startedAt,
+        });
       }
-
-      prompt = `${prompt}\n\nResultados de tools:\n${toolOutputs.join("\n")}`;
     }
 
-    throw new Error("El orquestador AI excedio el maximo de pasos permitidos");
+    const assistantText = buildAssistantFallbackText(toolCallSummaries);
+    return this.finalizeAssistantResponse({
+      sessionId: input.sessionId,
+      requestId: input.requestId,
+      userMessage: input.message,
+      sessionSummary: session.summary,
+      assistantText,
+      toolCallSummaries,
+      startedAt,
+    });
   }
 }
 

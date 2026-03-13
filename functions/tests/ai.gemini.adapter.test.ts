@@ -1,5 +1,9 @@
 describe("GeminiAdapter", () => {
   const originalEnv = { ...process.env };
+  const functionCallingModes = {
+    AUTO: "AUTO",
+    ANY: "ANY",
+  };
 
   beforeEach(() => {
     jest.resetModules();
@@ -33,9 +37,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
@@ -53,6 +55,49 @@ describe("GeminiAdapter", () => {
     });
   });
 
+  it("envia function calling en modo AUTO cuando solo recibe tools declaradas", async () => {
+    const generateContent = jest.fn().mockResolvedValue({
+      text: "ok",
+      functionCalls: [],
+    });
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: functionCallingModes,
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await geminiAdapter.generate({
+      contents: [{ role: "user", parts: [{ text: "hola" }] }],
+      tools: [
+        {
+          name: "buscar_productos",
+          description: "Buscar productos",
+        },
+      ],
+    });
+
+    expect(generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contents: [{ role: "user", parts: [{ text: "hola" }] }],
+        config: expect.objectContaining({
+          toolConfig: {
+            functionCallingConfig: {
+              mode: "AUTO",
+            },
+          },
+        }),
+      }),
+    );
+  });
+
   it("envia function calling en modo ANY con allowedFunctionNames", async () => {
     const generateContent = jest.fn().mockResolvedValue({
       text: "ok",
@@ -65,9 +110,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
@@ -121,9 +164,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
@@ -169,9 +210,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
@@ -207,9 +246,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
@@ -260,9 +297,7 @@ describe("GeminiAdapter", () => {
           generateContent,
         },
       })),
-      FunctionCallingConfigMode: {
-        ANY: "ANY",
-      },
+      FunctionCallingConfigMode: functionCallingModes,
     }));
 
     const {
