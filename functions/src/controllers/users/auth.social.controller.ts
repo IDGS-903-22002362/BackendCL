@@ -38,7 +38,7 @@ const getFirebaseWebApiKey = (): string => {
 const signInWithEmailAndPassword = async (
   email: string,
   password: string,
-): Promise<string> => {
+): Promise<{ idToken: string; uid: string; email: string }> => {
   const apiKey = getFirebaseWebApiKey();
   const endpoint = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
 
@@ -49,11 +49,26 @@ const signInWithEmailAndPassword = async (
   });
 
   const idToken = response.data?.idToken as string | undefined;
+  const uid = response.data?.localId as string | undefined;
+  const responseEmail = response.data?.email as string | undefined;
   if (!idToken) {
     throw new Error("No se pudo obtener idToken de Firebase Auth");
   }
 
-  return idToken;
+  if (!uid || !responseEmail) {
+    throw new Error("Respuesta incompleta de Firebase Auth");
+  }
+
+  return { idToken, uid, email: responseEmail };
+};
+
+const getIdentityToolkitErrorCode = (error: unknown): string | undefined => {
+  if (!axios.isAxiosError(error)) {
+    return undefined;
+  }
+
+  const message = error.response?.data?.error?.message;
+  return typeof message === "string" ? message : undefined;
 };
 
 export const registerOrLogin = async (req: Request, res: Response) => {
@@ -67,6 +82,10 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       req.body;
 
     let token = headerToken;
+    let resolvedUid: string | undefined;
+    let resolvedEmail: string | undefined;
+    let resolvedName: string | undefined;
+    let resolvedProvider: string | undefined;
 
     // Flujo actual: si ya viene token en header, se mantiene tal cual.
     // Flujo nuevo: si no viene token, se autentica con email/password para obtener idToken.
@@ -81,29 +100,99 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       const normalizedEmail = String(email).toLowerCase().trim();
 
       try {
-        token = await signInWithEmailAndPassword(
+        const signInResult = await signInWithEmailAndPassword(
           normalizedEmail,
           String(password),
         );
+        token = signInResult.idToken;
+        resolvedUid = signInResult.uid;
+        resolvedEmail = signInResult.email;
+        resolvedName = typeof nombre === "string" ? nombre.trim() : undefined;
+        resolvedProvider = "password";
       } catch (signInError) {
-        const errorCode =
-          axios.isAxiosError(signInError) &&
-          typeof signInError.response?.data?.error?.message === "string"
-            ? signInError.response.data.error.message
-            : undefined;
+        const errorCode = getIdentityToolkitErrorCode(signInError);
 
-        if (errorCode === "EMAIL_NOT_FOUND") {
-          await authAppOficial.createUser({
-            email: normalizedEmail,
-            password: String(password),
-            displayName: typeof nombre === "string" ? nombre.trim() : undefined,
-          });
+        // Con Email Enumeration Protection, Firebase puede devolver
+        // INVALID_LOGIN_CREDENTIALS tanto para "no existe" como para "password incorrecto".
+        // Intentamos crear: si ya existe, tratamos como credenciales inválidas.
+        const shouldTryCreateUser =
+          errorCode === "EMAIL_NOT_FOUND" ||
+          errorCode === "INVALID_LOGIN_CREDENTIALS";
 
-          token = await signInWithEmailAndPassword(
+        if (shouldTryCreateUser) {
+          try {
+            await authAppOficial.createUser({
+              email: normalizedEmail,
+              password: String(password),
+              displayName:
+                typeof nombre === "string" ? nombre.trim() : undefined,
+            });
+          } catch (createUserError: unknown) {
+            const createUserCode =
+              createUserError &&
+              typeof createUserError === "object" &&
+              "code" in createUserError
+                ? String((createUserError as { code?: string }).code || "")
+                : "";
+
+            if (
+              createUserCode === "auth/email-already-exists" ||
+              createUserCode === "auth/invalid-password"
+            ) {
+              const message =
+                createUserCode === "auth/invalid-password"
+                  ? "La contraseña no cumple los requisitos mínimos"
+                  : "Credenciales inválidas";
+
+              return res.status(401).json({
+                success: false,
+                message,
+              });
+            }
+
+            if (createUserCode.startsWith("auth/")) {
+              const message = createUserCode.includes("password")
+                ? "La contraseña no cumple los requisitos mínimos"
+                : "No fue posible registrar al usuario";
+
+              return res.status(400).json({
+                success: false,
+                message,
+              });
+            }
+
+            throw createUserError;
+          }
+
+          const signInResult = await signInWithEmailAndPassword(
             normalizedEmail,
             String(password),
           );
-        } else if (errorCode === "INVALID_PASSWORD") {
+          token = signInResult.idToken;
+          resolvedUid = signInResult.uid;
+          resolvedEmail = signInResult.email;
+          resolvedName = typeof nombre === "string" ? nombre.trim() : undefined;
+          resolvedProvider = "password";
+        } else if (
+          errorCode === "INVALID_PASSWORD" ||
+          errorCode === "USER_DISABLED"
+        ) {
+          return res.status(401).json({
+            success: false,
+            message: "Credenciales inválidas",
+          });
+        } else if (
+          errorCode === "INVALID_API_KEY" ||
+          errorCode === "API_KEY_INVALID" ||
+          errorCode === "PROJECT_NOT_FOUND" ||
+          errorCode === "OPERATION_NOT_ALLOWED"
+        ) {
+          return res.status(500).json({
+            success: false,
+            message:
+              "Configuración de autenticación inválida en servidor (API key o proveedor email/password)",
+          });
+        } else if (axios.isAxiosError(signInError)) {
           return res.status(401).json({
             success: false,
             message: "Credenciales inválidas",
@@ -114,9 +203,25 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       }
     }
 
-    // 2. Verificar token de Firebase
-    const decoded = await authAppOficial.verifyIdToken(token);
-    const { uid, email: decodedEmail, name, firebase } = decoded;
+    let uid: string;
+    let decodedEmail: string;
+    let name: string | undefined;
+    let firebaseProvider = resolvedProvider;
+
+    // Si el token viene por Authorization (social/client flow), verificamos idToken.
+    // Si el login se resolvió en backend por email/password, usamos los datos
+    // ya validados por Identity Toolkit.
+    if (resolvedUid && resolvedEmail) {
+      uid = resolvedUid;
+      decodedEmail = resolvedEmail;
+      name = resolvedName;
+    } else {
+      const decoded = await authAppOficial.verifyIdToken(token);
+      uid = decoded.uid;
+      decodedEmail = decoded.email || "";
+      name = decoded.name;
+      firebaseProvider = decoded.firebase?.sign_in_provider;
+    }
 
     if (!decodedEmail) {
       return res
@@ -125,17 +230,17 @@ export const registerOrLogin = async (req: Request, res: Response) => {
     }
 
     // 4. Detectar provider
-    const firebaseProvider = firebase?.sign_in_provider ?? "password";
+    const providerSource = firebaseProvider ?? "password";
     const providerMap: Record<string, "google" | "email" | "apple"> = {
       "google.com": "google",
       password: "email",
       "apple.com": "apple",
     };
-    const provider = providerMap[firebaseProvider];
+    const provider = providerMap[providerSource];
     if (!provider) {
       return res.status(400).json({
         success: false,
-        message: `Provider no soportado: ${firebaseProvider}`,
+        message: `Provider no soportado: ${providerSource}`,
       });
     }
 
@@ -220,7 +325,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     } as jwt.SignOptions);
 
-    console.log("🔑 Token generado para", usuario.email, ":", jwtToken);
+    console.log("🔑 Token generado para", usuario.email);
 
     // 7. Respuesta exitosa
     return res.status(200).json({
@@ -231,6 +336,13 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       usuario,
     });
   } catch (error) {
+    const originalMessage =
+      error instanceof Error ? error.message : String(error);
+    const originalCode =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: string }).code || "unknown")
+        : "unknown";
+
     const mapped = mapFirebaseError(error, {
       unauthorizedMessage: "Token inválido o expirado",
       forbiddenMessage: "Sin permisos para acceder",
@@ -242,6 +354,8 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       code: mapped.code,
       status: mapped.status,
       route: req.originalUrl,
+      originalCode,
+      originalMessage,
     });
 
     return res.status(mapped.status).json({
