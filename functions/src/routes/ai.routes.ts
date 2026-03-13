@@ -1,10 +1,24 @@
 import { Router } from "express";
 import { authMiddleware } from "../utils/middlewares";
-import { validateBody, validateParams } from "../middleware/validation.middleware";
-import { createAiSessionSchema, sessionIdParamSchema } from "../middleware/validators/ai-session.validator";
+import { asyncHandler } from "../utils/error-handler";
+import {
+  validateBody,
+  validateParams,
+} from "../middleware/validation.middleware";
+import {
+  createAiSessionSchema,
+  sessionIdParamSchema,
+} from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
-import { createTryOnJobSchema, tryOnJobIdParamSchema } from "../middleware/validators/ai-tryon.validator";
-import { aiChatRateLimiter, aiTryOnRateLimiter, aiUploadRateLimiter } from "../middleware/ai-rate-limit.middleware";
+import {
+  createTryOnJobSchema,
+  tryOnJobIdParamSchema,
+} from "../middleware/validators/ai-tryon.validator";
+import {
+  aiChatRateLimiter,
+  aiTryOnRateLimiter,
+  aiUploadRateLimiter,
+} from "../middleware/ai-rate-limit.middleware";
 import { requireAiAdmin } from "../middleware/ai-authz.middleware";
 import { aiUploadMiddleware } from "../services/ai/storage/ai-upload.middleware";
 import * as chatController from "../controllers/ai/chat.controller";
@@ -38,7 +52,12 @@ router.use(authMiddleware);
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post("/chat/sessions", aiChatRateLimiter, validateBody(createAiSessionSchema), chatController.createSession);
+router.post(
+  "/chat/sessions",
+  aiChatRateLimiter,
+  validateBody(createAiSessionSchema),
+  asyncHandler(chatController.createSession),
+);
 /**
  * @swagger
  * /api/ai/chat/sessions:
@@ -53,7 +72,11 @@ router.post("/chat/sessions", aiChatRateLimiter, validateBody(createAiSessionSch
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.get("/chat/sessions", aiChatRateLimiter, chatController.listSessions);
+router.get(
+  "/chat/sessions",
+  aiChatRateLimiter,
+  asyncHandler(chatController.listSessions),
+);
 /**
  * @swagger
  * /api/ai/chat/sessions/{id}:
@@ -78,7 +101,12 @@ router.get("/chat/sessions", aiChatRateLimiter, chatController.listSessions);
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get("/chat/sessions/:id", aiChatRateLimiter, validateParams(sessionIdParamSchema), chatController.getSessionDetail);
+router.get(
+  "/chat/sessions/:id",
+  aiChatRateLimiter,
+  validateParams(sessionIdParamSchema),
+  asyncHandler(chatController.getSessionDetail),
+);
 /**
  * @swagger
  * /api/ai/chat/messages:
@@ -101,7 +129,12 @@ router.get("/chat/sessions/:id", aiChatRateLimiter, validateParams(sessionIdPara
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post("/chat/messages", aiChatRateLimiter, validateBody(sendAiMessageSchema), chatController.sendMessage);
+router.post(
+  "/chat/messages",
+  aiChatRateLimiter,
+  validateBody(sendAiMessageSchema),
+  asyncHandler(chatController.sendMessage),
+);
 
 /**
  * @swagger
@@ -131,7 +164,12 @@ router.post("/chat/messages", aiChatRateLimiter, validateBody(sendAiMessageSchem
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post("/files/upload", aiUploadRateLimiter, aiUploadMiddleware.single("file"), filesController.uploadUserImage);
+router.post(
+  "/files/upload",
+  aiUploadRateLimiter,
+  aiUploadMiddleware.single("file"),
+  asyncHandler(filesController.uploadUserImage),
+);
 
 /**
  * @swagger
@@ -155,7 +193,12 @@ router.post("/files/upload", aiUploadRateLimiter, aiUploadMiddleware.single("fil
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post("/tryon/jobs", aiTryOnRateLimiter, validateBody(createTryOnJobSchema), tryonController.createTryOnJob);
+router.post(
+  "/tryon/jobs",
+  aiTryOnRateLimiter,
+  validateBody(createTryOnJobSchema),
+  asyncHandler(tryonController.createTryOnJob),
+);
 /**
  * @swagger
  * /api/ai/tryon/jobs:
@@ -170,7 +213,11 @@ router.post("/tryon/jobs", aiTryOnRateLimiter, validateBody(createTryOnJobSchema
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.get("/tryon/jobs", aiTryOnRateLimiter, tryonController.listTryOnJobs);
+router.get(
+  "/tryon/jobs",
+  aiTryOnRateLimiter,
+  asyncHandler(tryonController.listTryOnJobs),
+);
 /**
  * @swagger
  * /api/ai/tryon/jobs/{id}:
@@ -195,7 +242,12 @@ router.get("/tryon/jobs", aiTryOnRateLimiter, tryonController.listTryOnJobs);
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get("/tryon/jobs/:id", aiTryOnRateLimiter, validateParams(tryOnJobIdParamSchema), tryonController.getTryOnJob);
+router.get(
+  "/tryon/jobs/:id",
+  aiTryOnRateLimiter,
+  validateParams(tryOnJobIdParamSchema),
+  asyncHandler(tryonController.getTryOnJob),
+);
 /**
  * @swagger
  * /api/ai/tryon/jobs/{id}/download:
@@ -220,7 +272,12 @@ router.get("/tryon/jobs/:id", aiTryOnRateLimiter, validateParams(tryOnJobIdParam
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get("/tryon/jobs/:id/download", aiTryOnRateLimiter, validateParams(tryOnJobIdParamSchema), tryonController.getTryOnDownloadLink);
+router.get(
+  "/tryon/jobs/:id/download",
+  aiTryOnRateLimiter,
+  validateParams(tryOnJobIdParamSchema),
+  asyncHandler(tryonController.getTryOnDownloadLink),
+);
 
 /**
  * @swagger
@@ -238,7 +295,11 @@ router.get("/tryon/jobs/:id/download", aiTryOnRateLimiter, validateParams(tryOnJ
  *       403:
  *         $ref: '#/components/responses/403Forbidden'
  */
-router.get("/admin/metrics", requireAiAdmin, adminController.getMetrics);
+router.get(
+  "/admin/metrics",
+  requireAiAdmin,
+  asyncHandler(adminController.getMetrics),
+);
 /**
  * @swagger
  * /api/ai/admin/jobs:
@@ -255,6 +316,10 @@ router.get("/admin/metrics", requireAiAdmin, adminController.getMetrics);
  *       403:
  *         $ref: '#/components/responses/403Forbidden'
  */
-router.get("/admin/jobs", requireAiAdmin, adminController.listJobs);
+router.get(
+  "/admin/jobs",
+  requireAiAdmin,
+  asyncHandler(adminController.listJobs),
+);
 
 export default router;

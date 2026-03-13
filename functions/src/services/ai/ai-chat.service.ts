@@ -5,7 +5,12 @@ import aiToolCallService from "./memory/tool-call.service";
 import aiOrchestrator from "./adapters/ai-orchestrator";
 
 class AiChatService {
-  async createSession(input: { userId: string; role: RolUsuario; channel: string; title?: string }) {
+  async createSession(input: {
+    userId: string;
+    role: RolUsuario;
+    channel: string;
+    title?: string;
+  }) {
     return aiSessionService.createSession(input);
   }
 
@@ -14,8 +19,16 @@ class AiChatService {
   }
 
   async getSessionDetail(sessionId: string) {
-    const [session, messages, toolCalls] = await Promise.all([
-      aiSessionService.getSessionById(sessionId),
+    const session = await aiSessionService.getSessionById(sessionId);
+    if (!session) {
+      return {
+        session: null,
+        messages: [],
+        toolCalls: [],
+      };
+    }
+
+    const [messages, toolCalls] = await Promise.all([
       aiMessageService.listMessagesBySession(sessionId),
       aiToolCallService.listToolCallsBySession(sessionId),
     ]);
