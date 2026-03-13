@@ -122,6 +122,7 @@ export const aiConfig = {
     maxFiles: toInt(process.env.AI_UPLOAD_MAX_FILES, 1),
     minWidth: toInt(process.env.AI_UPLOAD_MIN_WIDTH, 512),
     minHeight: toInt(process.env.AI_UPLOAD_MIN_HEIGHT, 512),
+    maxPixels: toInt(process.env.AI_UPLOAD_MAX_PIXELS, 16_000_000),
     allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
   },
   storage: {

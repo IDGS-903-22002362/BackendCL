@@ -1,4 +1,5 @@
 import FormData from "form-data";
+import { promises as fs } from "fs";
 import { parseMultipartImages } from "../src/middleware/multipart.middleware";
 
 const runMultipartMiddleware = async (
@@ -23,6 +24,13 @@ const runMultipartMiddleware = async (
 };
 
 describe("parseMultipartImages", () => {
+  const tempFiles: string[] = [];
+
+  afterEach(async () => {
+    await Promise.allSettled(tempFiles.map(async (filePath) => fs.unlink(filePath)));
+    tempFiles.length = 0;
+  });
+
   it("procesa multipart desde req.rawBody y preserva campos del formulario", async () => {
     const form = new FormData();
     form.append("sessionId", "session-123");
@@ -53,6 +61,8 @@ describe("parseMultipartImages", () => {
       originalname: "evelyn.jpg",
       mimetype: "image/jpeg",
     });
+    expect((req.files as Express.Multer.File[])[0].path).toBeTruthy();
+    tempFiles.push((req.files as Express.Multer.File[])[0].path);
   });
 
   it("rechaza multipart sin boundary con un 400 controlado", async () => {
@@ -72,6 +82,31 @@ describe("parseMultipartImages", () => {
       expect.objectContaining({
         statusCode: 400,
         message: "Solicitud multipart inválida: falta el boundary en Content-Type",
+      }),
+    );
+  });
+
+  it("rechaza archivos mayores al límite configurado", async () => {
+    const form = new FormData();
+    form.append("file", Buffer.alloc(6 * 1024 * 1024, 1), {
+      filename: "big.png",
+      contentType: "image/png",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      rawBody: Buffer;
+      body: Record<string, unknown>;
+    } = {
+      headers: form.getHeaders(),
+      rawBody: form.getBuffer(),
+      body: {},
+    };
+
+    await expect(runMultipartMiddleware(req)).rejects.toEqual(
+      expect.objectContaining({
+        statusCode: 400,
+        message: expect.stringContaining("excede el límite"),
       }),
     );
   });
