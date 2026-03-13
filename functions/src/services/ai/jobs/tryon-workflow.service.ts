@@ -112,9 +112,18 @@ class TryOnWorkflowService {
   async processQueuedJob(jobId: string): Promise<void> {
     const job = await tryOnJobService.getJobById(jobId);
     if (!job || job.status !== TryOnJobStatus.QUEUED) {
+      this.baseLogger.info("tryon_job_skipped", {
+        jobId,
+        status: job?.status ?? "missing",
+      });
       return;
     }
 
+    this.baseLogger.info("tryon_job_transition", {
+      jobId,
+      fromStatus: TryOnJobStatus.QUEUED,
+      toStatus: TryOnJobStatus.PROCESSING,
+    });
     await tryOnJobService.markProcessing(jobId);
 
     try {
@@ -192,6 +201,11 @@ class TryOnWorkflowService {
       });
 
       await tryOnJobService.markCompleted(jobId, outputAsset.id!, stableOutputUri);
+      this.baseLogger.info("tryon_job_transition", {
+        jobId,
+        fromStatus: TryOnJobStatus.PROCESSING,
+        toStatus: TryOnJobStatus.COMPLETED,
+      });
       this.baseLogger.info("tryon_job_completed", {
         jobId,
         providerJobId: vertexResult.providerJobId,
@@ -211,6 +225,12 @@ class TryOnWorkflowService {
         error: message,
       });
       await tryOnJobService.markFailed(jobId, errorCode, message);
+      this.baseLogger.info("tryon_job_transition", {
+        jobId,
+        fromStatus: TryOnJobStatus.PROCESSING,
+        toStatus: TryOnJobStatus.FAILED,
+        errorCode,
+      });
     }
   }
 }
