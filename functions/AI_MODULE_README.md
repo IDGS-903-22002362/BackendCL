@@ -186,6 +186,24 @@ If the project already used the legacy AI service for news summaries:
 
 If the deployed environment still has `GEMINI_MODEL_PRIMARY` set to a preview/versioned value such as `gemini-2.5-pro-preview-05-06` or `gemini-3.1-pro-preview`, update it manually to `gemini-2.5-pro`. The backend does not silently fall back across model families.
 
+For `processTryOnJob`, the trigger service account `vertex-tryon-sa@e-comerce-leon.iam.gserviceaccount.com` must keep both:
+- `roles/eventarc.eventReceiver`
+- `roles/run.invoker` on the Cloud Run service `processtryonjob`
+
+If try-on jobs remain stuck in `queued` and `firebase functions:log --only processTryOnJob` shows `The request was not authenticated`, verify and restore the binding with:
+
+```bash
+gcloud run services add-iam-policy-binding processtryonjob \
+  --region=us-central1 \
+  --project=e-comerce-leon \
+  --member=serviceAccount:vertex-tryon-sa@e-comerce-leon.iam.gserviceaccount.com \
+  --role=roles/run.invoker
+
+gcloud run services get-iam-policy processtryonjob \
+  --region=us-central1 \
+  --project=e-comerce-leon
+```
+
 Rollback path:
 - remove `/api/ai` route mounting
 - stop exporting `processTryOnJob`
