@@ -1,4 +1,5 @@
 import {
+  Content,
   FunctionCall,
   FunctionCallingConfigMode,
   FunctionDeclaration,
@@ -16,7 +17,8 @@ import {
 
 export interface GeminiGenerationInput {
   model?: string;
-  prompt: string;
+  prompt?: string;
+  contents?: string | Content[];
   systemInstruction?: string;
   tools?: FunctionDeclaration[];
   allowedFunctionNames?: string[];
@@ -83,9 +85,19 @@ class GeminiAdapter {
       };
     }
 
-    // Gemini requires mode ANY when allowedFunctionNames is used.
-    // We send an always-valid whitelist by preferring matched names and
-    // falling back to all declared tools when no valid match is available.
+    if (requestedAllowedFunctionNames.length === 0) {
+      return {
+        tools: [{ functionDeclarations: uniqueTools }],
+        toolConfig: {
+          functionCallingConfig: {
+            mode: FunctionCallingConfigMode.AUTO,
+          },
+        },
+        declaredToolNames,
+        droppedAllowedFunctionNames,
+      };
+    }
+
     const effectiveAllowedFunctionNames =
       matchedAllowedFunctionNames.length > 0
         ? matchedAllowedFunctionNames
@@ -183,6 +195,11 @@ class GeminiAdapter {
     const client = this.getClient();
     const model = input.model || aiConfig.gemini.primaryModel;
     const preparedToolConfig = this.prepareToolCallingConfig(input);
+    const contents = input.contents ?? input.prompt;
+
+    if (!contents) {
+      throw new Error("Gemini generation requiere prompt o contents");
+    }
 
     if (preparedToolConfig.droppedAllowedFunctionNames.length > 0) {
       this.baseLogger.warn("gemini_tool_config_sanitized", {
@@ -197,7 +214,7 @@ class GeminiAdapter {
     try {
       response = await client.models.generateContent({
         model,
-        contents: input.prompt,
+        contents,
         config: {
           systemInstruction: input.systemInstruction,
           temperature: aiConfig.gemini.temperature,
