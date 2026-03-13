@@ -249,4 +249,28 @@ describe("AI try-on workflow", () => {
     );
     expect(mockedJobService.markCompleted).not.toHaveBeenCalled();
   });
+
+  it("firma la descarga usando el bucket persistido en el asset de salida", async () => {
+    mockedJobService.getJobById.mockResolvedValue({
+      id: "job_1",
+      status: TryOnJobStatus.COMPLETED,
+      outputAssetId: "asset_out_1",
+    } as never);
+    mockedAssetService.getAssetById.mockResolvedValue({
+      id: "asset_out_1",
+      bucket: "custom-output-bucket",
+      objectPath: "ai/tryon-results/user_1/session_1/job_1.png",
+    } as never);
+    mockedStorage.generateSignedDownloadUrl.mockResolvedValue(
+      "https://signed.example/job_1",
+    );
+
+    const url = await tryOnWorkflowService.getDownloadUrl("job_1");
+
+    expect(url).toBe("https://signed.example/job_1");
+    expect(mockedStorage.generateSignedDownloadUrl).toHaveBeenCalledWith(
+      "ai/tryon-results/user_1/session_1/job_1.png",
+      "custom-output-bucket",
+    );
+  });
 });

@@ -3,6 +3,9 @@ import { RolUsuario } from "../../models/usuario.model";
 import aiConfig from "../../config/ai.config";
 import tryOnWorkflowService from "../../services/ai/jobs/tryon-workflow.service";
 import tryOnJobService from "../../services/ai/jobs/tryon-job.service";
+import logger from "../../utils/logger";
+
+const tryOnControllerLogger = logger.child({ component: "tryon-controller" });
 
 export const createTryOnJob = async (req: Request, res: Response) => {
   try {
@@ -61,9 +64,27 @@ export const getTryOnDownloadLink = async (req: Request, res: Response) => {
     return res.status(403).json({ success: false, message: "No tienes permisos para descargar este try-on" });
   }
 
-  const url = await tryOnWorkflowService.getDownloadUrl(req.params.id);
+  let url: string | null;
+  try {
+    url = await tryOnWorkflowService.getDownloadUrl(req.params.id);
+  } catch (error) {
+    tryOnControllerLogger.error("tryon_download_link_failed", {
+      jobId: req.params.id,
+      userId: req.user?.uid,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "No se pudo generar el link de descarga del try-on",
+    });
+  }
+
   if (!url) {
-    return res.status(409).json({ success: false, message: "El resultado del try-on aun no esta disponible" });
+    return res.status(409).json({
+      success: false,
+      message: "El resultado del try-on aun no esta disponible",
+    });
   }
 
   return res.status(200).json({

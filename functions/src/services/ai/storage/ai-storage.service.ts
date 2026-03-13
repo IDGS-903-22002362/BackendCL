@@ -141,25 +141,41 @@ class AiStorageService {
     };
   }
 
-  async generateSignedDownloadUrl(objectPath: string): Promise<string> {
-    const [url] = await this.bucket.file(objectPath).getSignedUrl({
-      action: "read",
-      expires: Date.now() + aiConfig.storage.signedUrlTtlSec * 1000,
-      version: "v4",
-    });
+  async generateSignedDownloadUrl(
+    objectPath: string,
+    bucketName = this.bucket.name,
+  ): Promise<string> {
+    try {
+      const [url] = await storageTienda.bucket(bucketName).file(objectPath).getSignedUrl({
+        action: "read",
+        expires: Date.now() + aiConfig.storage.signedUrlTtlSec * 1000,
+        version: "v4",
+      });
 
-    return url;
+      return url;
+    } catch (error) {
+      this.baseLogger.error("ai_storage_signed_url_failed", {
+        bucket: bucketName,
+        objectPath,
+        runtimeService: process.env.K_SERVICE || "unknown",
+        functionTarget: process.env.FUNCTION_TARGET || "unknown",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+
+      throw error;
+    }
   }
 
   async getObjectMetadata(
     objectPath: string,
     bucketName = this.bucket.name,
-  ): Promise<{ sizeBytes: number; mimeType?: string }> {
+  ): Promise<{ sizeBytes: number; mimeType?: string; contentDisposition?: string }> {
     const [metadata] = await storageTienda.bucket(bucketName).file(objectPath).getMetadata();
 
     return {
       sizeBytes: Number(metadata.size || 0),
       mimeType: metadata.contentType,
+      contentDisposition: metadata.contentDisposition,
     };
   }
 

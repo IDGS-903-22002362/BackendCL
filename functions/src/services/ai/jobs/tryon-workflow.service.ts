@@ -146,17 +146,22 @@ class TryOnWorkflowService {
   }
 
   async getDownloadUrl(jobId: string): Promise<string | null> {
+    const asset = await this.getDownloadAsset(jobId);
+    if (!asset) {
+      return null;
+    }
+
+    return aiStorageService.generateSignedDownloadUrl(asset.objectPath, asset.bucket);
+  }
+
+  async getDownloadAsset(jobId: string) {
     const job = await tryOnJobService.getJobById(jobId);
     if (!job || job.status !== TryOnJobStatus.COMPLETED || !job.outputAssetId) {
       return null;
     }
 
     const asset = await tryOnAssetService.getAssetById(job.outputAssetId);
-    if (!asset) {
-      return null;
-    }
-
-    return aiStorageService.generateSignedDownloadUrl(asset.objectPath);
+    return asset || null;
   }
 
   async processQueuedJob(jobId: string): Promise<void> {
