@@ -41,10 +41,57 @@ export const defineTool = <
   execute: async (input, context) => tool.execute(tool.schema.parse(input), context),
 });
 
+type JsonSchemaObject = Record<string, unknown>;
+
+const isJsonSchemaObject = (value: unknown): value is JsonSchemaObject =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasEmptyObjectShape = (schema: JsonSchemaObject): boolean => {
+  if (schema.type !== "object") {
+    return false;
+  }
+
+  const properties = schema.properties;
+  if (!isJsonSchemaObject(properties) || Object.keys(properties).length > 0) {
+    return false;
+  }
+
+  const required = schema.required;
+  return !Array.isArray(required) || required.length === 0;
+};
+
+export const buildToolParametersJsonSchema = (
+  schema: z.ZodTypeAny,
+): JsonSchemaObject | undefined => {
+  const rawSchema = zodToJsonSchema(schema, {
+    target: "jsonSchema7",
+    $refStrategy: "none",
+  });
+
+  if (!isJsonSchemaObject(rawSchema)) {
+    return undefined;
+  }
+
+  const sanitizedSchema: JsonSchemaObject = { ...rawSchema };
+  delete sanitizedSchema.$schema;
+  delete sanitizedSchema.$defs;
+  delete sanitizedSchema.definitions;
+
+  if (hasEmptyObjectShape(sanitizedSchema)) {
+    return undefined;
+  }
+
+  return sanitizedSchema;
+};
+
 export const buildFunctionDeclaration = (
   tool: RuntimeAiToolDefinition,
-): FunctionDeclaration => ({
-  name: tool.name,
-  description: tool.description,
-  parametersJsonSchema: zodToJsonSchema(tool.schema, tool.name),
-});
+): FunctionDeclaration => {
+  const parametersJsonSchema = buildToolParametersJsonSchema(tool.schema);
+
+  return {
+    name: tool.name,
+    description: tool.description,
+    ...(parametersJsonSchema ? { parametersJsonSchema } : {}),
+  };
+};
