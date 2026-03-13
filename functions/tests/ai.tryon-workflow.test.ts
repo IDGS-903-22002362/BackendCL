@@ -3,6 +3,7 @@ jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
   default: {
     buildGcsUri: jest.fn(),
     getBucketName: jest.fn(),
+    downloadGcsFile: jest.fn(),
     uploadPrivateFile: jest.fn(),
     generateSignedDownloadUrl: jest.fn(),
     copyGcsFile: jest.fn(),
@@ -90,14 +91,29 @@ const mockedVertexAdapter = vertexTryOnAdapter as jest.Mocked<
 >;
 
 describe("AI try-on workflow", () => {
+  const originalFetch = global.fetch;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: jest
+        .fn()
+        .mockResolvedValue(Buffer.from("garment-image")),
+      headers: {
+        get: jest.fn().mockReturnValue("image/png"),
+      },
+    } as never);
 
     mockedStorage.buildGcsUri.mockImplementation(
       (objectPath: string, bucketName?: string) =>
         `gs://${bucketName || "e-comerce-leon-ai-private"}/${objectPath}`,
     );
     mockedStorage.getBucketName.mockReturnValue("e-comerce-leon-ai-private");
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
   });
 
   it("crea job y convierte firebase storage URL a gs://", async () => {
@@ -159,6 +175,11 @@ describe("AI try-on workflow", () => {
       mimeType: "image/png",
       rawResponse: {},
     });
+    mockedStorage.downloadGcsFile.mockResolvedValue({
+      buffer: Buffer.from("person-image"),
+      mimeType: "image/png",
+      sizeBytes: 12,
+    });
     mockedStorage.uploadPrivateFile.mockResolvedValue({
       bucket: "e-comerce-leon-ai-private",
       objectPath: "ai/tryon-results/user_1/session_1/result.png",
@@ -174,6 +195,19 @@ describe("AI try-on workflow", () => {
     await tryOnWorkflowService.processQueuedJob("job_1");
 
     expect(mockedJobService.markProcessing).toHaveBeenCalledWith("job_1");
+    expect(mockedStorage.downloadGcsFile).toHaveBeenCalledWith(
+      "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
+    );
+    expect(mockedVertexAdapter.runTryOn).toHaveBeenCalledWith({
+      personImage: {
+        bytesBase64Encoded: Buffer.from("person-image").toString("base64"),
+        mimeType: "image/png",
+      },
+      garmentImage: {
+        bytesBase64Encoded: Buffer.from("garment-image").toString("base64"),
+        mimeType: "image/png",
+      },
+    });
     expect(mockedStorage.uploadPrivateFile).toHaveBeenCalled();
     expect(mockedAssetService.createAsset).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -34,6 +34,28 @@ class AiStorageService {
     return `gs://${bucketName}/${objectPath}`;
   }
 
+  async downloadGcsFile(
+    sourceUri: string,
+  ): Promise<{ buffer: Buffer; mimeType?: string; sizeBytes: number }> {
+    const match = sourceUri.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!match) {
+      throw new Error("GCS URI invalida");
+    }
+
+    const [, sourceBucket, sourceObjectPath] = match;
+    const file = storageTienda.bucket(sourceBucket).file(sourceObjectPath);
+    const [[buffer], [metadata]] = await Promise.all([
+      file.download(),
+      file.getMetadata(),
+    ]);
+
+    return {
+      buffer,
+      mimeType: metadata.contentType,
+      sizeBytes: Number(metadata.size || buffer.length),
+    };
+  }
+
   async uploadPrivateFile(input: {
     buffer: Buffer;
     originalName: string;
