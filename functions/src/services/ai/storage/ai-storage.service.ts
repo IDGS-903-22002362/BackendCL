@@ -1,4 +1,6 @@
 import { createHash } from "crypto";
+import { createReadStream } from "fs";
+import { promises as fs } from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import aiConfig from "../../../config/ai.config";
@@ -8,6 +10,21 @@ import logger from "../../../utils/logger";
 class AiStorageService {
   private readonly bucket = storageTienda.bucket(aiConfig.storage.bucket);
   private readonly baseLogger = logger.child({ component: "ai-storage-service" });
+
+  private async hashFile(filePath: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const hash = createHash("sha256");
+      const stream = createReadStream(filePath);
+
+      stream.on("data", (chunk: string | Buffer) => {
+        hash.update(chunk);
+      });
+      stream.on("error", reject);
+      stream.on("end", () => {
+        resolve(hash.digest("hex"));
+      });
+    });
+  }
 
   getBucketName(): string {
     return this.bucket.name;
@@ -51,6 +68,52 @@ class AiStorageService {
       bucket: this.bucket.name,
       objectPath,
       sizeBytes: input.buffer.length,
+      sha256,
+      gcsUri: `gs://${this.bucket.name}/${objectPath}`,
+    };
+  }
+
+  async uploadPrivateFileFromPath(input: {
+    filePath: string;
+    originalName: string;
+    mimeType: string;
+    folder: string;
+  }): Promise<{ bucket: string; objectPath: string; sizeBytes: number; sha256: string; gcsUri: string }> {
+    const ext = path.extname(input.originalName) || path.extname(input.filePath) || ".bin";
+    const objectPath = `${input.folder}/${uuidv4()}${ext}`;
+    const file = this.bucket.file(objectPath);
+    const [fileStat, sha256] = await Promise.all([
+      fs.stat(input.filePath),
+      this.hashFile(input.filePath),
+    ]);
+
+    await this.bucket.upload(input.filePath, {
+      destination: objectPath,
+      resumable: false,
+      metadata: {
+        contentType: input.mimeType,
+        cacheControl: "private, max-age=0, no-transform",
+        metadata: {
+          sha256,
+        },
+      },
+      validation: false,
+    });
+
+    if (aiConfig.storage.makePublic) {
+      await file.makePublic();
+    }
+
+    this.baseLogger.info("ai_storage_uploaded", {
+      bucket: this.bucket.name,
+      objectPath,
+      sizeBytes: fileStat.size,
+    });
+
+    return {
+      bucket: this.bucket.name,
+      objectPath,
+      sizeBytes: fileStat.size,
       sha256,
       gcsUri: `gs://${this.bucket.name}/${objectPath}`,
     };

@@ -4,6 +4,7 @@ import tryOnAssetService from "./jobs/tryon-asset.service";
 import aiConfig from "../../config/ai.config";
 import { TryOnAsset, TryOnAssetKind } from "../../models/ai/ai.model";
 import aiSessionService from "./memory/session.service";
+import { promises as fs } from "fs";
 
 class AiFileService {
   async uploadUserImage(input: {
@@ -18,28 +19,36 @@ class AiFileService {
       }
     }
 
-    const validated = await aiUploadValidatorService.validateImage(input.file.buffer);
-    const folder = `${aiConfig.storage.uploadFolder}/${input.userId}`;
-    const uploaded = await aiStorageService.uploadPrivateFile({
-      buffer: input.file.buffer,
-      originalName: input.file.originalname,
-      mimeType: validated.mimeType,
-      folder,
-    });
+    if (!input.file.path) {
+      throw new Error("La imagen cargada no tiene una ruta temporal válida");
+    }
 
-    return tryOnAssetService.createAsset({
-      userId: input.userId,
-      sessionId: input.sessionId,
-      kind: TryOnAssetKind.USER_UPLOAD,
-      bucket: uploaded.bucket,
-      objectPath: uploaded.objectPath,
-      mimeType: validated.mimeType,
-      fileName: input.file.originalname,
-      sizeBytes: uploaded.sizeBytes,
-      width: validated.width,
-      height: validated.height,
-      sha256: uploaded.sha256,
-    });
+    try {
+      const validated = await aiUploadValidatorService.validateImage(input.file.path);
+      const folder = `${aiConfig.storage.uploadFolder}/${input.userId}`;
+      const uploaded = await aiStorageService.uploadPrivateFileFromPath({
+        filePath: input.file.path,
+        originalName: input.file.originalname,
+        mimeType: validated.mimeType,
+        folder,
+      });
+
+      return tryOnAssetService.createAsset({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        kind: TryOnAssetKind.USER_UPLOAD,
+        bucket: uploaded.bucket,
+        objectPath: uploaded.objectPath,
+        mimeType: validated.mimeType,
+        fileName: input.file.originalname,
+        sizeBytes: uploaded.sizeBytes,
+        width: validated.width,
+        height: validated.height,
+        sha256: uploaded.sha256,
+      });
+    } finally {
+      await fs.unlink(input.file.path).catch(() => undefined);
+    }
   }
 }
 

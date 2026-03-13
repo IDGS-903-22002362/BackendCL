@@ -1,4 +1,7 @@
 import sharp from "sharp";
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 import aiUploadValidatorService from "../src/services/ai/storage/ai-upload-validator.service";
 
 jest.mock(
@@ -14,8 +17,15 @@ const { fileTypeFromBuffer } = jest.requireMock("file-type") as {
 };
 
 describe("AI upload validator", () => {
+  const tempFiles: string[] = [];
+
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    await Promise.allSettled(tempFiles.map(async (filePath) => fs.unlink(filePath)));
+    tempFiles.length = 0;
   });
 
   it("acepta una imagen png valida con dimensiones minimas", async () => {
@@ -32,7 +42,11 @@ describe("AI upload validator", () => {
       .png()
       .toBuffer();
 
-    const result = await aiUploadValidatorService.validateImage(buffer);
+    const tempFilePath = path.join(os.tmpdir(), `validator-${Date.now()}.png`);
+    tempFiles.push(tempFilePath);
+    await fs.writeFile(tempFilePath, buffer);
+
+    const result = await aiUploadValidatorService.validateImage(tempFilePath);
 
     expect(result.mimeType).toBe("image/png");
     expect(result.width).toBe(600);
@@ -41,9 +55,35 @@ describe("AI upload validator", () => {
 
   it("rechaza un archivo corrupto o no soportado", async () => {
     fileTypeFromBuffer.mockResolvedValue(undefined);
+    const tempFilePath = path.join(os.tmpdir(), `validator-${Date.now()}.bin`);
+    tempFiles.push(tempFilePath);
+    await fs.writeFile(tempFilePath, Buffer.from("not-an-image"));
 
     await expect(
-      aiUploadValidatorService.validateImage(Buffer.from("not-an-image")),
+      aiUploadValidatorService.validateImage(tempFilePath),
     ).rejects.toThrow("Tipo de archivo no permitido");
+  });
+
+  it("rechaza una imagen que excede el máximo de pixeles", async () => {
+    fileTypeFromBuffer.mockResolvedValue({ mime: "image/png" });
+
+    const buffer = await sharp({
+      create: {
+        width: 5000,
+        height: 5000,
+        channels: 3,
+        background: { r: 255, g: 255, b: 255 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const tempFilePath = path.join(os.tmpdir(), `validator-${Date.now()}-large.png`);
+    tempFiles.push(tempFilePath);
+    await fs.writeFile(tempFilePath, buffer);
+
+    await expect(
+      aiUploadValidatorService.validateImage(tempFilePath),
+    ).rejects.toThrow("límite máximo de pixeles");
   });
 });
