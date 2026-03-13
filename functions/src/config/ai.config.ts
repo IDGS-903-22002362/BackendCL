@@ -1,5 +1,11 @@
 export type GeminiExecutionMode = "apiKey" | "vertexai";
 
+import {
+  AI_CONFIG_ERROR_CODE,
+  AiRuntimeError,
+  RECOMMENDED_VERTEX_GEMINI_MODEL,
+} from "../services/ai/ai.error";
+
 interface AssertAiConfigOptions {
   requireGemini?: boolean;
   requireTryOn?: boolean;
@@ -50,12 +56,43 @@ const resolveGeminiMode = (): GeminiExecutionMode => {
 
 const geminiMode: GeminiExecutionMode = resolveGeminiMode();
 
+const LEGACY_UNSUPPORTED_VERTEX_MODELS = new Set([
+  "gemini-2.5-pro-preview-05-06",
+  "gemini-3.1-pro-preview",
+]);
+
+const VERTEX_UNSUPPORTED_MODEL_PATTERN =
+  /(preview|experimental|exp|\d{2}-\d{2})/i;
+
+const buildVertexModelConfigError = (model: string): AiRuntimeError =>
+  new AiRuntimeError(
+    AI_CONFIG_ERROR_CODE,
+    `Configuracion AI invalida: el modelo "${model}" no es compatible con generateContent en modo vertexai. Ajusta AI_GEMINI_MODE=vertexai y GEMINI_MODEL_PRIMARY=${RECOMMENDED_VERTEX_GEMINI_MODEL}.`,
+    500,
+  );
+
+const assertVertexCompatibleGeminiModel = (model: string): void => {
+  const normalizedModel = model.trim();
+
+  if (!normalizedModel) {
+    throw buildVertexModelConfigError(model);
+  }
+
+  if (LEGACY_UNSUPPORTED_VERTEX_MODELS.has(normalizedModel)) {
+    throw buildVertexModelConfigError(normalizedModel);
+  }
+
+  if (VERTEX_UNSUPPORTED_MODEL_PATTERN.test(normalizedModel)) {
+    throw buildVertexModelConfigError(normalizedModel);
+  }
+};
+
 export const aiConfig = {
   gemini: {
     mode: geminiMode,
     apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
     primaryModel:
-      process.env.GEMINI_MODEL_PRIMARY || "gemini-2.5-pro-preview-05-06",
+      process.env.GEMINI_MODEL_PRIMARY || RECOMMENDED_VERTEX_GEMINI_MODEL,
     fastModel: process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash",
     summaryModel: process.env.GEMINI_MODEL_SUMMARY || "gemini-2.5-flash-lite",
     timeoutMs: toInt(process.env.AI_GEMINI_TIMEOUT_MS, 30000),
@@ -111,6 +148,7 @@ export const aiConfig = {
 
 export const getAiRuntimeSummary = () => ({
   geminiMode: aiConfig.gemini.mode,
+  geminiPrimaryModel: aiConfig.gemini.primaryModel,
   geminiProject: aiConfig.gemini.project,
   geminiRegion: aiConfig.gemini.region,
   hasGeminiApiKey: Boolean(aiConfig.gemini.apiKey),
@@ -142,6 +180,8 @@ export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
           "GCP_REGION es requerido cuando AI_GEMINI_MODE=vertexai",
         );
       }
+
+      assertVertexCompatibleGeminiModel(aiConfig.gemini.primaryModel);
     }
   }
 

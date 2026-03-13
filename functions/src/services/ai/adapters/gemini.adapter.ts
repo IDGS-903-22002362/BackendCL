@@ -7,6 +7,11 @@ import {
 } from "@google/genai";
 import aiConfig, { assertAiConfig } from "../../../config/ai.config";
 import logger from "../../../utils/logger";
+import {
+  AI_MODEL_UNSUPPORTED_CODE,
+  AiRuntimeError,
+  RECOMMENDED_VERTEX_GEMINI_MODEL,
+} from "../ai.error";
 
 export interface GeminiGenerationInput {
   model?: string;
@@ -27,6 +32,24 @@ export interface GeminiGenerationResult {
 class GeminiAdapter {
   private readonly baseLogger = logger.child({ component: "gemini-adapter" });
   private client?: GoogleGenAI;
+
+  private mapProviderError(error: unknown, model: string): never {
+    const status = typeof error === "object" && error !== null ? Reflect.get(error, "status") : undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    const unsupportedMethodError = status === 404 &&
+      /unsupported methods|not[_ ]found|not found/i.test(message);
+
+    if (unsupportedMethodError) {
+      throw new AiRuntimeError(
+        AI_MODEL_UNSUPPORTED_CODE,
+        `El modelo "${model}" no soporta generateContent con la configuracion actual (${aiConfig.gemini.mode}). Configura GEMINI_MODEL_PRIMARY=${RECOMMENDED_VERTEX_GEMINI_MODEL}.`,
+        502,
+        error,
+      );
+    }
+
+    throw error instanceof Error ? error : new Error(message);
+  }
 
   private getClient(): GoogleGenAI {
     if (this.client) {
@@ -52,35 +75,47 @@ class GeminiAdapter {
   async generate(input: GeminiGenerationInput): Promise<GeminiGenerationResult> {
     const requestStartedAt = Date.now();
     const client = this.getClient();
+    const model = input.model || aiConfig.gemini.primaryModel;
     const functionDeclarations = input.tools && input.tools.length > 0
       ? [{ functionDeclarations: input.tools }]
       : undefined;
 
-    const response = await client.models.generateContent({
-      model: input.model || aiConfig.gemini.primaryModel,
-      contents: input.prompt,
-      config: {
-        systemInstruction: input.systemInstruction,
-        temperature: aiConfig.gemini.temperature,
-        maxOutputTokens: 2048,
-        responseMimeType: input.responseMimeType,
-        responseJsonSchema: input.responseJsonSchema,
-        tools: functionDeclarations,
-        toolConfig:
-          input.allowedFunctionNames && input.allowedFunctionNames.length > 0
-            ? {
-                functionCallingConfig: {
-                  mode: FunctionCallingConfigMode.AUTO,
-                  allowedFunctionNames: input.allowedFunctionNames,
-                },
-              }
-            : undefined,
-      },
-    });
+    let response: GenerateContentResponse;
+    try {
+      response = await client.models.generateContent({
+        model,
+        contents: input.prompt,
+        config: {
+          systemInstruction: input.systemInstruction,
+          temperature: aiConfig.gemini.temperature,
+          maxOutputTokens: 2048,
+          responseMimeType: input.responseMimeType,
+          responseJsonSchema: input.responseJsonSchema,
+          tools: functionDeclarations,
+          toolConfig:
+            input.allowedFunctionNames && input.allowedFunctionNames.length > 0
+              ? {
+                  functionCallingConfig: {
+                    mode: FunctionCallingConfigMode.AUTO,
+                    allowedFunctionNames: input.allowedFunctionNames,
+                  },
+                }
+              : undefined,
+        },
+      });
+    } catch (error) {
+      this.baseLogger.error("gemini_generate_failed", {
+        model,
+        mode: aiConfig.gemini.mode,
+        message: error instanceof Error ? error.message : String(error),
+        status: typeof error === "object" && error !== null ? Reflect.get(error, "status") : undefined,
+      });
+      this.mapProviderError(error, model);
+    }
 
     const latencyMs = Date.now() - requestStartedAt;
     this.baseLogger.info("gemini_generate_completed", {
-      model: input.model || aiConfig.gemini.primaryModel,
+      model,
       latencyMs,
       functionCallCount: response.functionCalls?.length || 0,
     });
