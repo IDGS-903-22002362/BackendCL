@@ -41,6 +41,7 @@ export const api = onRequest(
       "STRIPE_CURRENCY",
       "APP_URL",
       "JWT_SECRET",
+      "WEB_API_KEY",
       "GEMINI_API_KEY",
       "GOOGLE_API_KEY",
       "GCP_PROJECT_ID",
