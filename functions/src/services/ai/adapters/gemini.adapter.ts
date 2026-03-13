@@ -8,6 +8,7 @@ import {
 import aiConfig, { assertAiConfig } from "../../../config/ai.config";
 import logger from "../../../utils/logger";
 import {
+  AI_INVALID_CONFIGURATION_CODE,
   AI_MODEL_UNSUPPORTED_CODE,
   AiRuntimeError,
   RECOMMENDED_VERTEX_GEMINI_MODEL,
@@ -34,16 +35,34 @@ class GeminiAdapter {
   private client?: GoogleGenAI;
 
   private mapProviderError(error: unknown, model: string): never {
-    const status = typeof error === "object" && error !== null ? Reflect.get(error, "status") : undefined;
+    const status =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "status")
+        : undefined;
     const message = error instanceof Error ? error.message : String(error);
-    const unsupportedMethodError = status === 404 &&
+    const unsupportedMethodError =
+      status === 404 &&
       /unsupported methods|not[_ ]found|not found/i.test(message);
+    const invalidFunctionCallingConfigError =
+      status === 400 &&
+      /INVALID_ARGUMENT|allowedFunctionNames|function.?calling|FunctionCallingConfig|mode\s*"?ANY"?/i.test(
+        message,
+      );
 
     if (unsupportedMethodError) {
       throw new AiRuntimeError(
         AI_MODEL_UNSUPPORTED_CODE,
         `El modelo "${model}" no soporta generateContent con la configuracion actual (${aiConfig.gemini.mode}). Configura GEMINI_MODEL_PRIMARY=${RECOMMENDED_VERTEX_GEMINI_MODEL}.`,
         502,
+        error,
+      );
+    }
+
+    if (invalidFunctionCallingConfigError) {
+      throw new AiRuntimeError(
+        AI_INVALID_CONFIGURATION_CODE,
+        "La configuracion de function/tool calling para Gemini es invalida. Verifica mode ANY y allowedFunctionNames.",
+        400,
         error,
       );
     }
@@ -58,27 +77,35 @@ class GeminiAdapter {
 
     assertAiConfig();
 
-    this.client = aiConfig.gemini.mode === "vertexai"
-      ? new GoogleGenAI({
-          vertexai: true,
-          project: aiConfig.gemini.project,
-          location: aiConfig.gemini.region,
-          apiVersion: "v1",
-        })
-      : new GoogleGenAI({
-          apiKey: aiConfig.gemini.apiKey,
-        });
+    this.client =
+      aiConfig.gemini.mode === "vertexai"
+        ? new GoogleGenAI({
+            vertexai: true,
+            project: aiConfig.gemini.project,
+            location: aiConfig.gemini.region,
+            apiVersion: "v1",
+          })
+        : new GoogleGenAI({
+            apiKey: aiConfig.gemini.apiKey,
+          });
 
     return this.client;
   }
 
-  async generate(input: GeminiGenerationInput): Promise<GeminiGenerationResult> {
+  async generate(
+    input: GeminiGenerationInput,
+  ): Promise<GeminiGenerationResult> {
     const requestStartedAt = Date.now();
     const client = this.getClient();
     const model = input.model || aiConfig.gemini.primaryModel;
-    const functionDeclarations = input.tools && input.tools.length > 0
-      ? [{ functionDeclarations: input.tools }]
-      : undefined;
+    const functionDeclarations =
+      input.tools && input.tools.length > 0
+        ? [{ functionDeclarations: input.tools }]
+        : undefined;
+    const hasFunctionDeclarations = Boolean(functionDeclarations);
+    const hasAllowedFunctionNames = Boolean(
+      input.allowedFunctionNames && input.allowedFunctionNames.length > 0,
+    );
 
     let response: GenerateContentResponse;
     try {
@@ -92,15 +119,16 @@ class GeminiAdapter {
           responseMimeType: input.responseMimeType,
           responseJsonSchema: input.responseJsonSchema,
           tools: functionDeclarations,
-          toolConfig:
-            input.allowedFunctionNames && input.allowedFunctionNames.length > 0
-              ? {
-                  functionCallingConfig: {
-                    mode: FunctionCallingConfigMode.AUTO,
-                    allowedFunctionNames: input.allowedFunctionNames,
-                  },
-                }
-              : undefined,
+          toolConfig: hasFunctionDeclarations
+            ? {
+                functionCallingConfig: {
+                  mode: FunctionCallingConfigMode.ANY,
+                  ...(hasAllowedFunctionNames
+                    ? { allowedFunctionNames: input.allowedFunctionNames }
+                    : {}),
+                },
+              }
+            : undefined,
         },
       });
     } catch (error) {
@@ -108,7 +136,10 @@ class GeminiAdapter {
         model,
         mode: aiConfig.gemini.mode,
         message: error instanceof Error ? error.message : String(error),
-        status: typeof error === "object" && error !== null ? Reflect.get(error, "status") : undefined,
+        status:
+          typeof error === "object" && error !== null
+            ? Reflect.get(error, "status")
+            : undefined,
       });
       this.mapProviderError(error, model);
     }

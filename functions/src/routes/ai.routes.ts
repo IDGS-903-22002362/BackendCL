@@ -112,6 +112,9 @@ router.get(
  * /api/ai/chat/messages:
  *   post:
  *     summary: Enviar mensaje al agente AI
+ *     description: |
+ *       Si stream=true, responde como Server-Sent Events (SSE) con la secuencia de eventos `status` -> `final` -> `done`.
+ *       Si stream no se envia o es false, responde JSON estandar.
  *     tags: [AI]
  *     security:
  *       - BearerAuth: []
@@ -123,11 +126,42 @@ router.get(
  *             $ref: '#/components/schemas/SendAiMessage'
  *     responses:
  *       200:
- *         description: Respuesta del agente
+ *         description: Respuesta del agente (JSON o stream SSE)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     text:
+ *                       type: string
+ *                     model:
+ *                       type: string
+ *                     latencyMs:
+ *                       type: number
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *               example: |
+ *                 event: status
+ *                 data: {"status":"processing"}
+ *
+ *                 event: final
+ *                 data: {"text":"Respuesta del agente"}
+ *
+ *                 event: done
+ *                 data: {}
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
  */
 router.post(
   "/chat/messages",

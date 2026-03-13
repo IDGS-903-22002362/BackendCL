@@ -29,11 +29,21 @@ export const listSessions = async (req: Request, res: Response) => {
 export const getSessionDetail = async (req: Request, res: Response) => {
   const detail = await aiChatService.getSessionDetail(req.params.id);
   if (!detail.session) {
-    return res.status(404).json({ success: false, message: "Sesion AI no encontrada" });
+    return res
+      .status(404)
+      .json({ success: false, message: "Sesion AI no encontrada" });
   }
 
-  if (detail.session.userId !== req.user!.uid && req.user!.rol !== RolUsuario.ADMIN) {
-    return res.status(403).json({ success: false, message: "No tienes permisos para esta sesion AI" });
+  if (
+    detail.session.userId !== req.user!.uid &&
+    req.user!.rol !== RolUsuario.ADMIN
+  ) {
+    return res
+      .status(403)
+      .json({
+        success: false,
+        message: "No tienes permisos para esta sesion AI",
+      });
   }
 
   return res.status(200).json({
@@ -43,17 +53,35 @@ export const getSessionDetail = async (req: Request, res: Response) => {
 };
 
 export const sendMessage = async (req: Request, res: Response) => {
-  const wantsSse = req.body.stream === true || req.query.stream === "true" || (req.headers.accept || "").includes("text/event-stream");
+  const wantsSse =
+    req.body.stream === true ||
+    req.query.stream === "true" ||
+    (req.headers.accept || "").includes("text/event-stream");
   const payload = {
     sessionId: req.body.sessionId,
     userId: req.user!.uid,
     role: req.user!.rol as RolUsuario,
     message: req.body.message,
-    aiToolScopes: Array.isArray(req.user!.aiToolScopes) ? req.user!.aiToolScopes.map((scope) => String(scope)) : [],
+    aiToolScopes: Array.isArray(req.user!.aiToolScopes)
+      ? req.user!.aiToolScopes.map((scope) => String(scope))
+      : [],
     requestId: req.requestId,
   };
 
   if (wantsSse) {
+    try {
+      await aiChatService.assertMessageExecutionReady(payload);
+    } catch (error) {
+      const errorPayload = toAiErrorPayload(error);
+      return res.status(errorPayload.statusCode).json({
+        success: false,
+        error: {
+          code: errorPayload.code,
+          message: errorPayload.message,
+        },
+      });
+    }
+
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
@@ -63,18 +91,21 @@ export const sendMessage = async (req: Request, res: Response) => {
     res.flushHeaders?.();
 
     try {
-      res.write(`event: status\ndata: ${JSON.stringify({ status: "processing" })}\n\n`);
-      const result = await aiChatService.sendMessage(payload);
-      res.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`);
-      res.write(`event: final\ndata: ${JSON.stringify(result)}\n\n`);
+      for await (const event of aiChatService.sendMessageStream(payload)) {
+        res.write(
+          `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`,
+        );
+      }
       res.write("event: done\ndata: {}\n\n");
       res.end();
     } catch (error) {
       const errorPayload = toAiErrorPayload(error);
-      res.write(`event: error\ndata: ${JSON.stringify({
-        code: errorPayload.code,
-        message: errorPayload.message,
-      })}\n\n`);
+      res.write(
+        `event: error\ndata: ${JSON.stringify({
+          code: errorPayload.code,
+          message: errorPayload.message,
+        })}\n\n`,
+      );
       res.write("event: done\ndata: {}\n\n");
       res.end();
     }

@@ -19,9 +19,12 @@ describe("GeminiAdapter", () => {
 
   it("remapea 404 unsupported methods a AI_MODEL_UNSUPPORTED", async () => {
     const generateContent = jest.fn().mockRejectedValue(
-      Object.assign(new Error("404 NOT_FOUND models/gemini-2.5-foo unsupported methods"), {
-        status: 404,
-      }),
+      Object.assign(
+        new Error("404 NOT_FOUND models/gemini-2.5-foo unsupported methods"),
+        {
+          status: 404,
+        },
+      ),
     );
 
     jest.doMock("@google/genai", () => ({
@@ -31,11 +34,13 @@ describe("GeminiAdapter", () => {
         },
       })),
       FunctionCallingConfigMode: {
-        AUTO: "AUTO",
+        ANY: "ANY",
       },
     }));
 
-    const { default: geminiAdapter } = require("../src/services/ai/adapters/gemini.adapter");
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
 
     await expect(
       geminiAdapter.generate({
@@ -45,6 +50,104 @@ describe("GeminiAdapter", () => {
       code: "AI_MODEL_UNSUPPORTED",
       message:
         'El modelo "gemini-2.5-pro" no soporta generateContent con la configuracion actual (vertexai). Configura GEMINI_MODEL_PRIMARY=gemini-2.5-pro.',
+    });
+  });
+
+  it("envia function calling en modo ANY con allowedFunctionNames", async () => {
+    const generateContent = jest.fn().mockResolvedValue({
+      text: "ok",
+      functionCalls: [],
+    });
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: {
+        ANY: "ANY",
+      },
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await geminiAdapter.generate({
+      prompt: "hola",
+      tools: [
+        {
+          name: "buscar_productos",
+          description: "Buscar productos",
+          parameters: {
+            type: "object",
+            properties: {},
+          },
+        },
+      ],
+      allowedFunctionNames: ["buscar_productos"],
+    });
+
+    expect(generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          toolConfig: {
+            functionCallingConfig: {
+              mode: "ANY",
+              allowedFunctionNames: ["buscar_productos"],
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("remapea INVALID_ARGUMENT por tool calling a AI_INVALID_CONFIGURATION", async () => {
+    const generateContent = jest.fn().mockRejectedValue(
+      Object.assign(
+        new Error(
+          "400 INVALID_ARGUMENT: allowedFunctionNames requires mode ANY",
+        ),
+        {
+          status: 400,
+        },
+      ),
+    );
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: {
+        ANY: "ANY",
+      },
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await expect(
+      geminiAdapter.generate({
+        prompt: "hola",
+        tools: [
+          {
+            name: "buscar_productos",
+            description: "Buscar productos",
+            parameters: {
+              type: "object",
+              properties: {},
+            },
+          },
+        ],
+        allowedFunctionNames: ["buscar_productos"],
+      }),
+    ).rejects.toMatchObject({
+      code: "AI_INVALID_CONFIGURATION",
+      statusCode: 400,
     });
   });
 });
