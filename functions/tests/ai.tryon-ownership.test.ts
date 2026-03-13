@@ -69,5 +69,35 @@ describe("AI try-on ownership", () => {
 
     expect((res.status as jest.Mock).mock.calls[0][0]).toBe(200);
     expect(mockedWorkflow.getDownloadUrl).toHaveBeenCalledWith("job_1");
+    expect((res.json as jest.Mock).mock.calls[0][0]).toMatchObject({
+      success: true,
+      data: {
+        jobId: "job_1",
+        url: "https://signed.example/job_1",
+      },
+    });
+  });
+
+  it("retorna error controlado si no puede generar la signed URL", async () => {
+    mockedWorkflow.getJobStatus.mockResolvedValue({
+      id: "job_1",
+      userId: "user_1",
+      status: "completed",
+    } as never);
+    mockedWorkflow.getDownloadUrl.mockRejectedValue(new Error("signBlob denied"));
+
+    const req = {
+      params: { id: "job_1" },
+      user: { uid: "user_1", rol: RolUsuario.CLIENTE },
+    } as unknown as Request;
+    const res = createResponse();
+
+    await tryonController.getTryOnDownloadLink(req, res);
+
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(500);
+    expect((res.json as jest.Mock).mock.calls[0][0]).toMatchObject({
+      success: false,
+      message: "No se pudo generar el link de descarga del try-on",
+    });
   });
 });
