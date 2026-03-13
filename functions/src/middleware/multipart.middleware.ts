@@ -39,6 +39,7 @@ export const parseMultipartImages = ({
     }
 
     const files: Express.Multer.File[] = [];
+    const bodyFields: Record<string, string | string[]> = {};
     let completed = false;
     let parsingError: ApiError | null = null;
 
@@ -137,6 +138,26 @@ export const parseMultipartImages = ({
       });
     });
 
+    parser.on("field", (name, value) => {
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        return;
+      }
+
+      const existingValue = bodyFields[normalizedName];
+      if (existingValue === undefined) {
+        bodyFields[normalizedName] = value;
+        return;
+      }
+
+      if (Array.isArray(existingValue)) {
+        existingValue.push(value);
+        return;
+      }
+
+      bodyFields[normalizedName] = [existingValue, value];
+    });
+
     parser.on("filesLimit", () => {
       setParsingError(
         new ApiError(400, `Máximo ${maxFiles} imágenes por solicitud`),
@@ -158,11 +179,19 @@ export const parseMultipartImages = ({
       }
 
       req.files = files;
+      req.body = {
+        ...(typeof req.body === "object" && req.body !== null ? req.body : {}),
+        ...bodyFields,
+      };
       next();
     });
 
     if (req.rawBody && req.rawBody.length > 0) {
-      parser.end(req.rawBody);
+      try {
+        parser.end(req.rawBody);
+      } catch (error) {
+        fail(error);
+      }
       return;
     }
 

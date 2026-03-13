@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { authMiddleware } from "../utils/middlewares";
 import { asyncHandler } from "../utils/error-handler";
+import aiConfig from "../config/ai.config";
 import {
   validateBody,
   validateParams,
@@ -19,8 +20,8 @@ import {
   aiTryOnRateLimiter,
   aiUploadRateLimiter,
 } from "../middleware/ai-rate-limit.middleware";
+import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { requireAiAdmin } from "../middleware/ai-authz.middleware";
-import { aiUploadMiddleware } from "../services/ai/storage/ai-upload.middleware";
 import * as chatController from "../controllers/ai/chat.controller";
 import * as filesController from "../controllers/ai/files.controller";
 import * as tryonController from "../controllers/ai/tryon.controller";
@@ -201,7 +202,11 @@ router.post(
 router.post(
   "/files/upload",
   aiUploadRateLimiter,
-  aiUploadMiddleware.single("file"),
+  parseMultipartImages({
+    fieldName: "file",
+    maxFiles: aiConfig.uploads.maxFiles,
+    maxFileSizeBytes: aiConfig.uploads.maxBytes,
+  }),
   asyncHandler(filesController.uploadUserImage),
 );
 
