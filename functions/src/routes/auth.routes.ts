@@ -1,22 +1,19 @@
 import { Router } from "express";
-import {
-  registerOrLogin,
-} from "../controllers/users/auth.social.controller";
+import { registerOrLogin } from "../controllers/users/auth.social.controller";
 import { logout } from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
 import { refreshToken } from "../controllers/users/auth.refresh.controller";
 
 const router = Router();
 
-
 /**
  * @swagger
  * /api/auth/register-or-login:
  *   post:
  *     summary: Registro o login combinado
- *     description: Endpoint que registra un nuevo usuario si no existe o realiza login si ya está registrado
+ *     description: Registra o inicia sesión sin requerir token previo y retorna el token bearer de sesión
  *     tags: [Authentication]
- *     requestBody: 
+ *     requestBody:
  *       required: true
  *       content:
  *         application/json:
@@ -50,6 +47,13 @@ const router = Router();
  *                   example: "Login exitoso"
  *                 token:
  *                   type: string
+ *                   description: JWT de sesión para Authorization Bearer
+ *                 bearerToken:
+ *                   type: string
+ *                   description: Alias explícito del token de sesión
+ *                 tokenType:
+ *                   type: string
+ *                   example: "Bearer"
  *                 user:
  *                   $ref: '#/components/schemas/User'
  *       201:
@@ -66,16 +70,23 @@ const router = Router();
  *                   example: "Usuario registrado exitosamente"
  *                 token:
  *                   type: string
+ *                   description: JWT de sesión para Authorization Bearer
+ *                 bearerToken:
+ *                   type: string
+ *                   description: Alias explícito del token de sesión
+ *                 tokenType:
+ *                   type: string
+ *                   example: "Bearer"
  *                 user:
  *                   $ref: '#/components/schemas/User'
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/register-or-login", registerOrLogin);
-
-
 
 router.post("/logout", authMiddleware, logout);
 
