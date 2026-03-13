@@ -57,13 +57,24 @@ export const sendMessage = async (req: Request, res: Response) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     });
+    res.flushHeaders?.();
 
-    res.write(`event: status\ndata: ${JSON.stringify({ status: "processing" })}\n\n`);
-    const result = await aiChatService.sendMessage(payload);
-    res.write(`event: final\ndata: ${JSON.stringify(result)}\n\n`);
-    res.write("event: done\ndata: {}\n\n");
-    res.end();
+    try {
+      res.write(`event: status\ndata: ${JSON.stringify({ status: "processing" })}\n\n`);
+      const result = await aiChatService.sendMessage(payload);
+      res.write(`event: message\ndata: ${JSON.stringify(result)}\n\n`);
+      res.write(`event: final\ndata: ${JSON.stringify(result)}\n\n`);
+      res.write("event: done\ndata: {}\n\n");
+      res.end();
+    } catch (error) {
+      res.write(`event: error\ndata: ${JSON.stringify({
+        message: error instanceof Error ? error.message : "Error interno del modulo AI",
+      })}\n\n`);
+      res.write("event: done\ndata: {}\n\n");
+      res.end();
+    }
     return;
   }
 
