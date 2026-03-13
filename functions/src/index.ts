@@ -34,6 +34,7 @@ const validateApiAiConfigOnce = (): void => {
 // Los secrets se inyectan automáticamente como process.env.* en runtime
 export const api = onRequest(
   {
+    memory: "1GiB",
     secrets: [
       "STRIPE_SECRET_KEY",
       "STRIPE_WEBHOOK_SECRET",
