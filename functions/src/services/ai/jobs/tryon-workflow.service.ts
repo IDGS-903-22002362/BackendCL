@@ -39,6 +39,56 @@ const normalizeToGcsUri = (url: string): string | null => {
   return null;
 };
 
+const encodeObjectPathForPublicUrl = (objectPath: string): string =>
+  objectPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+const downloadHttpImage = async (
+  url: string,
+): Promise<{ bytesBase64Encoded: string; mimeType?: string }> => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`No se pudo descargar imagen remota para try-on (${response.status})`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return {
+    bytesBase64Encoded: Buffer.from(arrayBuffer).toString("base64"),
+    mimeType: response.headers.get("content-type") || undefined,
+  };
+};
+
+const resolveVertexImageInput = async (
+  uri: string,
+): Promise<{ bytesBase64Encoded: string; mimeType?: string }> => {
+  if (uri.startsWith("gs://")) {
+    const match = uri.match(/^gs:\/\/([^/]+)\/(.+)$/);
+    if (!match) {
+      throw new Error("GCS URI invalida para try-on");
+    }
+
+    const [, bucketName, objectPath] = match;
+    if (bucketName === aiStorageService.getBucketName()) {
+      const downloaded = await aiStorageService.downloadGcsFile(uri);
+      return {
+        bytesBase64Encoded: downloaded.buffer.toString("base64"),
+        mimeType: downloaded.mimeType,
+      };
+    }
+
+    const publicUrl = `https://storage.googleapis.com/${bucketName}/${encodeObjectPathForPublicUrl(objectPath)}`;
+    return downloadHttpImage(publicUrl);
+  }
+
+  if (/^https?:\/\//.test(uri)) {
+    return downloadHttpImage(uri);
+  }
+
+  throw new Error("Fuente de imagen no compatible para try-on");
+};
+
 class TryOnWorkflowService {
   private readonly baseLogger = logger.child({ component: "tryon-workflow-service" });
 
@@ -129,10 +179,13 @@ class TryOnWorkflowService {
     try {
       const resultFolder = `${aiConfig.storage.resultFolder}/${job.userId}/${job.sessionId}`;
       const destinationPath = `${resultFolder}/${jobId}.png`;
+      const [personImage, garmentImage] = await Promise.all([
+        resolveVertexImageInput(job.inputUserImageUrl!),
+        resolveVertexImageInput(job.inputProductImageUrl),
+      ]);
       const vertexResult = await vertexTryOnAdapter.runTryOn({
-        personImageUri: job.inputUserImageUrl!,
-        garmentImageUri: job.inputProductImageUrl,
-        outputGcsUri: aiStorageService.buildGcsUri(resultFolder),
+        personImage,
+        garmentImage,
       });
 
       let finalBucket = aiStorageService.getBucketName();

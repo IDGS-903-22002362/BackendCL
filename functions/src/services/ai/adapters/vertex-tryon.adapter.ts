@@ -24,8 +24,22 @@ export class VertexTryOnError extends Error {
 }
 
 export interface VertexTryOnInput {
-  personImageUri: string;
-  garmentImageUri: string;
+  personImage:
+    | {
+        gcsUri: string;
+      }
+    | {
+        bytesBase64Encoded: string;
+        mimeType?: string;
+      };
+  garmentImage:
+    | {
+        gcsUri: string;
+      }
+    | {
+        bytesBase64Encoded: string;
+        mimeType?: string;
+      };
   outputGcsUri?: string;
 }
 
@@ -137,15 +151,11 @@ class VertexTryOnAdapter {
         instances: [
           {
             personImage: {
-              image: {
-                gcsUri: input.personImageUri,
-              },
+              image: input.personImage,
             },
             productImages: [
               {
-                image: {
-                  gcsUri: input.garmentImageUri,
-                },
+                image: input.garmentImage,
               },
             ],
           },

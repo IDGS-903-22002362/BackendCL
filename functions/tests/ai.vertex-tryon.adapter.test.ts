@@ -35,7 +35,7 @@ describe("Vertex try-on adapter", () => {
     jest.clearAllMocks();
   });
 
-  it("construye la llamada oficial a Vertex y parsea bytes base64", async () => {
+  it("construye la llamada oficial a Vertex con imagenes inline y parsea bytes base64", async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
       status: 200,
@@ -53,9 +53,14 @@ describe("Vertex try-on adapter", () => {
     });
 
     const result = await vertexTryOnAdapter.runTryOn({
-      personImageUri: "gs://e-comerce-leon-ai-private/ai/uploads/user_1/person.png",
-      garmentImageUri: "gs://e-comerce-leon.appspot.com/productos/jersey.png",
-      outputGcsUri: "gs://e-comerce-leon-ai-private/ai/tryon-results/user_1/session_1",
+      personImage: {
+        bytesBase64Encoded: "cGVyc29uLWltYWdl",
+        mimeType: "image/png",
+      },
+      garmentImage: {
+        bytesBase64Encoded: "Z2FybWVudC1pbWFnZQ==",
+        mimeType: "image/png",
+      },
     });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -67,16 +72,15 @@ describe("Vertex try-on adapter", () => {
     expect(options.headers.Authorization).toBe("Bearer test-access-token");
 
     const payload = JSON.parse(String(options.body));
-    expect(payload.instances[0].personImage.image.gcsUri).toBe(
-      "gs://e-comerce-leon-ai-private/ai/uploads/user_1/person.png",
+    expect(payload.instances[0].personImage.image.bytesBase64Encoded).toBe(
+      "cGVyc29uLWltYWdl",
     );
-    expect(payload.instances[0].productImages[0].image.gcsUri).toBe(
-      "gs://e-comerce-leon.appspot.com/productos/jersey.png",
+    expect(payload.instances[0].personImage.image.mimeType).toBe("image/png");
+    expect(payload.instances[0].productImages[0].image.bytesBase64Encoded).toBe(
+      "Z2FybWVudC1pbWFnZQ==",
     );
     expect(payload.parameters.sampleCount).toBe(1);
-    expect(payload.parameters.storageUri).toBe(
-      "gs://e-comerce-leon-ai-private/ai/tryon-results/user_1/session_1/",
-    );
+    expect(payload.parameters.storageUri).toBeUndefined();
 
     expect(result).toMatchObject({
       providerJobId: "provider-job-1",
@@ -100,8 +104,8 @@ describe("Vertex try-on adapter", () => {
 
     await expect(
       vertexTryOnAdapter.runTryOn({
-        personImageUri: "gs://bucket/person.png",
-        garmentImageUri: "gs://bucket/garment.png",
+        personImage: { gcsUri: "gs://bucket/person.png" },
+        garmentImage: { gcsUri: "gs://bucket/garment.png" },
       }),
     ).rejects.toMatchObject({
       code: "VERTEX_QUOTA_EXCEEDED",
@@ -116,8 +120,8 @@ describe("Vertex try-on adapter", () => {
 
     await expect(
       vertexTryOnAdapter.runTryOn({
-        personImageUri: "gs://bucket/person.png",
-        garmentImageUri: "gs://bucket/garment.png",
+        personImage: { gcsUri: "gs://bucket/person.png" },
+        garmentImage: { gcsUri: "gs://bucket/garment.png" },
       }),
     ).rejects.toMatchObject({
       code: "VERTEX_TIMEOUT",
