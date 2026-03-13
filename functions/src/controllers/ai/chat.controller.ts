@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import aiChatService from "../../services/ai/ai-chat.service";
 import { RolUsuario } from "../../models/usuario.model";
+import { toAiErrorPayload } from "../../services/ai/ai.error";
 
 export const createSession = async (req: Request, res: Response) => {
   const session = await aiChatService.createSession({
@@ -69,8 +70,10 @@ export const sendMessage = async (req: Request, res: Response) => {
       res.write("event: done\ndata: {}\n\n");
       res.end();
     } catch (error) {
+      const errorPayload = toAiErrorPayload(error);
       res.write(`event: error\ndata: ${JSON.stringify({
-        message: error instanceof Error ? error.message : "Error interno del modulo AI",
+        code: errorPayload.code,
+        message: errorPayload.message,
       })}\n\n`);
       res.write("event: done\ndata: {}\n\n");
       res.end();
@@ -78,9 +81,20 @@ export const sendMessage = async (req: Request, res: Response) => {
     return;
   }
 
-  const result = await aiChatService.sendMessage(payload);
-  return res.status(200).json({
-    success: true,
-    data: result,
-  });
+  try {
+    const result = await aiChatService.sendMessage(payload);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    const errorPayload = toAiErrorPayload(error);
+    return res.status(errorPayload.statusCode).json({
+      success: false,
+      error: {
+        code: errorPayload.code,
+        message: errorPayload.message,
+      },
+    });
+  }
 };

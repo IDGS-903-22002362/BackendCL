@@ -111,9 +111,9 @@ Required config:
 Add the following variables in the Functions environment:
 
 ```env
-AI_GEMINI_MODE=apiKey
+AI_GEMINI_MODE=vertexai
 GEMINI_API_KEY=
-GEMINI_MODEL_PRIMARY=gemini-3.1-pro-preview
+GEMINI_MODEL_PRIMARY=gemini-2.5-pro
 GEMINI_MODEL_FAST=gemini-2.5-flash
 GEMINI_MODEL_SUMMARY=gemini-2.5-flash-lite
 AI_GEMINI_TIMEOUT_MS=30000
@@ -183,6 +183,8 @@ If the project already used the legacy AI service for news summaries:
 - the implementation now routes through the new Gemini adapter
 
 ## Operational Notes
+
+If the deployed environment still has `GEMINI_MODEL_PRIMARY` set to a preview/versioned value such as `gemini-2.5-pro-preview-05-06` or `gemini-3.1-pro-preview`, update it manually to `gemini-2.5-pro`. The backend does not silently fall back across model families.
 
 Rollback path:
 - remove `/api/ai` route mounting
