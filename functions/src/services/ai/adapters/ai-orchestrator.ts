@@ -10,6 +10,7 @@ import aiMessageService from "../memory/message.service";
 import aiSessionService from "../memory/session.service";
 import aiToolCallService from "../memory/tool-call.service";
 import { RolUsuario } from "../../../models/usuario.model";
+import { AI_INVALID_CONFIGURATION_CODE, isAiRuntimeError } from "../ai.error";
 
 export interface OrchestrateAiMessageInput {
   sessionId: string;
@@ -55,7 +56,9 @@ const resolveAssistantText = (
 class AiOrchestrator {
   private readonly baseLogger = logger.child({ component: "ai-orchestrator" });
 
-  async handleMessage(input: OrchestrateAiMessageInput): Promise<OrchestrateAiMessageResult> {
+  async handleMessage(
+    input: OrchestrateAiMessageInput,
+  ): Promise<OrchestrateAiMessageResult> {
     const session = await aiSessionService.getSessionById(input.sessionId);
     if (!session) {
       throw new Error("Sesion AI no encontrada");
@@ -66,8 +69,14 @@ class AiOrchestrator {
     }
 
     const startedAt = Date.now();
-    const capabilities = roleToolMapperService.getCapabilities(input.role, input.aiToolScopes || []);
-    const allowedTools = toolRegistryService.getAllowedTools(input.role, input.aiToolScopes || []);
+    const capabilities = roleToolMapperService.getCapabilities(
+      input.role,
+      input.aiToolScopes || [],
+    );
+    const allowedTools = toolRegistryService.getAllowedTools(
+      input.role,
+      input.aiToolScopes || [],
+    );
 
     const userMessage = await aiMessageService.createMessage({
       sessionId: input.sessionId,
@@ -76,25 +85,63 @@ class AiOrchestrator {
       content: input.message,
     });
 
-    const messageHistory = await aiMessageService.listMessagesBySession(input.sessionId, aiConfig.gemini.maxContextMessages);
+    const messageHistory = await aiMessageService.listMessagesBySession(
+      input.sessionId,
+      aiConfig.gemini.maxContextMessages,
+    );
     const historyText = messageHistory
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n");
 
     let prompt = `Contexto:\n${session.summary || "Sin resumen previo."}\n\nHistorial reciente:\n${historyText}\n\nMensaje actual del usuario:\n${input.message}`;
-    const toolCallSummaries: Array<{ id: string; toolName: string; status: string }> = [];
+    const toolCallSummaries: Array<{
+      id: string;
+      toolName: string;
+      status: string;
+    }> = [];
+    const declaredTools = allowedTools.map(buildFunctionDeclaration);
+    const declaredToolNames = allowedTools.map((tool) => tool.name);
 
     for (let step = 0; step < aiConfig.gemini.maxToolSteps; step += 1) {
-      const response = await geminiAdapter.generate({
-        model: aiConfig.gemini.primaryModel,
-        prompt,
-        systemInstruction: AI_SYSTEM_INSTRUCTIONS,
-        tools: allowedTools.map(buildFunctionDeclaration),
-        allowedFunctionNames: allowedTools.map((tool) => tool.name),
-      });
+      let response;
+      try {
+        response = await geminiAdapter.generate({
+          model: aiConfig.gemini.primaryModel,
+          prompt,
+          systemInstruction: AI_SYSTEM_INSTRUCTIONS,
+          tools: declaredTools,
+          allowedFunctionNames: declaredToolNames,
+        });
+      } catch (error) {
+        const canRetryWithoutTools =
+          declaredTools.length > 0 &&
+          isAiRuntimeError(error) &&
+          error.code === AI_INVALID_CONFIGURATION_CODE;
+
+        if (!canRetryWithoutTools) {
+          throw error;
+        }
+
+        this.baseLogger.warn("ai_tool_calling_fallback_to_text", {
+          requestId: input.requestId,
+          sessionId: input.sessionId,
+          code: error.code,
+          message: error.message,
+          toolCount: declaredTools.length,
+        });
+
+        response = await geminiAdapter.generate({
+          model: aiConfig.gemini.primaryModel,
+          prompt,
+          systemInstruction: AI_SYSTEM_INSTRUCTIONS,
+        });
+      }
 
       if (!response.functionCalls || response.functionCalls.length === 0) {
-        const assistantText = resolveAssistantText(response.text, toolCallSummaries);
+        const assistantText = resolveAssistantText(
+          response.text,
+          toolCallSummaries,
+        );
         const assistantMessage = await aiMessageService.createMessage({
           sessionId: input.sessionId,
           userId: AI_ASSISTANT_USER_ID,
@@ -105,8 +152,14 @@ class AiOrchestrator {
           latencyMs: Date.now() - startedAt,
         });
 
-        const summarySource = `${session.summary || ""}\nUsuario: ${input.message}\nAsistente: ${assistantText}`.slice(-aiConfig.gemini.maxSummaryChars);
-        await aiSessionService.updateSessionSummary(input.sessionId, summarySource);
+        const summarySource =
+          `${session.summary || ""}\nUsuario: ${input.message}\nAsistente: ${assistantText}`.slice(
+            -aiConfig.gemini.maxSummaryChars,
+          );
+        await aiSessionService.updateSessionSummary(
+          input.sessionId,
+          summarySource,
+        );
         await aiSessionService.touchSession(input.sessionId);
 
         this.baseLogger.info("ai_message_completed", {
@@ -131,7 +184,9 @@ class AiOrchestrator {
           continue;
         }
 
-        const parsedInput = tool.schema.parse((functionCall.args || {}) as Record<string, unknown>);
+        const parsedInput = tool.schema.parse(
+          (functionCall.args || {}) as Record<string, unknown>,
+        );
 
         try {
           const toolStartedAt = Date.now();
@@ -157,7 +212,9 @@ class AiOrchestrator {
             toolName: tool.name,
             status: toolCall.status,
           });
-          toolOutputs.push(`Tool ${tool.name} output: ${JSON.stringify(toolOutput)}`);
+          toolOutputs.push(
+            `Tool ${tool.name} output: ${JSON.stringify(toolOutput)}`,
+          );
         } catch (error) {
           const toolCall = await aiToolCallService.createToolCall({
             sessionId: input.sessionId,
@@ -167,7 +224,8 @@ class AiOrchestrator {
             input: parsedInput,
             status: AiToolCallStatus.ERROR,
             errorCode: "TOOL_EXECUTION_FAILED",
-            errorMessage: error instanceof Error ? error.message : "Tool execution failed",
+            errorMessage:
+              error instanceof Error ? error.message : "Tool execution failed",
           });
 
           toolCallSummaries.push({
@@ -175,7 +233,9 @@ class AiOrchestrator {
             toolName: tool.name,
             status: toolCall.status,
           });
-          toolOutputs.push(`Tool ${tool.name} error: ${error instanceof Error ? error.message : "Error desconocido"}`);
+          toolOutputs.push(
+            `Tool ${tool.name} error: ${error instanceof Error ? error.message : "Error desconocido"}`,
+          );
         }
       }
 

@@ -150,4 +150,85 @@ describe("GeminiAdapter", () => {
       statusCode: 400,
     });
   });
+
+  it("sanea allowedFunctionNames y conserva solo tools declaradas", async () => {
+    const generateContent = jest.fn().mockResolvedValue({
+      text: "ok",
+      functionCalls: [],
+    });
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: {
+        ANY: "ANY",
+      },
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await geminiAdapter.generate({
+      prompt: "hola",
+      tools: [
+        {
+          name: "buscar_productos",
+          description: "Buscar productos",
+          parameters: {
+            type: "object",
+            properties: {},
+          },
+        },
+      ],
+      allowedFunctionNames: ["buscar_productos", "tool_inexistente", ""],
+    });
+
+    expect(generateContent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          toolConfig: {
+            functionCallingConfig: {
+              mode: "ANY",
+              allowedFunctionNames: ["buscar_productos"],
+            },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("no remapea INVALID_ARGUMENT generico sin senales de tool-calling", async () => {
+    const providerError = Object.assign(
+      new Error("400 INVALID_ARGUMENT: request payload invalid"),
+      {
+        status: 400,
+      },
+    );
+    const generateContent = jest.fn().mockRejectedValue(providerError);
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: {
+        ANY: "ANY",
+      },
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await expect(
+      geminiAdapter.generate({
+        prompt: "hola",
+      }),
+    ).rejects.toBe(providerError);
+  });
 });
