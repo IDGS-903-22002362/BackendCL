@@ -28,6 +28,30 @@ export interface OrchestrateAiMessageResult {
   latencyMs: number;
 }
 
+export const AI_ASSISTANT_USER_ID = "ai-assistant";
+
+const buildAssistantFallbackText = (
+  toolCalls: Array<{ id: string; toolName: string; status: string }>,
+): string => {
+  if (toolCalls.length > 0) {
+    return "Procese tu solicitud, pero no pude redactar una respuesta final. Intenta reformular tu mensaje.";
+  }
+
+  return "No pude generar una respuesta en este momento. Intenta nuevamente.";
+};
+
+const resolveAssistantText = (
+  rawText: string,
+  toolCalls: Array<{ id: string; toolName: string; status: string }>,
+): string => {
+  const normalizedText = rawText.trim();
+  if (normalizedText.length > 0) {
+    return normalizedText;
+  }
+
+  return buildAssistantFallbackText(toolCalls);
+};
+
 class AiOrchestrator {
   private readonly baseLogger = logger.child({ component: "ai-orchestrator" });
 
@@ -70,16 +94,18 @@ class AiOrchestrator {
       });
 
       if (!response.functionCalls || response.functionCalls.length === 0) {
+        const assistantText = resolveAssistantText(response.text, toolCallSummaries);
         const assistantMessage = await aiMessageService.createMessage({
           sessionId: input.sessionId,
-          userId: input.userId,
+          userId: AI_ASSISTANT_USER_ID,
           role: AiMessageRole.ASSISTANT,
-          content: response.text,
+          content: assistantText,
           model: aiConfig.gemini.primaryModel,
+          toolCallIds: toolCallSummaries.map((toolCall) => toolCall.id),
           latencyMs: Date.now() - startedAt,
         });
 
-        const summarySource = `${session.summary || ""}\nUsuario: ${input.message}\nAsistente: ${response.text}`.slice(-aiConfig.gemini.maxSummaryChars);
+        const summarySource = `${session.summary || ""}\nUsuario: ${input.message}\nAsistente: ${assistantText}`.slice(-aiConfig.gemini.maxSummaryChars);
         await aiSessionService.updateSessionSummary(input.sessionId, summarySource);
         await aiSessionService.touchSession(input.sessionId);
 
@@ -91,7 +117,7 @@ class AiOrchestrator {
         });
 
         return {
-          text: response.text,
+          text: assistantText,
           toolCalls: toolCallSummaries,
           model: aiConfig.gemini.primaryModel,
           latencyMs: Date.now() - startedAt,
