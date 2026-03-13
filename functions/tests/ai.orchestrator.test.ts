@@ -54,6 +54,8 @@ import toolRegistryService from "../src/services/ai/rbac/tool-registry.service";
 import roleToolMapperService from "../src/services/ai/rbac/role-tool-mapper.service";
 import { RolUsuario } from "../src/models/usuario.model";
 import { AiMessageRole } from "../src/models/ai/ai.model";
+import { AiRuntimeError } from "../src/services/ai/ai.error";
+import { z } from "zod";
 
 const mockedGeminiAdapter = geminiAdapter as jest.Mocked<typeof geminiAdapter>;
 const mockedSessionService = aiSessionService as jest.Mocked<
@@ -126,6 +128,74 @@ describe("AiOrchestrator.handleMessage", () => {
       expect.stringContaining(
         "Asistente: No pude generar una respuesta en este momento. Intenta nuevamente.",
       ),
+    );
+  });
+
+  it("reintenta sin tools cuando Gemini rechaza la configuracion de function calling", async () => {
+    mockedToolRegistryService.getAllowedTools.mockReturnValue([
+      {
+        name: "search_products",
+        description: "Buscar",
+        schema: z
+          .object({
+            query: z.string().min(1),
+          })
+          .strict(),
+        roles: [RolUsuario.CLIENTE],
+        execute: jest.fn(),
+      } as never,
+    ]);
+    mockedGeminiAdapter.generate
+      .mockRejectedValueOnce(
+        new AiRuntimeError(
+          "AI_INVALID_CONFIGURATION",
+          "Configuracion invalida de tool calling",
+          400,
+        ),
+      )
+      .mockResolvedValueOnce({
+        text: "Respuesta fallback",
+        functionCalls: [],
+        response: {} as never,
+      });
+
+    const result = await aiOrchestrator.handleMessage({
+      sessionId: "session-1",
+      userId: "user-1",
+      role: RolUsuario.CLIENTE,
+      message: "hola",
+      aiToolScopes: [],
+      requestId: "req-1",
+    });
+
+    expect(result.text).toBe("Respuesta fallback");
+    expect(mockedGeminiAdapter.generate).toHaveBeenCalledTimes(2);
+    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        tools: expect.any(Array),
+        allowedFunctionNames: ["search_products"],
+      }),
+    );
+    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        model: expect.any(String),
+        prompt: expect.any(String),
+        systemInstruction: expect.any(String),
+      }),
+    );
+    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
+      2,
+      expect.not.objectContaining({
+        tools: expect.anything(),
+      }),
+    );
+    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
+      2,
+      expect.not.objectContaining({
+        allowedFunctionNames: expect.anything(),
+      }),
     );
   });
 });

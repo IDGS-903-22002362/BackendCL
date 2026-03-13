@@ -30,9 +30,79 @@ export interface GeminiGenerationResult {
   response: GenerateContentResponse;
 }
 
+interface PreparedToolCallingConfig {
+  tools?: Array<{ functionDeclarations: FunctionDeclaration[] }>;
+  toolConfig?: {
+    functionCallingConfig: {
+      mode: FunctionCallingConfigMode;
+      allowedFunctionNames?: string[];
+    };
+  };
+  declaredToolNames: string[];
+  droppedAllowedFunctionNames: string[];
+}
+
 class GeminiAdapter {
   private readonly baseLogger = logger.child({ component: "gemini-adapter" });
   private client?: GoogleGenAI;
+
+  private prepareToolCallingConfig(
+    input: GeminiGenerationInput,
+  ): PreparedToolCallingConfig {
+    const declaredTools = (input.tools || []).filter(
+      (tool): tool is FunctionDeclaration =>
+        Boolean(tool?.name && tool.name.trim().length > 0),
+    );
+    const uniqueTools = Array.from(
+      new Map(declaredTools.map((tool) => [tool.name!.trim(), tool])).values(),
+    );
+    const declaredToolNames = uniqueTools.map((tool) => tool.name!.trim());
+    const declaredToolNameSet = new Set(declaredToolNames);
+
+    const requestedAllowedFunctionNames = Array.from(
+      new Set(
+        (input.allowedFunctionNames || [])
+          .map((name) => name.trim())
+          .filter((name) => name.length > 0),
+      ),
+    );
+
+    const matchedAllowedFunctionNames = requestedAllowedFunctionNames.filter(
+      (name) => declaredToolNameSet.has(name),
+    );
+    const droppedAllowedFunctionNames = requestedAllowedFunctionNames.filter(
+      (name) => !declaredToolNameSet.has(name),
+    );
+
+    if (declaredToolNames.length === 0) {
+      return {
+        tools: undefined,
+        toolConfig: undefined,
+        declaredToolNames,
+        droppedAllowedFunctionNames,
+      };
+    }
+
+    // Gemini requires mode ANY when allowedFunctionNames is used.
+    // We send an always-valid whitelist by preferring matched names and
+    // falling back to all declared tools when no valid match is available.
+    const effectiveAllowedFunctionNames =
+      matchedAllowedFunctionNames.length > 0
+        ? matchedAllowedFunctionNames
+        : declaredToolNames;
+
+    return {
+      tools: [{ functionDeclarations: uniqueTools }],
+      toolConfig: {
+        functionCallingConfig: {
+          mode: FunctionCallingConfigMode.ANY,
+          allowedFunctionNames: effectiveAllowedFunctionNames,
+        },
+      },
+      declaredToolNames,
+      droppedAllowedFunctionNames,
+    };
+  }
 
   private mapProviderError(error: unknown, model: string): never {
     const status =
@@ -45,7 +115,7 @@ class GeminiAdapter {
       /unsupported methods|not[_ ]found|not found/i.test(message);
     const invalidFunctionCallingConfigError =
       status === 400 &&
-      /INVALID_ARGUMENT|allowedFunctionNames|function.?calling|FunctionCallingConfig|mode\s*"?ANY"?/i.test(
+      /allowedFunctionNames|allowed_function_names|function.?calling|FunctionCallingConfig|mode\s*"?ANY"?/i.test(
         message,
       );
 
@@ -98,14 +168,16 @@ class GeminiAdapter {
     const requestStartedAt = Date.now();
     const client = this.getClient();
     const model = input.model || aiConfig.gemini.primaryModel;
-    const functionDeclarations =
-      input.tools && input.tools.length > 0
-        ? [{ functionDeclarations: input.tools }]
-        : undefined;
-    const hasFunctionDeclarations = Boolean(functionDeclarations);
-    const hasAllowedFunctionNames = Boolean(
-      input.allowedFunctionNames && input.allowedFunctionNames.length > 0,
-    );
+    const preparedToolConfig = this.prepareToolCallingConfig(input);
+
+    if (preparedToolConfig.droppedAllowedFunctionNames.length > 0) {
+      this.baseLogger.warn("gemini_tool_config_sanitized", {
+        model,
+        droppedAllowedFunctionNames:
+          preparedToolConfig.droppedAllowedFunctionNames,
+        declaredToolNames: preparedToolConfig.declaredToolNames,
+      });
+    }
 
     let response: GenerateContentResponse;
     try {
@@ -118,17 +190,8 @@ class GeminiAdapter {
           maxOutputTokens: 2048,
           responseMimeType: input.responseMimeType,
           responseJsonSchema: input.responseJsonSchema,
-          tools: functionDeclarations,
-          toolConfig: hasFunctionDeclarations
-            ? {
-                functionCallingConfig: {
-                  mode: FunctionCallingConfigMode.ANY,
-                  ...(hasAllowedFunctionNames
-                    ? { allowedFunctionNames: input.allowedFunctionNames }
-                    : {}),
-                },
-              }
-            : undefined,
+          tools: preparedToolConfig.tools,
+          toolConfig: preparedToolConfig.toolConfig,
         },
       });
     } catch (error) {
@@ -136,6 +199,12 @@ class GeminiAdapter {
         model,
         mode: aiConfig.gemini.mode,
         message: error instanceof Error ? error.message : String(error),
+        functionCallingMode:
+          preparedToolConfig.toolConfig?.functionCallingConfig.mode,
+        declaredToolNames: preparedToolConfig.declaredToolNames,
+        allowedFunctionNames:
+          preparedToolConfig.toolConfig?.functionCallingConfig
+            .allowedFunctionNames,
         status:
           typeof error === "object" && error !== null
             ? Reflect.get(error, "status")
