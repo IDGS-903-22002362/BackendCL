@@ -131,7 +131,7 @@ describe("AiOrchestrator.handleMessage", () => {
     );
   });
 
-  it("reintenta sin tools cuando Gemini rechaza la configuracion de function calling", async () => {
+  it("reintenta sin tools cuando Gemini rechaza el schema o la configuracion de tools", async () => {
     mockedToolRegistryService.getAllowedTools.mockReturnValue([
       {
         name: "search_products",
@@ -149,7 +149,7 @@ describe("AiOrchestrator.handleMessage", () => {
       .mockRejectedValueOnce(
         new AiRuntimeError(
           "AI_INVALID_CONFIGURATION",
-          "Configuracion invalida de tool calling",
+          "Schema invalido de tool calling",
           400,
         ),
       )

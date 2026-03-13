@@ -151,6 +151,50 @@ describe("GeminiAdapter", () => {
     });
   });
 
+  it("remapea INVALID_ARGUMENT por schema de tools a AI_INVALID_CONFIGURATION", async () => {
+    const generateContent = jest.fn().mockRejectedValue(
+      Object.assign(
+        new Error(
+          "400 INVALID_ARGUMENT: reference to undefined schema at top-level",
+        ),
+        {
+          status: 400,
+        },
+      ),
+    );
+
+    jest.doMock("@google/genai", () => ({
+      GoogleGenAI: jest.fn().mockImplementation(() => ({
+        models: {
+          generateContent,
+        },
+      })),
+      FunctionCallingConfigMode: {
+        ANY: "ANY",
+      },
+    }));
+
+    const {
+      default: geminiAdapter,
+    } = require("../src/services/ai/adapters/gemini.adapter");
+
+    await expect(
+      geminiAdapter.generate({
+        prompt: "hola",
+        tools: [
+          {
+            name: "buscar_productos",
+            description: "Buscar productos",
+          },
+        ],
+        allowedFunctionNames: ["buscar_productos"],
+      }),
+    ).rejects.toMatchObject({
+      code: "AI_INVALID_CONFIGURATION",
+      statusCode: 400,
+    });
+  });
+
   it("sanea allowedFunctionNames y conserva solo tools declaradas", async () => {
     const generateContent = jest.fn().mockResolvedValue({
       text: "ok",

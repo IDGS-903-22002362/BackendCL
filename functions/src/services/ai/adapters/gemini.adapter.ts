@@ -118,6 +118,11 @@ class GeminiAdapter {
       /allowedFunctionNames|allowed_function_names|function.?calling|FunctionCallingConfig|mode\s*"?ANY"?/i.test(
         message,
       );
+    const invalidToolSchemaError =
+      status === 400 &&
+      /reference to undefined schema|undefined schema at top-level|invalid top-level schema|tool schema|parametersJsonSchema|function declaration|responseJsonSchema|schema validation/i.test(
+        message,
+      );
 
     if (unsupportedMethodError) {
       throw new AiRuntimeError(
@@ -132,6 +137,15 @@ class GeminiAdapter {
       throw new AiRuntimeError(
         AI_INVALID_CONFIGURATION_CODE,
         "La configuracion de function/tool calling para Gemini es invalida. Verifica mode ANY y allowedFunctionNames.",
+        400,
+        error,
+      );
+    }
+
+    if (invalidToolSchemaError) {
+      throw new AiRuntimeError(
+        AI_INVALID_CONFIGURATION_CODE,
+        "La configuracion de schema/tool calling para Gemini es invalida. Verifica parametersJsonSchema y evita referencias top-level no soportadas.",
         400,
         error,
       );
