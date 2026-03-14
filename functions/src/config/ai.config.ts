@@ -131,12 +131,10 @@ export const aiConfig = {
     apiVersion: process.env.AI_PREVIEW_MOCKUP_API_VERSION,
     fallbackModel:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_MODEL ||
-      "imagen-3.0-capability-001",
+      "gemini-2.5-flash-image",
     fallbackRegion:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_REGION ||
-      process.env.GCP_REGION ||
-      process.env.GOOGLE_CLOUD_LOCATION ||
-      "us-central1",
+      "global",
     fallbackApiVersion:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_API_VERSION || "v1",
     timeoutMs: toInt(process.env.AI_PREVIEW_MOCKUP_TIMEOUT_MS, 120000),

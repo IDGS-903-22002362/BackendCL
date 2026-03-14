@@ -1,13 +1,10 @@
 import {
-  EditImageResponse,
-  EditMode,
+  GenerateContentResponse,
   GoogleGenAI,
+  Modality,
   PersonGeneration,
-  RawReferenceImage,
   RecontextImageResponse,
   SafetyFilterLevel,
-  SubjectReferenceImage,
-  SubjectReferenceType,
 } from "@google/genai";
 import aiConfig from "../../../config/ai.config";
 import {
@@ -144,12 +141,13 @@ const buildPrompt = (input: VertexPreviewMockupInput): string => {
     .join("\n");
 };
 
-const buildFallbackEditPrompt = (input: VertexPreviewMockupInput): string =>
+const buildGeminiFallbackPrompt = (input: VertexPreviewMockupInput): string =>
   [
-    "Edita la foto base [1] para crear una vista previa realista de e-commerce.",
-    "Usa la referencia [2] como el producto exacto que debe aparecer en la imagen final.",
-    "Mantener a la misma persona de [1], sin cambiar su identidad facial, complexión ni pose general salvo ajustes naturales minimos.",
-    "Conservar exactamente el color, forma, logo y proporcion del producto de [2].",
+    "La primera imagen es la foto real de la persona cliente.",
+    "La segunda imagen es la foto oficial del producto.",
+    "Genera una sola imagen final de vista previa realista para e-commerce usando ambas referencias.",
+    "Mantener a la misma persona de la primera imagen, sin cambiar su identidad facial, complexión ni pose general salvo ajustes naturales minimos.",
+    "Conservar exactamente el color, forma, logo y proporcion del producto de la segunda imagen.",
     "Nunca transformar el producto en otra categoria distinta.",
     "Si la colocacion correcta no es confiable, mostrar el producto junto a la persona o en su mano.",
     "No convertir gorras, calcetas, balones ni souvenirs en camisas o prendas superiores.",
@@ -165,20 +163,22 @@ const buildFallbackEditPrompt = (input: VertexPreviewMockupInput): string =>
     .filter(Boolean)
     .join("\n");
 
-const buildNegativePrompt = (input: VertexPreviewMockupInput): string =>
-  [
-    "No cambiar el producto por una camiseta, jersey, sudadera, chamarra o cualquier otra prenda incorrecta.",
-    "No eliminar el logo ni alterar los colores oficiales del producto.",
-    "No deformar el cuerpo, rostro, manos o cabeza de la persona.",
-    input.previewMode === ProductPreviewMode.ACCESSORY_MOCKUP
-      ? "No colocar gorras en el torso ni calcetas en manos, torso o cabeza."
-      : "No vestir balones, souvenirs o accesorios sobre torso, piernas o cabeza.",
-  ].join(" ");
-
 const extractGeneratedImage = (
-  response: RecontextImageResponse | EditImageResponse,
+  response: RecontextImageResponse,
 ) =>
   response.generatedImages?.find((image) => image.image?.imageBytes || image.image?.gcsUri);
+
+const extractGeminiImage = (response: GenerateContentResponse) => {
+  const parts =
+    response.candidates?.flatMap((candidate) => candidate.content?.parts || []) || [];
+
+  return parts.find(
+    (part) =>
+      part.inlineData?.data &&
+      typeof part.inlineData.mimeType === "string" &&
+      part.inlineData.mimeType.startsWith("image/"),
+  );
+};
 
 const resolveErrorStatus = (error: unknown): number | undefined => {
   if (typeof error !== "object" || error === null) {
@@ -198,7 +198,7 @@ const resolveErrorMessage = (error: unknown): string =>
       ? String(Reflect.get(error, "message"))
       : "Error desconocido al generar mockup de preview";
 
-const shouldFallbackToEditImage = (error: unknown): boolean => {
+const shouldFallbackToGeminiImage = (error: unknown): boolean => {
   const status = resolveErrorStatus(error);
   const message = resolveErrorMessage(error);
 
@@ -274,62 +274,76 @@ class VertexPreviewMockupAdapter {
     };
   }
 
-  private async runEditImageFallback(
+  private buildGeminiImagePart(input: VertexPreviewMockupImageInput) {
+    if (input.gcsUri) {
+      return {
+        fileData: {
+          fileUri: input.gcsUri,
+          mimeType: input.mimeType || "image/png",
+        },
+      };
+    }
+
+    if (input.bytesBase64Encoded) {
+      return {
+        inlineData: {
+          data: input.bytesBase64Encoded,
+          mimeType: input.mimeType || "image/png",
+        },
+      };
+    }
+
+    throw new VertexPreviewMockupError(
+      "PRODUCT_PREVIEW_INVALID_ARGUMENT",
+      "La imagen de entrada para mockup es invalida",
+    );
+  }
+
+  private async runGeminiImageFallback(
     input: VertexPreviewMockupInput,
     controller: AbortController,
   ): Promise<VertexPreviewMockupResult> {
-    const baseReferenceImage = new RawReferenceImage();
-    baseReferenceImage.referenceId = 1;
-    baseReferenceImage.referenceImage = normalizeImageInput(input.personImage);
-
-    const productReferenceImage = new SubjectReferenceImage();
-    productReferenceImage.referenceId = 2;
-    productReferenceImage.referenceImage = normalizeImageInput(input.productImage);
-    productReferenceImage.config = {
-      subjectType: SubjectReferenceType.SUBJECT_TYPE_PRODUCT,
-      subjectDescription:
-        input.productDescription ||
-        input.categoryName ||
-        input.lineName ||
-        "Producto oficial de tienda deportiva",
-    };
-
     const fallbackClient = this.getClient(
       aiConfig.previewMockup.fallbackRegion,
       aiConfig.previewMockup.fallbackApiVersion,
     );
-    const response = await fallbackClient.models.editImage({
+    const response = await fallbackClient.models.generateContent({
       model: aiConfig.previewMockup.fallbackModel,
-      prompt: buildFallbackEditPrompt(input),
-      referenceImages: [baseReferenceImage, productReferenceImage],
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: buildGeminiFallbackPrompt(input) },
+            this.buildGeminiImagePart(input.personImage),
+            this.buildGeminiImagePart(input.productImage),
+          ],
+        },
+      ],
       config: {
         abortSignal: controller.signal,
-        numberOfImages: 1,
-        outputGcsUri: input.outputGcsUri,
-        personGeneration: PersonGeneration.ALLOW_ADULT,
-        safetyFilterLevel: SafetyFilterLevel.BLOCK_ONLY_HIGH,
-        outputMimeType: "image/png",
-        addWatermark: true,
-        guidanceScale: 20,
-        editMode: EditMode.EDIT_MODE_PRODUCT_IMAGE,
-        negativePrompt: buildNegativePrompt(input),
+        responseModalities: [Modality.IMAGE],
+        temperature: 0.2,
+        imageConfig: {
+          aspectRatio: "3:4",
+          imageSize: "1K",
+          personGeneration: PersonGeneration.ALLOW_ADULT,
+        },
       },
     });
 
-    const generatedImage = extractGeneratedImage(response);
-    if (!generatedImage?.image?.imageBytes && !generatedImage?.image?.gcsUri) {
+    const generatedImage = extractGeminiImage(response);
+    if (!generatedImage?.inlineData?.data) {
       throw new VertexPreviewMockupError(
         "PRODUCT_PREVIEW_PARSE_ERROR",
-        "Vertex preview mockup fallback no devolvio una imagen utilizable",
+        "Vertex preview mockup fallback con Gemini no devolvio una imagen utilizable",
         undefined,
         response,
       );
     }
 
     return {
-      outputImageBytesBase64: generatedImage.image?.imageBytes,
-      outputGcsUri: generatedImage.image?.gcsUri,
-      mimeType: generatedImage.image?.mimeType,
+      outputImageBytesBase64: generatedImage.inlineData.data,
+      mimeType: generatedImage.inlineData.mimeType,
       rawResponse: response,
     };
   }
@@ -351,7 +365,7 @@ class VertexPreviewMockupAdapter {
       try {
         return await this.runRecontextRequest(input, client, controller);
       } catch (error) {
-        if (!shouldFallbackToEditImage(error)) {
+        if (!shouldFallbackToGeminiImage(error)) {
           throw error;
         }
 
@@ -364,7 +378,7 @@ class VertexPreviewMockupAdapter {
           status: resolveErrorStatus(error),
         });
 
-        return await this.runEditImageFallback(input, controller);
+        return await this.runGeminiImageFallback(input, controller);
       }
     } catch (error) {
       if (error instanceof VertexPreviewMockupError) {
