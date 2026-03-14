@@ -12,11 +12,16 @@ import {
 } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
 import {
+  createPublicAiSessionSchema,
+  sendPublicAiMessageSchema,
+} from "../middleware/validators/ai-public-chat.validator";
+import {
   createTryOnJobSchema,
   tryOnJobIdParamSchema,
 } from "../middleware/validators/ai-tryon.validator";
 import {
   aiChatRateLimiter,
+  aiPublicChatRateLimiter,
   aiTryOnRateLimiter,
   aiUploadRateLimiter,
 } from "../middleware/ai-rate-limit.middleware";
@@ -28,8 +33,25 @@ import * as tryonController from "../controllers/ai/tryon.controller";
 import * as adminController from "../controllers/ai/admin.controller";
 
 const router = Router();
+const protectedRouter = Router();
 
-router.use(authMiddleware);
+if (aiConfig.api.publicChatEnabled) {
+  router.post(
+    "/public/chat/sessions",
+    aiPublicChatRateLimiter,
+    validateBody(createPublicAiSessionSchema),
+    asyncHandler(chatController.createPublicSession),
+  );
+
+  router.post(
+    "/public/chat/messages",
+    aiPublicChatRateLimiter,
+    validateBody(sendPublicAiMessageSchema),
+    asyncHandler(chatController.sendPublicMessage),
+  );
+}
+
+protectedRouter.use(authMiddleware);
 
 /**
  * @swagger
@@ -53,7 +75,7 @@ router.use(authMiddleware);
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post(
+protectedRouter.post(
   "/chat/sessions",
   aiChatRateLimiter,
   validateBody(createAiSessionSchema),
@@ -73,7 +95,7 @@ router.post(
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.get(
+protectedRouter.get(
   "/chat/sessions",
   aiChatRateLimiter,
   asyncHandler(chatController.listSessions),
@@ -102,7 +124,7 @@ router.get(
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get(
+protectedRouter.get(
   "/chat/sessions/:id",
   aiChatRateLimiter,
   validateParams(sessionIdParamSchema),
@@ -164,7 +186,7 @@ router.get(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post(
+protectedRouter.post(
   "/chat/messages",
   aiChatRateLimiter,
   validateBody(sendAiMessageSchema),
@@ -199,7 +221,7 @@ router.post(
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post(
+protectedRouter.post(
   "/files/upload",
   aiUploadRateLimiter,
   parseMultipartImages({
@@ -246,7 +268,7 @@ router.post(
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.post(
+protectedRouter.post(
   "/tryon/jobs",
   aiTryOnRateLimiter,
   validateBody(createTryOnJobSchema),
@@ -266,7 +288,7 @@ router.post(
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
-router.get(
+protectedRouter.get(
   "/tryon/jobs",
   aiTryOnRateLimiter,
   asyncHandler(tryonController.listTryOnJobs),
@@ -305,7 +327,7 @@ router.get(
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get(
+protectedRouter.get(
   "/tryon/jobs/:id",
   aiTryOnRateLimiter,
   validateParams(tryOnJobIdParamSchema),
@@ -335,7 +357,7 @@ router.get(
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  */
-router.get(
+protectedRouter.get(
   "/tryon/jobs/:id/download",
   aiTryOnRateLimiter,
   validateParams(tryOnJobIdParamSchema),
@@ -358,7 +380,7 @@ router.get(
  *       403:
  *         $ref: '#/components/responses/403Forbidden'
  */
-router.get(
+protectedRouter.get(
   "/admin/metrics",
   requireAiAdmin,
   asyncHandler(adminController.getMetrics),
@@ -379,10 +401,12 @@ router.get(
  *       403:
  *         $ref: '#/components/responses/403Forbidden'
  */
-router.get(
+protectedRouter.get(
   "/admin/jobs",
   requireAiAdmin,
   asyncHandler(adminController.listJobs),
 );
+
+router.use(protectedRouter);
 
 export default router;

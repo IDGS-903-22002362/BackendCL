@@ -60,6 +60,9 @@ async function seed() {
     // 7. Seed de Configuración
     await seedConfiguracion();
 
+    // 8. Seed de conocimiento AI
+    await seedAiKnowledge();
+
     console.log("\n🎉 Seed completado exitosamente!\n");
     process.exit(0);
   } catch (error) {
@@ -494,6 +497,166 @@ async function seedConfiguracion() {
   await firestoreTienda.collection("configuracion").doc("tienda").set(configTienda);
 
   log.success("Configuración del sistema creada");
+}
+
+async function seedAiKnowledge() {
+  log.info("Creando conocimiento base para AI...");
+
+  const now = admin.firestore.Timestamp.now();
+  const faqEntries = [
+    {
+      id: "faq_envios",
+      question: "¿Cuanto tarda en llegar mi pedido?",
+      answer:
+        "Los tiempos de entrega dependen de la zona, pero normalmente procesamos y enviamos entre 2 y 5 dias habiles. Si hay envio gratis o promocion, se indicara en el checkout.",
+      tags: ["envio", "entrega", "pedido", "llega"],
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "faq_tallas",
+      question: "¿Como elijo mi talla?",
+      answer:
+        "Si buscas jersey oficial, te recomendamos revisar la guia de tallas y, si dudas entre dos medidas, elegir la mas comoda para el uso que le daras.",
+      tags: ["talla", "medidas", "jersey", "guia"],
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "faq_cambios",
+      question: "¿Aceptan cambios?",
+      answer:
+        "Si, aceptamos cambios dentro del plazo vigente siempre que el producto este en buen estado y conserve etiquetas. Aplican restricciones en productos personalizados.",
+      tags: ["cambios", "devoluciones", "garantia"],
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+
+  const policyEntries = [
+    {
+      id: "envios",
+      title: "Politica de envios",
+      body:
+        "Procesamos pedidos de lunes a viernes. El costo base de envio es de $150 MXN y el envio gratis aplica a partir de $1000 MXN salvo promociones especiales.",
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "devoluciones",
+      title: "Politica de cambios y devoluciones",
+      body:
+        "Aceptamos cambios y devoluciones hasta por 30 dias con ticket o comprobante. No aplican devoluciones en productos personalizados o usados.",
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+
+  const knowledgeEntries = [
+    {
+      id: "store_info",
+      title: "Informacion de tienda fisica",
+      body:
+        "La tienda oficial del Club Leon atiende todos los dias y puede compartirse la ubicacion oficial por Google Maps.",
+      tags: ["tienda", "ubicacion", "maps", "horario"],
+      type: "store_info",
+      active: true,
+      metadata: {
+        mapsUrl: "https://maps.app.goo.gl/nnLL1SCpgJo5aqVR6",
+        storeName: "Tienda Oficial Club Leon",
+      },
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "guia_tallas",
+      title: "Guia de tallas",
+      body:
+        "Adulto: XS a XXL. Infantil: CH, MED y GDE. Si el usuario pide mediana, equivale a M; grande equivale a L; chica equivale a S.",
+      tags: ["talla", "guia", "medidas", "m", "l", "s"],
+      type: "guide",
+      active: true,
+      metadata: {
+        adultSizes: ["xs", "s", "m", "l", "xl", "xxl"],
+        kidsSizes: ["ch", "med", "gde"],
+      },
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "catalog_aliases",
+      title: "Alias conversacionales del catalogo",
+      body:
+        "playera, jersey, camiseta y remera se interpretan como jerseys o playeras segun el contexto. local, visitante, portero y entrenamiento deben usarse como pistas comerciales.",
+      tags: ["alias", "catalogo", "jersey", "playera", "local", "visitante", "portero"],
+      type: "catalog_aliases",
+      active: true,
+      metadata: {
+        aliases: {
+          jersey: ["playera", "camiseta", "remera", "uniforme"],
+          local: ["de local", "home"],
+          visitante: ["de visitante", "away"],
+          portero: ["arquero", "goalkeeper"],
+          entrenamiento: ["training", "entreno"],
+        },
+      },
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "restricciones",
+      title: "Restricciones operativas del asistente",
+      body:
+        "El asistente no debe inventar stock, precios, promociones, pedidos o politicas. Si no hay datos suficientes, debe pedir una aclaracion breve o decir que no puede confirmarlo.",
+      tags: ["restricciones", "seguridad", "hallucination"],
+      type: "restriction",
+      active: true,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+
+  const promotionEntries = [
+    {
+      id: "promo_envio_gratis",
+      title: "Envio gratis en compras mayores a $1000",
+      description:
+        "Las compras superiores a $1000 MXN reciben envio gratis automaticamente.",
+      active: true,
+      tags: ["envio", "gratis", "promocion"],
+      metadata: {
+        threshold: 1000,
+      },
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+
+  const batch = firestoreTienda.batch();
+
+  for (const faq of faqEntries) {
+    batch.set(firestoreTienda.collection("faqTienda").doc(faq.id), faq);
+  }
+
+  for (const policy of policyEntries) {
+    batch.set(firestoreTienda.collection("politicasTienda").doc(policy.id), policy);
+  }
+
+  for (const knowledge of knowledgeEntries) {
+    batch.set(firestoreTienda.collection("knowledgeTienda").doc(knowledge.id), knowledge);
+  }
+
+  for (const promotion of promotionEntries) {
+    batch.set(firestoreTienda.collection("promocionesTienda").doc(promotion.id), promotion);
+  }
+
+  await batch.commit();
+  log.success("Conocimiento base AI creado");
 }
 
 // Ejecutar seed

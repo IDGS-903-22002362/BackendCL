@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "crypto";
 import { RolUsuario } from "../../models/usuario.model";
 import { assertAiConfig } from "../../config/ai.config";
 import aiSessionService from "./memory/session.service";
@@ -9,13 +10,29 @@ import {
   AiRuntimeError,
   toAiErrorPayload,
 } from "./ai.error";
+import { AiAttachment, AiSessionMode } from "../../models/ai/ai.model";
+import { admin } from "../../config/firebase.admin";
+
+const hashToken = (value: string): string =>
+  createHash("sha256").update(value).digest("hex");
 
 export interface SendAiMessageInput {
   sessionId: string;
   userId: string;
   role: RolUsuario;
   message: string;
+  attachments?: AiAttachment[];
+  clientContext?: Record<string, unknown>;
   aiToolScopes?: string[];
+  requestId?: string;
+}
+
+export interface SendPublicAiMessageInput {
+  sessionId: string;
+  publicAccessToken: string;
+  message: string;
+  attachments?: AiAttachment[];
+  clientContext?: Record<string, unknown>;
   requestId?: string;
 }
 
@@ -39,7 +56,12 @@ export type SendAiMessageStreamEvent =
     };
 
 class AiChatService {
-  async assertMessageExecutionReady(input: SendAiMessageInput) {
+  private async getValidatedSessionForUser(input: {
+    sessionId: string;
+    userId?: string;
+    role?: RolUsuario;
+    publicAccessToken?: string;
+  }) {
     try {
       assertAiConfig();
     } catch (error) {
@@ -60,6 +82,35 @@ class AiChatService {
       );
     }
 
+    if (session.mode === AiSessionMode.GUEST) {
+      if (!input.publicAccessToken) {
+        throw new AiRuntimeError(
+          "AI_FORBIDDEN",
+          "Se requiere token de acceso publico para esta sesion",
+          403,
+        );
+      }
+
+      const incomingHash = hashToken(input.publicAccessToken);
+      if (incomingHash !== session.guestAccess?.tokenHash) {
+        throw new AiRuntimeError(
+          "AI_FORBIDDEN",
+          "Token publico invalido para esta sesion",
+          403,
+        );
+      }
+
+      return session;
+    }
+
+    if (!input.userId || !input.role) {
+      throw new AiRuntimeError(
+        "AI_FORBIDDEN",
+        "Se requiere usuario autenticado para esta sesion",
+        403,
+      );
+    }
+
     if (session.userId !== input.userId && input.role !== RolUsuario.ADMIN) {
       throw new AiRuntimeError(
         "AI_FORBIDDEN",
@@ -67,6 +118,23 @@ class AiChatService {
         403,
       );
     }
+
+    return session;
+  }
+
+  async assertMessageExecutionReady(input: SendAiMessageInput) {
+    await this.getValidatedSessionForUser({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: input.role,
+    });
+  }
+
+  async assertPublicMessageExecutionReady(input: SendPublicAiMessageInput) {
+    await this.getValidatedSessionForUser({
+      sessionId: input.sessionId,
+      publicAccessToken: input.publicAccessToken,
+    });
   }
 
   async createSession(input: {
@@ -75,7 +143,43 @@ class AiChatService {
     channel: string;
     title?: string;
   }) {
-    return aiSessionService.createSession(input);
+    return aiSessionService.createSession({
+      ...input,
+      mode: AiSessionMode.AUTHENTICATED,
+    });
+  }
+
+  async createPublicSession(input: {
+    channel: string;
+    title?: string;
+    guestLabel?: string;
+  }) {
+    const publicAccessToken = randomBytes(24).toString("hex");
+    const session = await aiSessionService.createSession({
+      userId: `guest:${randomBytes(12).toString("hex")}`,
+      role: RolUsuario.CLIENTE,
+      channel: input.channel,
+      title: input.title,
+      mode: AiSessionMode.GUEST,
+      guestAccess: {
+        tokenHash: hashToken(publicAccessToken),
+        label: input.guestLabel?.trim(),
+        createdAt: admin.firestore.Timestamp.now(),
+      },
+    });
+
+    return {
+      session: {
+        ...session,
+        guestAccess: session.guestAccess
+          ? {
+              ...session.guestAccess,
+              tokenHash: "",
+            }
+          : null,
+      },
+      publicAccessToken,
+    };
   }
 
   async listSessions(userId: string) {
@@ -106,7 +210,29 @@ class AiChatService {
 
   async sendMessage(input: SendAiMessageInput) {
     await this.assertMessageExecutionReady(input);
-    return aiOrchestrator.handleMessage(input);
+    return aiOrchestrator.handleMessage({
+      ...input,
+      sessionMode: AiSessionMode.AUTHENTICATED,
+    });
+  }
+
+  async sendPublicMessage(input: SendPublicAiMessageInput) {
+    const session = await this.getValidatedSessionForUser({
+      sessionId: input.sessionId,
+      publicAccessToken: input.publicAccessToken,
+    });
+
+    return aiOrchestrator.handleMessage({
+      sessionId: input.sessionId,
+      userId: session.userId,
+      role: RolUsuario.CLIENTE,
+      message: input.message,
+      attachments: input.attachments,
+      clientContext: input.clientContext,
+      aiToolScopes: [],
+      requestId: input.requestId,
+      sessionMode: AiSessionMode.GUEST,
+    });
   }
 
   async *sendMessageStream(
@@ -121,6 +247,34 @@ class AiChatService {
 
     try {
       const result = await this.sendMessage(input);
+      yield {
+        type: "final",
+        data: result,
+      };
+    } catch (error) {
+      const errorPayload = toAiErrorPayload(error);
+      yield {
+        type: "error",
+        data: {
+          code: errorPayload.code,
+          message: errorPayload.message,
+        },
+      };
+    }
+  }
+
+  async *sendPublicMessageStream(
+    input: SendPublicAiMessageInput,
+  ): AsyncGenerator<SendAiMessageStreamEvent> {
+    yield {
+      type: "status",
+      data: {
+        status: "processing",
+      },
+    };
+
+    try {
+      const result = await this.sendPublicMessage(input);
       yield {
         type: "final",
         data: result,

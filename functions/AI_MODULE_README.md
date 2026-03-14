@@ -45,6 +45,8 @@ Protected endpoints:
 - `GET /api/ai/chat/sessions`
 - `GET /api/ai/chat/sessions/:id`
 - `POST /api/ai/chat/messages`
+- `POST /api/ai/public/chat/sessions`
+- `POST /api/ai/public/chat/messages`
 - `POST /api/ai/files/upload`
 - `POST /api/ai/tryon/jobs`
 - `GET /api/ai/tryon/jobs`
@@ -66,6 +68,34 @@ The module uses the store database and adds:
 - `ai_audit_logs`
 - `faqTienda`
 - `politicasTienda`
+- `knowledgeTienda`
+- `promocionesTienda`
+
+## Chat orchestration
+
+The commerce assistant now uses a fixed backend pipeline:
+
+1. Normalize message and map commerce slang/synonyms.
+2. Load structured conversation state from `ai_sessions.conversationState`.
+3. Create a typed chat plan (`intent`, `toolCalls`, `needsClarification`, `sessionUpdates`).
+4. Execute only backend-approved tools.
+5. Compose a final answer from tool outputs and business context.
+6. Persist summary, tool traces, and updated conversation state.
+
+Guest/public mode is read-only and limited to catalog, FAQ, policies, promotions, store info, and recommendations. Authenticated mode keeps the full commerce surface.
+
+## Prompt examples
+
+- Planner prompt: decide intent, tool usage, and clarification with strict JSON output.
+- Responder prompt: use tool outputs to answer clearly, commercially, and without hallucinating data.
+
+## Tool examples
+
+- `search_products({ query, filters })`
+- `get_product_stock({ productId, sizeId? })`
+- `get_promotions({ activeOnly })`
+- `get_store_info()`
+- `get_order_status({ orderId, phone? })`
 
 ## Try-On Flow
 

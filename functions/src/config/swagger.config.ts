@@ -61,6 +61,10 @@ import {
 } from "../middleware/validators/new.validator";
 import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
+import {
+  createPublicAiSessionSchema,
+  sendPublicAiMessageSchema,
+} from "../middleware/validators/ai-public-chat.validator";
 import { createTryOnJobSchema } from "../middleware/validators/ai-tryon.validator";
 import { uploadAiFileBodySchema } from "../middleware/validators/ai-file.validator";
 
@@ -279,7 +283,9 @@ const swaggerDefinition = {
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
+      CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
+      SendPublicAiMessage: zodToJsonSchema(sendPublicAiMessageSchema),
       CreateTryOnJob: zodToJsonSchema(createTryOnJobSchema),
       UploadAiFileBody: zodToJsonSchema(uploadAiFileBodySchema),
       AiProductCategorySnapshot: {

@@ -1,19 +1,35 @@
 import { admin } from "../../../config/firebase.admin";
 import { firestoreTienda } from "../../../config/firebase";
 import { RolUsuario } from "../../../models/usuario.model";
-import { AiSession, AiSessionStatus } from "../../../models/ai/ai.model";
+import {
+  AiSession,
+  AiSessionMode,
+  AiSessionStatus,
+  ConversationState,
+} from "../../../models/ai/ai.model";
 import AI_COLLECTIONS from "../collections";
 
 class AiSessionService {
-  async createSession(input: { userId: string; role: RolUsuario; channel: string; title?: string }): Promise<AiSession> {
+  async createSession(input: {
+    userId: string;
+    role: RolUsuario;
+    channel: string;
+    title?: string;
+    mode?: AiSessionMode;
+    guestAccess?: AiSession["guestAccess"];
+    conversationState?: ConversationState;
+  }): Promise<AiSession> {
     const now = admin.firestore.Timestamp.now();
     const payload: Omit<AiSession, "id"> = {
       userId: input.userId,
       role: input.role,
+      mode: input.mode || AiSessionMode.AUTHENTICATED,
       channel: input.channel,
       title: input.title?.trim() || "Nueva conversacion",
       status: AiSessionStatus.ACTIVE,
       summary: "",
+      guestAccess: input.guestAccess || null,
+      conversationState: input.conversationState || {},
       createdAt: now,
       updatedAt: now,
       lastMessageAt: now,
@@ -50,6 +66,28 @@ class AiSessionService {
     await firestoreTienda.collection(AI_COLLECTIONS.sessions).doc(sessionId).update({
       summary,
       updatedAt: admin.firestore.Timestamp.now(),
+    });
+  }
+
+  async updateConversationState(
+    sessionId: string,
+    conversationState: ConversationState,
+  ): Promise<void> {
+    await firestoreTienda
+      .collection(AI_COLLECTIONS.sessions)
+      .doc(sessionId)
+      .update({
+        conversationState,
+        updatedAt: admin.firestore.Timestamp.now(),
+      });
+  }
+
+  async touchGuestSession(sessionId: string): Promise<void> {
+    const now = admin.firestore.Timestamp.now();
+    await firestoreTienda.collection(AI_COLLECTIONS.sessions).doc(sessionId).update({
+      "guestAccess.lastUsedAt": now,
+      lastMessageAt: now,
+      updatedAt: now,
     });
   }
 

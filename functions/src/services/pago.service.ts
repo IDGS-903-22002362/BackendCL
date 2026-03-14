@@ -248,6 +248,40 @@ const wait = (ms: number): Promise<void> => {
 };
 
 class PagoService {
+  getSupportedPaymentMethods(): Array<{
+    code: MetodoPago;
+    label: string;
+    availableOnline: boolean;
+  }> {
+    return [
+      {
+        code: MetodoPago.TARJETA,
+        label: "Tarjeta",
+        availableOnline: true,
+      },
+      {
+        code: MetodoPago.TRANSFERENCIA,
+        label: "Transferencia",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.EFECTIVO,
+        label: "Efectivo",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.PAYPAL,
+        label: "PayPal",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.MERCADOPAGO,
+        label: "Mercado Pago",
+        availableOnline: false,
+      },
+    ];
+  }
+
   private getStartPaymentLockRef(
     ordenId: string,
     userId: string,

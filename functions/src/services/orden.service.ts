@@ -10,6 +10,7 @@
  * - Sin autenticación por ahora (agregar cuando TASK-032 esté completa)
  */
 
+import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
 import {
@@ -943,6 +944,59 @@ export class OrdenService {
           : "Error al obtener el historial de órdenes",
       );
     }
+  }
+
+  async getOrderStatusForAssistant(input: {
+    orderId: string;
+    authUser?: { uid: string; rol: RolUsuario };
+    phone?: string;
+  }): Promise<{
+    orderId: string;
+    estado: EstadoOrden;
+    total: number;
+    metodoPago: string;
+    numeroGuia?: string;
+    transportista?: string;
+    createdAt: Timestamp;
+    updatedAt: Timestamp;
+  } | null> {
+    const ordenDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(input.orderId)
+      .get();
+
+    if (!ordenDoc.exists) {
+      return null;
+    }
+
+    const orden = ordenDoc.data() as Orden;
+    const isPrivileged =
+      input.authUser?.rol === RolUsuario.ADMIN ||
+      input.authUser?.rol === RolUsuario.EMPLEADO;
+    const isOwner =
+      Boolean(input.authUser?.uid) && orden.usuarioId === input.authUser?.uid;
+    const normalizedPhone = (input.phone || "").replace(/\D/g, "");
+    const matchesPhone =
+      normalizedPhone.length >= 8 &&
+      String(orden.direccionEnvio?.telefono || "").replace(/\D/g, "") ===
+        normalizedPhone;
+
+    if (!isPrivileged && !isOwner && !matchesPhone) {
+      throw new Error(
+        "No hay autorizacion suficiente para consultar el estado de este pedido",
+      );
+    }
+
+    return {
+      orderId: ordenDoc.id,
+      estado: orden.estado,
+      total: orden.total,
+      metodoPago: orden.metodoPago,
+      numeroGuia: orden.numeroGuia,
+      transportista: orden.transportista,
+      createdAt: orden.createdAt,
+      updatedAt: orden.updatedAt,
+    };
   }
 }
 

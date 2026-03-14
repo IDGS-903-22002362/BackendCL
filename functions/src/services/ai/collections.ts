@@ -7,6 +7,8 @@ export const AI_COLLECTIONS = {
   auditLogs: "ai_audit_logs",
   faq: "faqTienda",
   policies: "politicasTienda",
+  knowledge: "knowledgeTienda",
+  promotions: "promocionesTienda",
 } as const;
 
 export default AI_COLLECTIONS;

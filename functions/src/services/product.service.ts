@@ -79,11 +79,136 @@ export interface ReplaceProductSizeInventoryResult {
   }>;
 }
 
+export interface AssistantProductSearchFilters {
+  normalizedQuery?: string;
+  categoryIds?: string[];
+  lineIds?: string[];
+  colors?: string[];
+  sizeIds?: string[];
+  audience?: string[];
+  pricePreference?: "lowest" | "premium" | "standard";
+  availability?: "in_stock" | "all";
+}
+
+export interface AssistantProductSearchResult extends Producto {
+  score: number;
+  matchReasons: string[];
+  inStock: boolean;
+}
+
 /**
  * Clase ProductService
  * Encapsula las operaciones CRUD y consultas de productos
  */
 export class ProductService {
+  private normalizeSearchText(value: string): string {
+    return value
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+  }
+
+  private getSizeStock(product: Producto, sizeId?: string): number {
+    if (!sizeId) {
+      return product.existencias;
+    }
+
+    return (
+      product.inventarioPorTalla.find((item) => item.tallaId === sizeId)?.cantidad ??
+      0
+    );
+  }
+
+  private scoreAssistantSearchResult(
+    product: Producto,
+    query: string,
+    filters: AssistantProductSearchFilters,
+  ): AssistantProductSearchResult | null {
+    const haystack = this.normalizeSearchText(
+      [
+        product.descripcion,
+        product.clave,
+        product.lineaId,
+        product.categoriaId,
+      ].join(" "),
+    );
+    const reasons: string[] = [];
+    let score = 0;
+
+    if (filters.categoryIds?.length) {
+      if (filters.categoryIds.includes(product.categoriaId)) {
+        score += 7;
+        reasons.push(`category:${product.categoriaId}`);
+      } else {
+        return null;
+      }
+    }
+
+    const effectiveLineIds = filters.lineIds?.length
+      ? filters.lineIds
+      : filters.audience;
+    if (effectiveLineIds?.length) {
+      if (effectiveLineIds.includes(product.lineaId)) {
+        score += 6;
+        reasons.push(`line:${product.lineaId}`);
+      } else if (!filters.categoryIds?.length) {
+        return null;
+      }
+    }
+
+    if (filters.colors?.length) {
+      const hasColor = filters.colors.some((color) => haystack.includes(color));
+      if (!hasColor) {
+        return null;
+      }
+      score += 4;
+      reasons.push(`color:${filters.colors.join(",")}`);
+    }
+
+    if (filters.sizeIds?.length) {
+      const bestSize = filters.sizeIds.find((sizeId) => product.tallaIds.includes(sizeId));
+      if (!bestSize) {
+        return null;
+      }
+
+      const sizeStock = this.getSizeStock(product, bestSize);
+      if (filters.availability === "in_stock" && sizeStock <= 0) {
+        return null;
+      }
+
+      score += sizeStock > 0 ? 5 : 1;
+      reasons.push(`size:${bestSize}`);
+    } else if (filters.availability === "in_stock" && product.existencias <= 0) {
+      return null;
+    }
+
+    if (query.trim()) {
+      const queryTokens = this.normalizeSearchText(query)
+        .split(/\s+/)
+        .filter(Boolean);
+      const tokenHits = queryTokens.filter((token) => haystack.includes(token));
+      score += tokenHits.length * 2;
+      if (tokenHits.length > 0) {
+        reasons.push(`query:${tokenHits.join(",")}`);
+      }
+    }
+
+    if (score <= 0) {
+      return null;
+    }
+
+    return {
+      ...product,
+      score,
+      matchReasons: reasons,
+      inStock:
+        filters.sizeIds?.length
+          ? filters.sizeIds.some((sizeId) => this.getSizeStock(product, sizeId) > 0)
+          : product.existencias > 0,
+    };
+  }
+
   private normalizeInventoryBySize(
     inventarioPorTalla: unknown,
     tallaIds: unknown = [],
@@ -908,6 +1033,46 @@ export class ProductService {
           : "Error al actualizar stock del producto",
       );
     }
+  }
+
+  async searchProductsForAssistant(
+    searchTerm: string,
+    filters: AssistantProductSearchFilters = {},
+  ): Promise<AssistantProductSearchResult[]> {
+    const products = await this.getAllProducts();
+    const query = filters.normalizedQuery || searchTerm;
+
+    const ranked = products
+      .map((product) => this.scoreAssistantSearchResult(product, query, filters))
+      .filter(
+        (product): product is AssistantProductSearchResult => product !== null,
+      );
+
+    if (filters.pricePreference === "lowest") {
+      ranked.sort((a, b) => {
+        if (a.precioPublico !== b.precioPublico) {
+          return a.precioPublico - b.precioPublico;
+        }
+        return b.score - a.score;
+      });
+    } else if (filters.pricePreference === "premium") {
+      ranked.sort((a, b) => {
+        if (a.precioPublico !== b.precioPublico) {
+          return b.precioPublico - a.precioPublico;
+        }
+        return b.score - a.score;
+      });
+    } else {
+      ranked.sort((a, b) => {
+        if (b.score !== a.score) {
+          return b.score - a.score;
+        }
+
+        return a.precioPublico - b.precioPublico;
+      });
+    }
+
+    return ranked.slice(0, 12);
   }
 
   async replaceSizeInventory(
