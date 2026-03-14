@@ -1,18 +1,32 @@
-import productService from "../../../services/product.service";
+import productService, {
+  AssistantProductSearchFilters,
+  AssistantProductSearchResult,
+} from "../../../services/product.service";
 import carritoService from "../../../services/carrito.service";
 import categoryService from "../../../services/category.service";
 import lineService from "../../../services/line.service";
-import { getSizeById } from "../../../services/size.service";
+import { getAllSizes, getSizeById } from "../../../services/size.service";
 import inventoryService from "../../../services/inventory.service";
+import pagoService from "../../../services/pago.service";
 import storeConfigService from "./store-config.service";
 import faqService from "./faq.service";
 import policyService from "./policy.service";
 import productLinkService from "./product-link.service";
-import { Producto } from "../../../models/producto.model";
+import promotionService from "./promotion.service";
+import storeInfoService from "./store-info.service";
+import orderSupportService from "./order-support.service";
+import knowledgeRetrievalService from "./knowledge-retrieval.service";
+import tryOnAssetService from "../jobs/tryon-asset.service";
+import aiSessionService from "../memory/session.service";
+import { RolUsuario } from "../../../models/usuario.model";
 
 class StoreAiBusinessService {
-  async searchProducts(term: string): Promise<Producto[]> {
-    return productService.searchProducts(term);
+  async searchProducts(
+    term: string,
+    filters: AssistantProductSearchFilters = {},
+  ): Promise<Array<Record<string, unknown>>> {
+    const results = await productService.searchProductsForAssistant(term, filters);
+    return results.map((product) => this.mapSearchResult(product));
   }
 
   async getProductDetail(productId: string): Promise<Record<string, unknown> | null> {
@@ -32,7 +46,11 @@ class StoreAiBusinessService {
       category,
       line,
       variants,
-      canonicalLink: productLinkService.buildProductLink(product as unknown as Record<string, unknown>),
+      canonicalLink: productLinkService.buildProductLink({
+        ...product,
+        id: product.id,
+      }),
+      inStock: product.existencias > 0,
     };
   }
 
@@ -49,8 +67,25 @@ class StoreAiBusinessService {
     };
   }
 
-  async getProductStock(productId: string): Promise<Record<string, unknown> | null> {
-    return productService.getStockBySize(productId);
+  async getProductStock(
+    productId: string,
+    sizeId?: string,
+  ): Promise<Record<string, unknown> | null> {
+    const stock = await productService.getStockBySize(productId);
+    if (!stock) {
+      return null;
+    }
+
+    const selectedSize = sizeId
+      ? stock.inventarioPorTalla.find((item) => item.tallaId === sizeId)
+      : undefined;
+
+    return {
+      ...stock,
+      requestedSizeId: sizeId || null,
+      requestedSizeStock: selectedSize?.cantidad ?? null,
+      inStock: sizeId ? (selectedSize?.cantidad ?? 0) > 0 : stock.existencias > 0,
+    };
   }
 
   async getProductVariants(productId: string): Promise<Array<Record<string, unknown>>> {
@@ -68,19 +103,62 @@ class StoreAiBusinessService {
           sizeCode: size?.codigo || sizeId,
           sizeDescription: size?.descripcion || sizeId,
           stock: inventory?.cantidad ?? 0,
+          inStock: (inventory?.cantidad ?? 0) > 0,
         };
       }),
     );
   }
 
-  async getRelatedProducts(productId: string): Promise<Producto[]> {
-    const current = await productService.getProductById(productId);
-    if (!current) {
+  async listCategories(): Promise<Array<Record<string, unknown>>> {
+    const categories = await categoryService.getAllCategories();
+    return categories.map((category) => ({
+      id: category.id,
+      nombre: category.nombre,
+      lineaId: category.lineaId || null,
+    }));
+  }
+
+  async listLines(): Promise<Array<Record<string, unknown>>> {
+    const lines = await lineService.getAllLines();
+    return lines.map((line) => ({
+      id: line.id,
+      nombre: line.nombre,
+      codigo: line.codigo,
+    }));
+  }
+
+  async listCollections(): Promise<Array<Record<string, unknown>>> {
+    const docs = await knowledgeRetrievalService.searchKnowledgeDocuments("catalog aliases");
+    return docs.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      metadata: doc.metadata || {},
+    }));
+  }
+
+  async getRelatedProducts(input: {
+    productId?: string;
+    query?: string;
+  }): Promise<Array<Record<string, unknown>>> {
+    if (input.productId) {
+      const current = await productService.getProductById(input.productId);
+      if (!current) {
+        return [];
+      }
+
+      const related = await productService.getProductsByCategory(current.categoriaId);
+      return related
+        .filter((product) => product.id !== input.productId)
+        .slice(0, 5)
+        .map((product) => this.mapSearchResult({ ...product, score: 0, matchReasons: [], inStock: product.existencias > 0 }));
+    }
+
+    if (!input.query) {
       return [];
     }
 
-    const related = await productService.getProductsByCategory(current.categoriaId);
-    return related.filter((product) => product.id !== productId).slice(0, 5);
+    const found = await this.searchProducts(input.query, {});
+    return found.slice(0, 5);
   }
 
   async getProductLink(productId: string): Promise<string | null> {
@@ -89,7 +167,7 @@ class StoreAiBusinessService {
       return null;
     }
 
-    return productLinkService.buildProductLink(product as unknown as Record<string, unknown>);
+    return productLinkService.buildProductLink({ ...product, id: product.id });
   }
 
   async searchFaq(term: string) {
@@ -118,6 +196,87 @@ class StoreAiBusinessService {
       storeConfig,
       policy,
     };
+  }
+
+  async getPromotions(activeOnly = true) {
+    const promotions = await promotionService.listActivePromotions();
+    return activeOnly ? promotions : promotions;
+  }
+
+  async getStoreInfo() {
+    return storeInfoService.getStoreInfo();
+  }
+
+  async getPaymentMethods() {
+    return pagoService.getSupportedPaymentMethods();
+  }
+
+  async getOrderStatus(input: {
+    orderId: string;
+    userId?: string;
+    role?: RolUsuario;
+    phone?: string;
+  }) {
+    return orderSupportService.getOrderStatus({
+      orderId: input.orderId,
+      userId: input.userId,
+      role: input.role,
+      phone: input.phone,
+    });
+  }
+
+  async detectImageReferencedProduct(input: {
+    sessionId?: string;
+    attachments?: Array<{ assetId: string }>;
+  }): Promise<Record<string, unknown> | null> {
+    if (input.attachments?.length) {
+      const asset = await tryOnAssetService.getAssetById(input.attachments[0].assetId);
+      return asset
+        ? {
+            assetId: asset.id,
+            productId: asset.productId || null,
+            variantId: asset.variantId || null,
+            kind: asset.kind,
+          }
+        : null;
+    }
+
+    if (!input.sessionId) {
+      return null;
+    }
+
+    const session = await aiSessionService.getSessionById(input.sessionId);
+    if (!session?.conversationState?.recentAttachments?.length) {
+      return null;
+    }
+
+    const attachment = session.conversationState.recentAttachments[0];
+    if (!attachment?.assetId) {
+      return null;
+    }
+
+    const asset = await tryOnAssetService.getAssetById(attachment.assetId);
+    return asset
+      ? {
+          assetId: asset.id,
+          productId: asset.productId || null,
+          variantId: asset.variantId || null,
+          kind: asset.kind,
+        }
+      : null;
+  }
+
+  async getKnowledgeBundle(query: string) {
+    return knowledgeRetrievalService.findRelevantKnowledge(query);
+  }
+
+  async listSizes() {
+    const sizes = await getAllSizes();
+    return sizes.map((size) => ({
+      id: size.id,
+      code: size.codigo,
+      description: size.descripcion,
+    }));
   }
 
   async createCart(userId: string) {
@@ -180,6 +339,36 @@ class StoreAiBusinessService {
       productoId: filters.productoId,
       limit: 20,
     });
+  }
+
+  async handoffToHuman(reason: string) {
+    return {
+      status: "queued",
+      reason,
+      message:
+        "Puedo pasarte con atencion humana. Comparte tu pedido o medio de contacto y te damos seguimiento.",
+    };
+  }
+
+  private mapSearchResult(product: AssistantProductSearchResult): Record<string, unknown> {
+    return {
+      id: product.id,
+      productId: product.id,
+      clave: product.clave,
+      descripcion: product.descripcion,
+      lineaId: product.lineaId,
+      categoriaId: product.categoriaId,
+      precioPublico: product.precioPublico,
+      existencias: product.existencias,
+      tallaIds: product.tallaIds,
+      inStock: product.inStock,
+      score: product.score,
+      reasons: product.matchReasons,
+      canonicalLink: productLinkService.buildProductLink({
+        ...product,
+        id: product.id,
+      }),
+    };
   }
 }
 

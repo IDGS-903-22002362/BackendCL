@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { FunctionDeclaration } from "@google/genai";
+import { AiAttachment } from "../../../models/ai/ai.model";
 import { RolUsuario } from "../../../models/usuario.model";
 
 export interface AiToolExecutionContext {
@@ -8,6 +9,21 @@ export interface AiToolExecutionContext {
   role: RolUsuario;
   requestId?: string;
   capabilities: string[];
+  sessionId?: string;
+  sessionMode?: "authenticated" | "guest";
+  attachments?: AiAttachment[];
+}
+
+export interface ToolExecutionResultPayload<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
+  ok: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: Record<string, unknown>;
+  };
 }
 
 export interface AiToolDefinition<TInput extends Record<string, unknown> = Record<string, unknown>, TOutput extends Record<string, unknown> = Record<string, unknown>> {
@@ -16,7 +32,11 @@ export interface AiToolDefinition<TInput extends Record<string, unknown> = Recor
   schema: z.ZodType<TInput>;
   roles: RolUsuario[];
   capabilities?: string[];
-  execute: (input: TInput, context: AiToolExecutionContext) => Promise<TOutput>;
+  public?: boolean;
+  execute: (
+    input: TInput,
+    context: AiToolExecutionContext,
+  ) => Promise<TOutput | ToolExecutionResultPayload<TOutput>>;
 }
 
 export interface RuntimeAiToolDefinition {
@@ -25,6 +45,7 @@ export interface RuntimeAiToolDefinition {
   schema: z.ZodTypeAny;
   roles: RolUsuario[];
   capabilities?: string[];
+  public?: boolean;
   execute: (
     input: Record<string, unknown>,
     context: AiToolExecutionContext,
@@ -38,7 +59,10 @@ export const defineTool = <
   tool: AiToolDefinition<TInput, TOutput>,
 ): RuntimeAiToolDefinition => ({
   ...tool,
-  execute: async (input, context) => tool.execute(tool.schema.parse(input), context),
+  execute: async (input, context) =>
+    tool.execute(tool.schema.parse(input), context) as Promise<
+      Record<string, unknown>
+    >,
 });
 
 type JsonSchemaObject = Record<string, unknown>;

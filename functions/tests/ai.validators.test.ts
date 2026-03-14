@@ -1,5 +1,6 @@
 import { createAiSessionSchema } from "../src/middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../src/middleware/validators/ai-chat.validator";
+import { sendPublicAiMessageSchema } from "../src/middleware/validators/ai-public-chat.validator";
 import { createTryOnJobSchema } from "../src/middleware/validators/ai-tryon.validator";
 
 describe("AI validators", () => {
@@ -32,6 +33,15 @@ describe("AI validators", () => {
         productId: "prod_1",
         userImageAssetId: "asset_1",
         consentAccepted: false,
+      }),
+    ).toThrow();
+  });
+
+  it("requiere publicAccessToken en modo guest", () => {
+    expect(() =>
+      sendPublicAiMessageSchema.parse({
+        sessionId: "guest_1",
+        message: "hola",
       }),
     ).toThrow();
   });

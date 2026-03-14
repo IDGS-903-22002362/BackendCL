@@ -22,6 +22,13 @@ Todos los endpoints de esta guia requieren:
 Authorization: Bearer <jwt-del-backend>
 ```
 
+Excepcion:
+
+- `POST /api/ai/public/chat/sessions`
+- `POST /api/ai/public/chat/messages`
+
+Esos endpoints son para modo guest y no requieren JWT; usan `publicAccessToken` por sesion.
+
 Importante:
 
 - Los endpoints AI no aceptan directamente un Firebase ID token.
@@ -92,6 +99,7 @@ console.log(res.headers.get("x-request-id"));
 3. Guardar el `sessionId`.
 4. Listar o recuperar la sesion cuando necesites recargar historial.
 5. Enviar mensajes al agente con `POST /api/ai/chat/messages`.
+5b. Si el flujo es guest, primero crear sesion con `POST /api/ai/public/chat/sessions` y luego enviar mensajes con `POST /api/ai/public/chat/messages`.
 6. Si vas a usar preview de producto, subir primero una imagen con `POST /api/ai/files/upload`.
 7. Guardar el `asset.id` devuelto por upload como `userImageAssetId`.
 8. Crear el job de preview con `POST /api/ai/tryon/jobs`.
@@ -685,8 +693,8 @@ Errores comunes:
 
 Notas frontend:
 
-- `attachments` esta aceptado por validacion, pero hoy el controlador no lo propaga al orquestador. Tratalo como campo reservado, sin efecto observable actual.
-- El mensaje del usuario si se persiste en la sesion.
+- `attachments` ahora si se propaga al orquestador y puede influir en la respuesta.
+- El mensaje del usuario se persiste junto con el estado conversacional estructurado.
 - La respuesta final incluye `toolCalls`, util para debug o trazabilidad.
 
 ---

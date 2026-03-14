@@ -15,5 +15,10 @@ export const createAiRateLimiter = (
 };
 
 export const aiChatRateLimiter = createAiRateLimiter("ai:chat");
+export const aiPublicChatRateLimiter = createAiRateLimiter(
+  "ai:public-chat",
+  aiConfig.api.publicChatRateLimitMax,
+  aiConfig.api.publicChatRateLimitWindowMs,
+);
 export const aiUploadRateLimiter = createAiRateLimiter("ai:upload", Math.max(3, Math.floor(aiConfig.api.rateLimitMax / 3)));
 export const aiTryOnRateLimiter = createAiRateLimiter("ai:tryon", Math.max(5, Math.floor(aiConfig.api.rateLimitMax / 2)));

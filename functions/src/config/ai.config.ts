@@ -163,11 +163,23 @@ export const aiConfig = {
     rateLimitWindowMs: toInt(process.env.AI_RATE_LIMIT_WINDOW_MS, 60000),
     rateLimitMax: toInt(process.env.AI_RATE_LIMIT_MAX, 30),
     enableSse: toBool(process.env.AI_ENABLE_SSE, true),
+    publicChatEnabled: toBool(process.env.AI_PUBLIC_CHAT_ENABLED, true),
+    publicChatRateLimitWindowMs: toInt(
+      process.env.AI_PUBLIC_CHAT_RATE_LIMIT_WINDOW_MS,
+      60000,
+    ),
+    publicChatRateLimitMax: toInt(
+      process.env.AI_PUBLIC_CHAT_RATE_LIMIT_MAX,
+      12,
+    ),
   },
   storefront: {
     baseUrl: normalizeBaseUrl(process.env.STORE_PUBLIC_BASE_URL),
     productPathTemplate:
       process.env.STORE_PRODUCT_PATH_TEMPLATE || "/productos/:id",
+    mapsUrl:
+      process.env.AI_STORE_MAPS_URL ||
+      "https://maps.app.goo.gl/nnLL1SCpgJo5aqVR6",
   },
 };
 
@@ -184,6 +196,8 @@ export const getAiRuntimeSummary = () => ({
   previewMockupFallbackModel: aiConfig.previewMockup.fallbackModel,
   previewMockupFallbackRegion: aiConfig.previewMockup.fallbackRegion,
   storageBucket: aiConfig.storage.bucket,
+  publicChatEnabled: aiConfig.api.publicChatEnabled,
+  storeMapsUrl: aiConfig.storefront.mapsUrl,
 });
 
 export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {

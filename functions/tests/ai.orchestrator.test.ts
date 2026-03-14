@@ -2,6 +2,14 @@ jest.mock("../src/services/ai/adapters/gemini.adapter", () => ({
   __esModule: true,
   default: {
     generate: jest.fn(),
+    generateStructured: jest.fn(),
+  },
+}));
+
+jest.mock("../src/services/ai/planning/chat-planner.service", () => ({
+  __esModule: true,
+  default: {
+    plan: jest.fn(),
   },
 }));
 
@@ -10,7 +18,9 @@ jest.mock("../src/services/ai/memory/session.service", () => ({
   default: {
     getSessionById: jest.fn(),
     updateSessionSummary: jest.fn(),
+    updateConversationState: jest.fn(),
     touchSession: jest.fn(),
+    touchGuestSession: jest.fn(),
   },
 }));
 
@@ -44,22 +54,24 @@ jest.mock("../src/services/ai/rbac/role-tool-mapper.service", () => ({
   },
 }));
 
-import aiConfig from "../src/config/ai.config";
-import aiOrchestrator, {
-  AI_ASSISTANT_USER_ID,
-} from "../src/services/ai/adapters/ai-orchestrator";
+import aiOrchestrator from "../src/services/ai/adapters/ai-orchestrator";
 import geminiAdapter from "../src/services/ai/adapters/gemini.adapter";
+import chatPlannerService from "../src/services/ai/planning/chat-planner.service";
 import aiSessionService from "../src/services/ai/memory/session.service";
 import aiMessageService from "../src/services/ai/memory/message.service";
 import aiToolCallService from "../src/services/ai/memory/tool-call.service";
 import toolRegistryService from "../src/services/ai/rbac/tool-registry.service";
 import roleToolMapperService from "../src/services/ai/rbac/role-tool-mapper.service";
 import { RolUsuario } from "../src/models/usuario.model";
-import { AiMessageRole, AiToolCallStatus } from "../src/models/ai/ai.model";
-import { AiRuntimeError } from "../src/services/ai/ai.error";
+import {
+  AiMessageRole,
+  AiSessionMode,
+  AiToolCallStatus,
+} from "../src/models/ai/ai.model";
 import { z } from "zod";
 
 const mockedGeminiAdapter = geminiAdapter as jest.Mocked<typeof geminiAdapter>;
+const mockedPlanner = chatPlannerService as jest.Mocked<typeof chatPlannerService>;
 const mockedSessionService = aiSessionService as jest.Mocked<
   typeof aiSessionService
 >;
@@ -82,9 +94,11 @@ const createSearchProductsTool = () => ({
   schema: z
     .object({
       query: z.string().min(1),
+      filters: z.record(z.unknown()).optional(),
     })
     .strict(),
   roles: [RolUsuario.CLIENTE],
+  public: true,
   execute: jest.fn(),
 });
 
@@ -94,10 +108,12 @@ describe("AiOrchestrator.handleMessage", () => {
     mockedSessionService.getSessionById.mockResolvedValue({
       id: "session-1",
       userId: "user-1",
+      mode: AiSessionMode.AUTHENTICATED,
       summary: "",
+      conversationState: {},
     } as never);
     mockedMessageService.listMessagesBySession.mockResolvedValue([] as never);
-    mockedToolRegistryService.getAllowedTools.mockReturnValue([]);
+    mockedToolRegistryService.getAllowedTools.mockReturnValue([] as never);
     mockedRoleToolMapperService.getCapabilities.mockReturnValue([] as never);
     mockedMessageService.createMessage
       .mockResolvedValueOnce({
@@ -119,9 +135,59 @@ describe("AiOrchestrator.handleMessage", () => {
     );
   });
 
-  it("usa un remitente de asistente estable y texto fallback cuando Gemini responde vacio", async () => {
+  it("ejecuta el plan estructurado, llama tools permitidas y responde con gemini", async () => {
+    const tool = createSearchProductsTool();
+    tool.execute.mockResolvedValue({
+      products: [
+        {
+          id: "jersey-2024-local",
+          descripcion: "Jersey Oficial Club Leon 2024 Local",
+          precioPublico: 1299,
+          canonicalLink: "https://clubleon.mx/productos/jersey-2024-local",
+        },
+      ],
+    });
+    mockedToolRegistryService.getAllowedTools.mockReturnValue([tool] as never);
+    mockedToolRegistryService.getToolByName.mockReturnValue(tool as never);
+    mockedPlanner.plan.mockResolvedValue({
+      normalized: {
+        originalText: "que playeras tienes",
+        normalizedText: "que playeras tienes",
+        tokens: ["que", "playeras", "tienes"],
+        filters: { categoryIds: ["jersey"] },
+        references: [],
+        topics: [],
+        asksForRecommendation: false,
+        asksForComparison: false,
+        asksForStoreLocation: false,
+        mentionsImage: false,
+      },
+      plan: {
+        intent: "product_search",
+        confidence: 0.91,
+        requiresTools: true,
+        toolCalls: [
+          {
+            toolName: "search_products",
+            arguments: {
+              query: "que playeras tienes",
+              filters: { categoryIds: ["jersey"] },
+            },
+          },
+        ],
+        needsClarification: false,
+        clarificationQuestion: null,
+        sessionUpdates: {
+          currentIntent: "product_search",
+          activeFilters: { categoryIds: ["jersey"] },
+          tone: "commercial",
+          preferredLanguage: "es-MX",
+        },
+        finalAnswer: "Voy a revisar productos reales.",
+      },
+    } as never);
     mockedGeminiAdapter.generate.mockResolvedValue({
-      text: "   ",
+      text: "Tengo disponible el Jersey Oficial Club Leon 2024 Local por $1299 MXN. Aqui lo puedes ver: https://clubleon.mx/productos/jersey-2024-local",
       functionCalls: [],
       response: {} as never,
     });
@@ -130,267 +196,80 @@ describe("AiOrchestrator.handleMessage", () => {
       sessionId: "session-1",
       userId: "user-1",
       role: RolUsuario.CLIENTE,
-      message: "hola",
+      message: "que playeras tienes",
       aiToolScopes: [],
       requestId: "req-1",
+      sessionMode: AiSessionMode.AUTHENTICATED,
     });
 
-    expect(result.text).toBe(
-      "No pude generar una respuesta en este momento. Intenta nuevamente.",
-    );
-    expect(mockedMessageService.createMessage).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        sessionId: "session-1",
-        userId: AI_ASSISTANT_USER_ID,
-        role: AiMessageRole.ASSISTANT,
-        content:
-          "No pude generar una respuesta en este momento. Intenta nuevamente.",
-        toolCallIds: [],
-      }),
-    );
-    expect(mockedSessionService.updateSessionSummary).toHaveBeenCalledWith(
-      "session-1",
-      expect.stringContaining(
-        "Asistente: No pude generar una respuesta en este momento. Intenta nuevamente.",
-      ),
-    );
-  });
-
-  it("reintenta sin tools cuando Gemini rechaza el schema o la configuracion de tools", async () => {
-    mockedToolRegistryService.getAllowedTools.mockReturnValue([
-      createSearchProductsTool() as never,
-    ]);
-    mockedGeminiAdapter.generate
-      .mockRejectedValueOnce(
-        new AiRuntimeError(
-          "AI_INVALID_CONFIGURATION",
-          "Schema invalido de tool calling",
-          400,
-        ),
-      )
-      .mockResolvedValueOnce({
-        text: "Respuesta fallback",
-        functionCalls: [],
-        response: {} as never,
-      });
-
-    const result = await aiOrchestrator.handleMessage({
-      sessionId: "session-1",
-      userId: "user-1",
-      role: RolUsuario.CLIENTE,
-      message: "hola",
-      aiToolScopes: [],
-      requestId: "req-1",
-    });
-
-    expect(result.text).toBe("Respuesta fallback");
-    expect(mockedGeminiAdapter.generate).toHaveBeenCalledTimes(2);
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        tools: expect.any(Array),
-      }),
-    );
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      1,
-      expect.not.objectContaining({
-        allowedFunctionNames: expect.anything(),
-      }),
-    );
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        model: expect.any(String),
-        contents: expect.any(Array),
-        systemInstruction: expect.any(String),
-      }),
-    );
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      2,
-      expect.not.objectContaining({
-        tools: expect.anything(),
-      }),
-    );
-  });
-
-  it("envia function responses reales y obtiene texto final despues de ejecutar tools", async () => {
-    const tool = createSearchProductsTool();
-    tool.execute.mockResolvedValue({
-      products: [{ id: "jersey-2024", descripcion: "Jersey Oficial 2024" }],
-    });
-    mockedToolRegistryService.getAllowedTools.mockReturnValue([tool as never]);
-    mockedToolRegistryService.getToolByName.mockReturnValue(tool as never);
-    mockedGeminiAdapter.generate
-      .mockResolvedValueOnce({
-        text: "",
-        functionCalls: [
-          {
-            id: "call-1",
-            name: "search_products",
-            args: { query: "jersey oficial 2024" },
-          },
-        ],
-        response: {} as never,
-      })
-      .mockResolvedValueOnce({
-        text: "El Jersey Oficial 2024 destaca por su diseño local y disponibilidad actual en catalogo.",
-        functionCalls: [],
-        response: {} as never,
-      });
-
-    const result = await aiOrchestrator.handleMessage({
-      sessionId: "session-1",
-      userId: "user-1",
-      role: RolUsuario.CLIENTE,
-      message: "Explícame las características del jersey",
-      aiToolScopes: [],
-      requestId: "req-1",
-    });
-
-    expect(result.text).toContain("Jersey Oficial 2024");
     expect(tool.execute).toHaveBeenCalledWith(
-      { query: "jersey oficial 2024" },
+      {
+        query: "que playeras tienes",
+        filters: { categoryIds: ["jersey"] },
+      },
       expect.objectContaining({
         userId: "user-1",
+        sessionId: "session-1",
       }),
     );
-    expect(mockedGeminiAdapter.generate).toHaveBeenCalledTimes(2);
-    const secondCall = mockedGeminiAdapter.generate.mock.calls[1][0] as {
-      contents: Array<{
-        role: string;
-        parts: Array<Record<string, unknown>>;
-      }>;
-    };
-    expect(secondCall.contents).toHaveLength(3);
-    expect(secondCall.contents[1]).toMatchObject({
-      role: "model",
-    });
-    expect(secondCall.contents[1].parts[0]).toEqual(
+    expect(result.text).toContain("Jersey Oficial Club Leon 2024 Local");
+    expect(mockedSessionService.updateConversationState).toHaveBeenCalled();
+    expect(mockedToolCallService.createToolCall).toHaveBeenCalledWith(
       expect.objectContaining({
-        functionCall: expect.objectContaining({
-          name: "search_products",
-        }),
-      }),
-    );
-    expect(secondCall.contents[2]).toMatchObject({
-      role: "user",
-    });
-    expect(secondCall.contents[2].parts[0]).toEqual(
-      expect.objectContaining({
-        functionResponse: expect.objectContaining({
-          name: "search_products",
-        }),
+        toolName: "search_products",
+        status: AiToolCallStatus.SUCCESS,
       }),
     );
   });
 
-  it("corta loops repetidos sin reejecutar tools y sintetiza sin tools", async () => {
-    const tool = createSearchProductsTool();
-    tool.execute.mockResolvedValue({
-      products: [{ id: "jersey-2024" }],
-    });
-    mockedToolRegistryService.getAllowedTools.mockReturnValue([tool as never]);
-    mockedToolRegistryService.getToolByName.mockReturnValue(tool as never);
-    mockedGeminiAdapter.generate
-      .mockResolvedValueOnce({
-        text: "",
-        functionCalls: [
-          {
-            id: "call-1",
-            name: "search_products",
-            args: { query: "jersey oficial 2024" },
+  it("responde con aclaracion cuando el plan no tiene suficiente contexto", async () => {
+    mockedPlanner.plan.mockResolvedValue({
+      normalized: {
+        originalText: "hay en m",
+        normalizedText: "hay en m",
+        tokens: ["hay", "en", "m"],
+        filters: { sizeIds: ["m"] },
+        references: [],
+        topics: [],
+        asksForRecommendation: false,
+        asksForComparison: false,
+        asksForStoreLocation: false,
+        mentionsImage: false,
+      },
+      plan: {
+        intent: "inventory_check",
+        confidence: 0.42,
+        requiresTools: false,
+        toolCalls: [],
+        needsClarification: true,
+        clarificationQuestion:
+          "Te ayudo. ¿De cual producto hablas exactamente: el jersey local, visitante, infantil u otra opcion?",
+        sessionUpdates: {
+          currentIntent: "inventory_check",
+          activeFilters: { sizeIds: ["m"] },
+          pendingClarification: {
+            type: "product",
+            question:
+              "Te ayudo. ¿De cual producto hablas exactamente: el jersey local, visitante, infantil u otra opcion?",
           },
-        ],
-        response: {} as never,
-      })
-      .mockResolvedValueOnce({
-        text: "",
-        functionCalls: [
-          {
-            id: "call-2",
-            name: "search_products",
-            args: { query: "jersey oficial 2024" },
-          },
-        ],
-        response: {} as never,
-      })
-      .mockResolvedValueOnce({
-        text: "Con la informacion disponible, el jersey local 2024 ya fue identificado.",
-        functionCalls: [],
-        response: {} as never,
-      });
+        },
+        finalAnswer:
+          "Te ayudo. ¿De cual producto hablas exactamente: el jersey local, visitante, infantil u otra opcion?",
+      },
+    } as never);
 
     const result = await aiOrchestrator.handleMessage({
       sessionId: "session-1",
       userId: "user-1",
       role: RolUsuario.CLIENTE,
-      message: "Háblame del jersey local",
+      message: "hay en m",
       aiToolScopes: [],
-      requestId: "req-1",
+      requestId: "req-2",
+      sessionMode: AiSessionMode.AUTHENTICATED,
     });
 
-    expect(result.text).toContain("jersey local 2024");
-    expect(tool.execute).toHaveBeenCalledTimes(1);
-    expect(mockedGeminiAdapter.generate).toHaveBeenCalledTimes(3);
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        contents: expect.any(Array),
-      }),
-    );
-    expect(mockedGeminiAdapter.generate).toHaveBeenNthCalledWith(
-      3,
-      expect.not.objectContaining({
-        tools: expect.anything(),
-      }),
-    );
-  });
-
-  it("sintetiza una respuesta final al alcanzar maxToolSteps en lugar de lanzar 500", async () => {
-    const tool = createSearchProductsTool();
-    tool.execute.mockResolvedValue({
-      products: [{ id: "jersey-2024" }],
-    });
-    mockedToolRegistryService.getAllowedTools.mockReturnValue([tool as never]);
-    mockedToolRegistryService.getToolByName.mockReturnValue(tool as never);
-
-    const toolResponses = Array.from(
-      { length: aiConfig.gemini.maxToolSteps },
-      (_, index) => ({
-        text: "",
-        functionCalls: [
-          {
-            id: `call-${index + 1}`,
-            name: "search_products",
-            args: { query: `jersey oficial ${index + 1}` },
-          },
-        ],
-        response: {} as never,
-      }),
-    );
-    for (const response of toolResponses) {
-      mockedGeminiAdapter.generate.mockResolvedValueOnce(response);
-    }
-    mockedGeminiAdapter.generate.mockResolvedValueOnce({
-      text: "Respuesta final sintetizada despues de consultar tools.",
-      functionCalls: [],
-      response: {} as never,
-    });
-
-    const result = await aiOrchestrator.handleMessage({
-      sessionId: "session-1",
-      userId: "user-1",
-      role: RolUsuario.CLIENTE,
-      message: "Resume lo encontrado del jersey",
-      aiToolScopes: [],
-      requestId: "req-1",
-    });
-
-    expect(result.text).toContain("Respuesta final sintetizada");
-    expect(tool.execute).toHaveBeenCalledTimes(aiConfig.gemini.maxToolSteps);
-    expect(mockedGeminiAdapter.generate).toHaveBeenCalledTimes(
-      aiConfig.gemini.maxToolSteps + 1,
-    );
+    expect(result.text).toContain("¿De cual producto hablas");
+    expect(mockedGeminiAdapter.generate).not.toHaveBeenCalled();
+    expect(mockedToolCallService.createToolCall).not.toHaveBeenCalled();
   });
 });

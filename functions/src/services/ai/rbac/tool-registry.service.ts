@@ -4,11 +4,19 @@ import aiToolDefinitions from "../tools/definitions";
 import roleToolMapperService from "./role-tool-mapper.service";
 
 class ToolRegistryService {
-  getAllowedTools(role: RolUsuario, scopes: string[] = []): RuntimeAiToolDefinition[] {
+  getAllowedTools(
+    role: RolUsuario,
+    scopes: string[] = [],
+    options: { publicOnly?: boolean } = {},
+  ): RuntimeAiToolDefinition[] {
     const capabilities = roleToolMapperService.getCapabilities(role, scopes);
 
     return aiToolDefinitions.filter((tool) => {
       if (!tool.roles.includes(role)) {
+        return false;
+      }
+
+       if (options.publicOnly && tool.public === false) {
         return false;
       }
 
