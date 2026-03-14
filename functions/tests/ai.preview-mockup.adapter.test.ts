@@ -1,16 +1,33 @@
 const mockRecontextImage = jest.fn();
+const mockEditImage = jest.fn();
 
 jest.mock("@google/genai", () => ({
   GoogleGenAI: jest.fn().mockImplementation(() => ({
     models: {
       recontextImage: mockRecontextImage,
+      editImage: mockEditImage,
     },
   })),
+  EditMode: {
+    EDIT_MODE_PRODUCT_IMAGE: "EDIT_MODE_PRODUCT_IMAGE",
+  },
   PersonGeneration: {
     ALLOW_ADULT: "ALLOW_ADULT",
   },
+  RawReferenceImage: class RawReferenceImage {
+    referenceId?: number;
+    referenceImage?: unknown;
+  },
   SafetyFilterLevel: {
     BLOCK_ONLY_HIGH: "BLOCK_ONLY_HIGH",
+  },
+  SubjectReferenceImage: class SubjectReferenceImage {
+    referenceId?: number;
+    referenceImage?: unknown;
+    config?: unknown;
+  },
+  SubjectReferenceType: {
+    SUBJECT_TYPE_PRODUCT: "SUBJECT_TYPE_PRODUCT",
   },
 }));
 
@@ -22,6 +39,9 @@ jest.mock("../src/config/ai.config", () => ({
       region: "us-central1",
       model: "imagen-product-recontext-preview-06-30",
       apiVersion: "v1beta",
+      fallbackModel: "imagen-3.0-capability-001",
+      fallbackRegion: "us-central1",
+      fallbackApiVersion: "v1",
       timeoutMs: 2500,
     },
   },
@@ -113,5 +133,57 @@ describe("Vertex preview mockup adapter", () => {
     expect(request.source.prompt).toContain(
       "Si es balon o souvenir, solo puede aparecer en las manos, junto al cuerpo o en una escena cercana y realista.",
     );
+  });
+
+  it("usa editImage como fallback cuando recontext no esta disponible", async () => {
+    mockRecontextImage.mockRejectedValue({
+      status: 404,
+      message:
+        "Image editing failed with the following error: imagen-product-recontext-preview-06-30 is unavailable.",
+    });
+    mockEditImage.mockResolvedValue({
+      generatedImages: [
+        {
+          image: {
+            imageBytes: "ZmFsbGJhY2staW1hZ2U=",
+            mimeType: "image/png",
+          },
+        },
+      ],
+    });
+
+    const result = await vertexPreviewMockupAdapter.generateMockup({
+      personImage: {
+        bytesBase64Encoded: "cGVyc29u",
+        mimeType: "image/png",
+      },
+      productImage: {
+        bytesBase64Encoded: "Z29ycmE=",
+        mimeType: "image/png",
+      },
+      previewMode: ProductPreviewMode.ACCESSORY_MOCKUP,
+      productPreviewType: ProductPreviewType.ACCESSORY,
+      productDescription: "Gorra oficial verde",
+      categoryName: "Gorra",
+      lineName: "Souvenir",
+    });
+
+    expect(mockRecontextImage).toHaveBeenCalledTimes(1);
+    expect(mockEditImage).toHaveBeenCalledTimes(1);
+
+    const fallbackRequest = mockEditImage.mock.calls[0][0];
+    expect(fallbackRequest.model).toBe("imagen-3.0-capability-001");
+    expect(fallbackRequest.prompt).toContain(
+      "Usa la referencia [2] como el producto exacto que debe aparecer en la imagen final.",
+    );
+    expect(fallbackRequest.config.editMode).toBe("EDIT_MODE_PRODUCT_IMAGE");
+    expect(fallbackRequest.config.negativePrompt).toContain(
+      "No colocar gorras en el torso ni calcetas en manos, torso o cabeza.",
+    );
+
+    expect(result).toMatchObject({
+      outputImageBytesBase64: "ZmFsbGJhY2staW1hZ2U=",
+      mimeType: "image/png",
+    });
   });
 });

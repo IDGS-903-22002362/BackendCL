@@ -1,8 +1,13 @@
 import {
+  EditImageResponse,
+  EditMode,
   GoogleGenAI,
   PersonGeneration,
+  RawReferenceImage,
   RecontextImageResponse,
   SafetyFilterLevel,
+  SubjectReferenceImage,
+  SubjectReferenceType,
 } from "@google/genai";
 import aiConfig from "../../../config/ai.config";
 import {
@@ -139,34 +144,203 @@ const buildPrompt = (input: VertexPreviewMockupInput): string => {
     .join("\n");
 };
 
-const extractGeneratedImage = (response: RecontextImageResponse) =>
+const buildFallbackEditPrompt = (input: VertexPreviewMockupInput): string =>
+  [
+    "Edita la foto base [1] para crear una vista previa realista de e-commerce.",
+    "Usa la referencia [2] como el producto exacto que debe aparecer en la imagen final.",
+    "Mantener a la misma persona de [1], sin cambiar su identidad facial, complexión ni pose general salvo ajustes naturales minimos.",
+    "Conservar exactamente el color, forma, logo y proporcion del producto de [2].",
+    "Nunca transformar el producto en otra categoria distinta.",
+    "Si la colocacion correcta no es confiable, mostrar el producto junto a la persona o en su mano.",
+    "No convertir gorras, calcetas, balones ni souvenirs en camisas o prendas superiores.",
+    input.previewMode === ProductPreviewMode.ACCESSORY_MOCKUP
+      ? "Si el producto es una gorra, solo puede ir en la cabeza o en la mano. Si es una calceta, solo en los pies; si no se ven, dejarla junto a la persona."
+      : "Si el producto es un balon o souvenir, solo debe ir en las manos, junto al cuerpo o en una escena cercana realista.",
+    input.productDescription
+      ? `Descripcion del producto: ${input.productDescription}.`
+      : null,
+    input.categoryName ? `Categoria: ${input.categoryName}.` : null,
+    input.lineName ? `Linea: ${input.lineName}.` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+const buildNegativePrompt = (input: VertexPreviewMockupInput): string =>
+  [
+    "No cambiar el producto por una camiseta, jersey, sudadera, chamarra o cualquier otra prenda incorrecta.",
+    "No eliminar el logo ni alterar los colores oficiales del producto.",
+    "No deformar el cuerpo, rostro, manos o cabeza de la persona.",
+    input.previewMode === ProductPreviewMode.ACCESSORY_MOCKUP
+      ? "No colocar gorras en el torso ni calcetas en manos, torso o cabeza."
+      : "No vestir balones, souvenirs o accesorios sobre torso, piernas o cabeza.",
+  ].join(" ");
+
+const extractGeneratedImage = (
+  response: RecontextImageResponse | EditImageResponse,
+) =>
   response.generatedImages?.find((image) => image.image?.imageBytes || image.image?.gcsUri);
+
+const resolveErrorStatus = (error: unknown): number | undefined => {
+  if (typeof error !== "object" || error === null) {
+    return undefined;
+  }
+
+  const value = Reflect.get(error, "status");
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+};
+
+const resolveErrorMessage = (error: unknown): string =>
+  error instanceof Error
+    ? error.message
+    : typeof error === "object" &&
+        error !== null &&
+        typeof Reflect.get(error, "message") === "string"
+      ? String(Reflect.get(error, "message"))
+      : "Error desconocido al generar mockup de preview";
+
+const shouldFallbackToEditImage = (error: unknown): boolean => {
+  const status = resolveErrorStatus(error);
+  const message = resolveErrorMessage(error);
+
+  return (
+    status === 404 &&
+    /unavailable|not found|not[_ ]found|not available/i.test(message)
+  );
+};
 
 class VertexPreviewMockupAdapter {
   private readonly baseLogger = logger.child({
     component: "vertex-preview-mockup-adapter",
   });
-  private client?: GoogleGenAI;
+  private readonly clients = new Map<string, GoogleGenAI>();
 
-  private getClient(): GoogleGenAI {
-    if (this.client) {
-      return this.client;
+  private getClient(location: string, apiVersion?: string): GoogleGenAI {
+    const cacheKey = `${location}:${apiVersion || "default"}`;
+    const existingClient = this.clients.get(cacheKey);
+    if (existingClient) {
+      return existingClient;
     }
 
-    this.client = new GoogleGenAI({
+    const client = new GoogleGenAI({
       vertexai: true,
       project: aiConfig.previewMockup.project,
-      location: aiConfig.previewMockup.region,
-      apiVersion: aiConfig.previewMockup.apiVersion,
+      location,
+      apiVersion,
+    });
+    this.clients.set(cacheKey, client);
+
+    return client;
+  }
+
+  private async runRecontextRequest(
+    input: VertexPreviewMockupInput,
+    client: GoogleGenAI,
+    controller: AbortController,
+  ): Promise<VertexPreviewMockupResult> {
+    const response = await client.models.recontextImage({
+      model: aiConfig.previewMockup.model,
+      source: {
+        prompt: buildPrompt(input),
+        personImage: normalizeImageInput(input.personImage),
+        productImages: [{ productImage: normalizeImageInput(input.productImage) }],
+      },
+      config: {
+        abortSignal: controller.signal,
+        numberOfImages: 1,
+        outputGcsUri: input.outputGcsUri,
+        personGeneration: PersonGeneration.ALLOW_ADULT,
+        safetyFilterLevel: SafetyFilterLevel.BLOCK_ONLY_HIGH,
+        outputMimeType: "image/png",
+        addWatermark: true,
+        enhancePrompt: true,
+      },
     });
 
-    return this.client;
+    const generatedImage = extractGeneratedImage(response);
+    if (!generatedImage?.image?.imageBytes && !generatedImage?.image?.gcsUri) {
+      throw new VertexPreviewMockupError(
+        "PRODUCT_PREVIEW_PARSE_ERROR",
+        "Vertex preview mockup no devolvio una imagen utilizable",
+        undefined,
+        response,
+      );
+    }
+
+    return {
+      outputImageBytesBase64: generatedImage.image?.imageBytes,
+      outputGcsUri: generatedImage.image?.gcsUri,
+      mimeType: generatedImage.image?.mimeType,
+      rawResponse: response,
+    };
+  }
+
+  private async runEditImageFallback(
+    input: VertexPreviewMockupInput,
+    controller: AbortController,
+  ): Promise<VertexPreviewMockupResult> {
+    const baseReferenceImage = new RawReferenceImage();
+    baseReferenceImage.referenceId = 1;
+    baseReferenceImage.referenceImage = normalizeImageInput(input.personImage);
+
+    const productReferenceImage = new SubjectReferenceImage();
+    productReferenceImage.referenceId = 2;
+    productReferenceImage.referenceImage = normalizeImageInput(input.productImage);
+    productReferenceImage.config = {
+      subjectType: SubjectReferenceType.SUBJECT_TYPE_PRODUCT,
+      subjectDescription:
+        input.productDescription ||
+        input.categoryName ||
+        input.lineName ||
+        "Producto oficial de tienda deportiva",
+    };
+
+    const fallbackClient = this.getClient(
+      aiConfig.previewMockup.fallbackRegion,
+      aiConfig.previewMockup.fallbackApiVersion,
+    );
+    const response = await fallbackClient.models.editImage({
+      model: aiConfig.previewMockup.fallbackModel,
+      prompt: buildFallbackEditPrompt(input),
+      referenceImages: [baseReferenceImage, productReferenceImage],
+      config: {
+        abortSignal: controller.signal,
+        numberOfImages: 1,
+        outputGcsUri: input.outputGcsUri,
+        personGeneration: PersonGeneration.ALLOW_ADULT,
+        safetyFilterLevel: SafetyFilterLevel.BLOCK_ONLY_HIGH,
+        outputMimeType: "image/png",
+        addWatermark: true,
+        guidanceScale: 20,
+        editMode: EditMode.EDIT_MODE_PRODUCT_IMAGE,
+        negativePrompt: buildNegativePrompt(input),
+      },
+    });
+
+    const generatedImage = extractGeneratedImage(response);
+    if (!generatedImage?.image?.imageBytes && !generatedImage?.image?.gcsUri) {
+      throw new VertexPreviewMockupError(
+        "PRODUCT_PREVIEW_PARSE_ERROR",
+        "Vertex preview mockup fallback no devolvio una imagen utilizable",
+        undefined,
+        response,
+      );
+    }
+
+    return {
+      outputImageBytesBase64: generatedImage.image?.imageBytes,
+      outputGcsUri: generatedImage.image?.gcsUri,
+      mimeType: generatedImage.image?.mimeType,
+      rawResponse: response,
+    };
   }
 
   async generateMockup(
     input: VertexPreviewMockupInput,
   ): Promise<VertexPreviewMockupResult> {
-    const client = this.getClient();
+    const client = this.getClient(
+      aiConfig.previewMockup.region,
+      aiConfig.previewMockup.apiVersion,
+    );
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -174,41 +348,24 @@ class VertexPreviewMockupAdapter {
     );
 
     try {
-      const response = await client.models.recontextImage({
-        model: aiConfig.previewMockup.model,
-        source: {
-          prompt: buildPrompt(input),
-          personImage: normalizeImageInput(input.personImage),
-          productImages: [{ productImage: normalizeImageInput(input.productImage) }],
-        },
-        config: {
-          abortSignal: controller.signal,
-          numberOfImages: 1,
-          outputGcsUri: input.outputGcsUri,
-          personGeneration: PersonGeneration.ALLOW_ADULT,
-          safetyFilterLevel: SafetyFilterLevel.BLOCK_ONLY_HIGH,
-          outputMimeType: "image/png",
-          addWatermark: true,
-          enhancePrompt: true,
-        },
-      });
+      try {
+        return await this.runRecontextRequest(input, client, controller);
+      } catch (error) {
+        if (!shouldFallbackToEditImage(error)) {
+          throw error;
+        }
 
-      const generatedImage = extractGeneratedImage(response);
-      if (!generatedImage?.image?.imageBytes && !generatedImage?.image?.gcsUri) {
-        throw new VertexPreviewMockupError(
-          "PRODUCT_PREVIEW_PARSE_ERROR",
-          "Vertex preview mockup no devolvio una imagen utilizable",
-          undefined,
-          response,
-        );
+        this.baseLogger.warn("vertex_preview_mockup_recontext_unavailable", {
+          primaryModel: aiConfig.previewMockup.model,
+          primaryRegion: aiConfig.previewMockup.region,
+          fallbackModel: aiConfig.previewMockup.fallbackModel,
+          fallbackRegion: aiConfig.previewMockup.fallbackRegion,
+          message: resolveErrorMessage(error),
+          status: resolveErrorStatus(error),
+        });
+
+        return await this.runEditImageFallback(input, controller);
       }
-
-      return {
-        outputImageBytesBase64: generatedImage.image?.imageBytes,
-        outputGcsUri: generatedImage.image?.gcsUri,
-        mimeType: generatedImage.image?.mimeType,
-        rawResponse: response,
-      };
     } catch (error) {
       if (error instanceof VertexPreviewMockupError) {
         throw error;
@@ -221,18 +378,12 @@ class VertexPreviewMockupAdapter {
         );
       }
 
-      const status =
-        typeof error === "object" && error !== null
-          ? Number(Reflect.get(error, "status"))
-          : undefined;
+      const status = resolveErrorStatus(error);
       const code =
         typeof status === "number" && Number.isFinite(status)
           ? mapHttpStatusToCode(status)
           : "PRODUCT_PREVIEW_PROVIDER_ERROR";
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Error desconocido al generar mockup de preview";
+      const message = resolveErrorMessage(error);
 
       this.baseLogger.error("vertex_preview_mockup_failed", {
         code,
