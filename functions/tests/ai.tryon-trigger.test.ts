@@ -55,6 +55,7 @@ describe("AI try-on trigger", () => {
     expect(mockAssertAiConfig).toHaveBeenCalledWith({
       requireGemini: false,
       requireTryOn: true,
+      requirePreviewMockup: true,
     });
     expect(mockProcessQueuedJob).toHaveBeenCalledWith("job_123");
   });

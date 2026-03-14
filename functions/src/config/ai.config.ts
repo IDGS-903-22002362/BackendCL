@@ -9,6 +9,7 @@ import {
 interface AssertAiConfigOptions {
   requireGemini?: boolean;
   requireTryOn?: boolean;
+  requirePreviewMockup?: boolean;
 }
 
 const toInt = (value: string | undefined, fallback: number): number => {
@@ -117,6 +118,19 @@ export const aiConfig = {
     timeoutMs: toInt(process.env.AI_TRYON_TIMEOUT_MS, 120000),
     pollIntervalMs: toInt(process.env.AI_TRYON_POLL_INTERVAL_MS, 4000),
   },
+  previewMockup: {
+    project: process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    region:
+      process.env.GCP_REGION ||
+      process.env.GOOGLE_CLOUD_LOCATION ||
+      "us-central1",
+    model:
+      process.env.AI_PREVIEW_MOCKUP_MODEL ||
+      process.env.VERTEX_IMAGE_MOCKUP_MODEL ||
+      "imagen-product-recontext-preview-06-30",
+    apiVersion: process.env.AI_PREVIEW_MOCKUP_API_VERSION,
+    timeoutMs: toInt(process.env.AI_PREVIEW_MOCKUP_TIMEOUT_MS, 120000),
+  },
   uploads: {
     maxBytes: toInt(process.env.AI_UPLOAD_MAX_MB, 10) * 1024 * 1024,
     maxFiles: toInt(process.env.AI_UPLOAD_MAX_FILES, 1),
@@ -156,6 +170,7 @@ export const getAiRuntimeSummary = () => ({
   tryOnProject: aiConfig.tryOn.project,
   tryOnRegion: aiConfig.tryOn.region,
   tryOnModel: aiConfig.tryOn.model,
+  previewMockupModel: aiConfig.previewMockup.model,
   storageBucket: aiConfig.storage.bucket,
 });
 
@@ -203,6 +218,22 @@ export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
 
     if (!aiConfig.tryOn.model) {
       throw new Error("VERTEX_TRYON_MODEL es requerido para Vertex Try-On");
+    }
+  }
+
+  if (options.requirePreviewMockup) {
+    if (!aiConfig.previewMockup.project) {
+      throw new Error("GCP_PROJECT_ID es requerido para AI preview mockup");
+    }
+
+    if (!aiConfig.previewMockup.region) {
+      throw new Error("GCP_REGION es requerido para AI preview mockup");
+    }
+
+    if (!aiConfig.previewMockup.model) {
+      throw new Error(
+        "AI_PREVIEW_MOCKUP_MODEL o VERTEX_IMAGE_MOCKUP_MODEL es requerido para AI preview mockup",
+      );
     }
   }
 };

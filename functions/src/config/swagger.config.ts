@@ -282,6 +282,74 @@ const swaggerDefinition = {
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
       CreateTryOnJob: zodToJsonSchema(createTryOnJobSchema),
       UploadAiFileBody: zodToJsonSchema(uploadAiFileBodySchema),
+      AiProductCategorySnapshot: {
+        type: "object",
+        properties: {
+          categoryId: { type: "string", example: "gorra" },
+          categoryName: { type: "string", nullable: true, example: "Gorra" },
+          lineId: { type: "string", example: "souvenir" },
+          lineName: { type: "string", nullable: true, example: "Souvenir" },
+          productDescription: {
+            type: "string",
+            example: "Gorra Oficial Verde con Logo Bordado",
+          },
+        },
+      },
+      AiTryOnJob: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "job_123" },
+          userId: { type: "string", example: "uid_123" },
+          sessionId: { type: "string", example: "session_123" },
+          productId: { type: "string", example: "prod_123" },
+          inputUserImageAssetId: { type: "string", example: "asset_123" },
+          inputUserImageUrl: {
+            type: "string",
+            example: "gs://e-comerce-leon-ai-private/ai/uploads/uid_123/foto.png",
+          },
+          inputProductImageUrl: {
+            type: "string",
+            example: "gs://bucket/productos/gorra.png",
+          },
+          previewMode: {
+            type: "string",
+            enum: ["body_tryon", "accessory_mockup", "prop_mockup", "unsupported"],
+            example: "accessory_mockup",
+          },
+          productPreviewType: {
+            type: "string",
+            enum: ["apparel", "accessory", "prop", "unknown"],
+            example: "accessory",
+          },
+          classificationSource: {
+            type: "string",
+            enum: [
+              "category_id",
+              "category_name",
+              "line_name",
+              "description_keyword",
+              "unclassified",
+            ],
+            example: "category_id",
+          },
+          productCategorySnapshot: {
+            $ref: "#/components/schemas/AiProductCategorySnapshot",
+          },
+          status: {
+            type: "string",
+            enum: ["queued", "processing", "completed", "failed"],
+            example: "queued",
+          },
+          errorCode: {
+            type: "string",
+            example: "PRODUCT_PREVIEW_UNSUPPORTED",
+          },
+          errorMessage: {
+            type: "string",
+            example: "El producto seleccionado no es compatible con una vista previa AI confiable",
+          },
+        },
+      },
 
       CreateCategory: zodToJsonSchema(createCategorySchema),
       UpdateCategory: zodToJsonSchema(updateCategorySchema),

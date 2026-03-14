@@ -27,6 +27,28 @@ export enum TryOnJobStatus {
   FAILED = "failed",
 }
 
+export enum ProductPreviewMode {
+  BODY_TRYON = "body_tryon",
+  ACCESSORY_MOCKUP = "accessory_mockup",
+  PROP_MOCKUP = "prop_mockup",
+  UNSUPPORTED = "unsupported",
+}
+
+export enum ProductPreviewType {
+  APPAREL = "apparel",
+  ACCESSORY = "accessory",
+  PROP = "prop",
+  UNKNOWN = "unknown",
+}
+
+export enum ProductPreviewClassificationSource {
+  CATEGORY_ID = "category_id",
+  CATEGORY_NAME = "category_name",
+  LINE_NAME = "line_name",
+  DESCRIPTION_KEYWORD = "description_keyword",
+  UNCLASSIFIED = "unclassified",
+}
+
 export enum TryOnAssetKind {
   USER_UPLOAD = "user_upload",
   PRODUCT_IMAGE = "product_image",
@@ -109,6 +131,14 @@ export interface TryOnAsset {
   updatedAt: Timestamp;
 }
 
+export interface ProductCategorySnapshot {
+  categoryId?: string;
+  categoryName?: string | null;
+  lineId?: string;
+  lineName?: string | null;
+  productDescription?: string;
+}
+
 export interface TryOnJob {
   id?: string;
   userId: string;
@@ -125,6 +155,10 @@ export interface TryOnJob {
   status: TryOnJobStatus;
   consentAccepted: boolean;
   requestedByRole: RolUsuario;
+  previewMode: ProductPreviewMode;
+  productPreviewType: ProductPreviewType;
+  classificationSource: ProductPreviewClassificationSource;
+  productCategorySnapshot: ProductCategorySnapshot;
   errorCode?: string;
   errorMessage?: string;
   providerJobId?: string;

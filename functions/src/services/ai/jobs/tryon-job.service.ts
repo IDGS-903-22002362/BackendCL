@@ -1,7 +1,14 @@
 import { admin } from "../../../config/firebase.admin";
 import { firestoreTienda } from "../../../config/firebase";
+import {
+  ProductCategorySnapshot,
+  ProductPreviewClassificationSource,
+  ProductPreviewMode,
+  ProductPreviewType,
+  TryOnJob,
+  TryOnJobStatus,
+} from "../../../models/ai/ai.model";
 import { RolUsuario } from "../../../models/usuario.model";
-import { TryOnJob, TryOnJobStatus } from "../../../models/ai/ai.model";
 import AI_COLLECTIONS from "../collections";
 
 class TryOnJobService {
@@ -16,6 +23,10 @@ class TryOnJobService {
     inputProductImageUrl: string;
     consentAccepted: boolean;
     requestedByRole: RolUsuario;
+    previewMode: ProductPreviewMode;
+    productPreviewType: ProductPreviewType;
+    classificationSource: ProductPreviewClassificationSource;
+    productCategorySnapshot: ProductCategorySnapshot;
   }): Promise<TryOnJob> {
     const now = admin.firestore.Timestamp.now();
     const payload: Omit<TryOnJob, "id"> = {
