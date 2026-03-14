@@ -92,12 +92,15 @@ console.log(res.headers.get("x-request-id"));
 3. Guardar el `sessionId`.
 4. Listar o recuperar la sesion cuando necesites recargar historial.
 5. Enviar mensajes al agente con `POST /api/ai/chat/messages`.
-6. Si vas a usar try-on, subir primero una imagen con `POST /api/ai/files/upload`.
+6. Si vas a usar preview de producto, subir primero una imagen con `POST /api/ai/files/upload`.
 7. Guardar el `asset.id` devuelto por upload como `userImageAssetId`.
-8. Crear el job de try-on con `POST /api/ai/tryon/jobs`.
+8. Crear el job de preview con `POST /api/ai/tryon/jobs`.
 9. Consultar el estado con `GET /api/ai/tryon/jobs/:id`.
-10. Cuando el job quede `completed`, pedir la URL firmada con `GET /api/ai/tryon/jobs/:id/download`.
-11. Los endpoints `/api/ai/admin/*` dejalos solo para panel interno y usuarios `ADMIN`.
+10. Revisar `data.previewMode`:
+   - `body_tryon`: mostrarlo como try-on corporal
+   - `accessory_mockup` o `prop_mockup`: mostrarlo como vista previa con el producto
+11. Cuando el job quede `completed`, pedir la URL firmada con `GET /api/ai/tryon/jobs/:id/download`.
+12. Los endpoints `/api/ai/admin/*` dejalos solo para panel interno y usuarios `ADMIN`.
 
 ## 3. Helpers TypeScript reutilizables
 
@@ -178,6 +181,19 @@ Objeto:
 {
   "success": false,
   "message": "Sesion AI no encontrada"
+}
+```
+
+En `POST /api/ai/tryon/jobs`, el backend tambien puede devolver:
+
+```json
+{
+  "success": false,
+  "message": "El producto seleccionado no es compatible con una vista previa AI confiable",
+  "error": {
+    "code": "PRODUCT_PREVIEW_UNSUPPORTED",
+    "message": "El producto seleccionado no es compatible con una vista previa AI confiable"
+  }
 }
 ```
 
@@ -790,7 +806,7 @@ Notas frontend:
 
 ### POST `/api/ai/tryon/jobs`
 
-Crea un job asincrono de virtual try-on. El job se guarda inicialmente como `queued`.
+Crea un job asincrono de preview AI. El backend clasifica el producto y decide si el resultado sera `body_tryon`, `accessory_mockup` o `prop_mockup`. El job se guarda inicialmente como `queued`.
 
 Quien puede usarlo:
 
@@ -818,6 +834,7 @@ Dependencias reales:
 - el asset debe ser de tipo `user_upload`
 - el producto debe existir
 - el producto debe tener una imagen oficial utilizable
+- el producto debe poder clasificarse de forma confiable para preview
 
 Ejemplo:
 
@@ -865,6 +882,16 @@ Respuesta exitosa `201`:
     "inputUserImageAssetId": "asset_123",
     "inputUserImageUrl": "gs://e-comerce-leon-ai-private/ai/uploads/uid_123/foto.png",
     "inputProductImageUrl": "gs://bucket/productos/jersey.png",
+    "previewMode": "body_tryon",
+    "productPreviewType": "apparel",
+    "classificationSource": "category_id",
+    "productCategorySnapshot": {
+      "categoryId": "jersey",
+      "categoryName": "Jersey Oficial",
+      "lineId": "caballero",
+      "lineName": "Caballero",
+      "productDescription": "Jersey Oficial Club León 2024 Local"
+    },
     "status": "queued",
     "consentAccepted": true,
     "requestedByRole": "CLIENTE",
@@ -881,6 +908,9 @@ Errores comunes:
 - `400` sesion invalida
 - `400` asset invalido
 - `400` producto sin imagen utilizable
+- `400` `PRODUCT_PREVIEW_UNSUPPORTED`
+- `400` `PRODUCT_PREVIEW_CLASSIFICATION_FAILED`
+- `400` `PRODUCT_PREVIEW_IMAGE_INVALID`
 - `401`
 - `429`
 
@@ -888,6 +918,7 @@ Notas frontend:
 
 - No esperes el resultado final aqui. Este endpoint solo encola el job.
 - Guarda `data.id` como `jobId`.
+- Usa `data.previewMode` para rotular bien la UX antes de mostrar el resultado.
 - Luego consulta estado periodicamente.
 
 ---
@@ -950,7 +981,7 @@ Notas frontend:
 
 ### GET `/api/ai/tryon/jobs/:id`
 
-Obtiene el estado actual de un job de try-on.
+Obtiene el estado actual de un job de preview AI.
 
 Quien puede usarlo:
 
@@ -982,6 +1013,16 @@ Respuesta exitosa `200`:
     "userId": "uid_123",
     "sessionId": "session_123",
     "productId": "prod_123",
+    "previewMode": "accessory_mockup",
+    "productPreviewType": "accessory",
+    "classificationSource": "category_id",
+    "productCategorySnapshot": {
+      "categoryId": "gorra",
+      "categoryName": "Gorra",
+      "lineId": "souvenir",
+      "lineName": "Souvenir",
+      "productDescription": "Gorra Oficial Verde con Logo Bordado"
+    },
     "status": "completed",
     "outputAssetId": "asset_out_123",
     "outputImageUrl": "gs://e-comerce-leon-ai-private/ai/tryon-results/uid_123/session_123/job_123.png",
@@ -1002,6 +1043,7 @@ Errores comunes:
 Notas frontend:
 
 - Haz polling hasta que `status` sea `completed` o `failed`.
+- Si `previewMode` es `accessory_mockup` o `prop_mockup`, presenta el resultado como "vista previa con el producto", no como try-on corporal.
 - Si queda `failed`, revisa `errorCode` y `errorMessage` si vienen presentes.
 
 Ejemplo de polling:

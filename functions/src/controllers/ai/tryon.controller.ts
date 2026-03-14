@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { RolUsuario } from "../../models/usuario.model";
 import aiConfig from "../../config/ai.config";
+import { toAiErrorPayload } from "../../services/ai/ai.error";
 import tryOnWorkflowService from "../../services/ai/jobs/tryon-workflow.service";
 import tryOnJobService from "../../services/ai/jobs/tryon-job.service";
 import logger from "../../utils/logger";
@@ -25,9 +26,14 @@ export const createTryOnJob = async (req: Request, res: Response) => {
       data: job,
     });
   } catch (error) {
-    return res.status(400).json({
+    const errorPayload = toAiErrorPayload(error);
+    return res.status(errorPayload.statusCode).json({
       success: false,
-      message: error instanceof Error ? error.message : "No se pudo crear el job de try-on",
+      message: errorPayload.message,
+      error: {
+        code: errorPayload.code,
+        message: errorPayload.message,
+      },
     });
   }
 };

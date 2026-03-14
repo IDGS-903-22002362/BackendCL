@@ -9,6 +9,7 @@ Core goals:
 - Use real store data through internal services.
 - Persist sessions, messages, tool calls, jobs, and assets in Firestore.
 - Keep try-on assets private and downloadable through signed URLs.
+- Resolver automaticamente si el preview debe ser try-on corporal o mockup segun el tipo real de producto.
 
 ## Architecture
 
@@ -75,9 +76,10 @@ The module uses the store database and adds:
 5. The job document is persisted in Firestore as `queued`.
 6. Firestore trigger `processTryOnJob` picks the job.
 7. Worker resolves the official product image and calls Vertex Virtual Try-On using the service account `vertex-tryon-sa@e-comerce-leon.iam.gserviceaccount.com`.
-8. Output is persisted in the private bucket and linked to `tryon_assets` with a stable `gs://` reference.
-9. Job status moves to `completed` or `failed`.
-10. User downloads through `/api/ai/tryon/jobs/:id/download`, which validates ownership and returns a signed URL.
+8. Si el producto es `body_tryon`, usa `virtual-try-on-001`. Si es `accessory_mockup` o `prop_mockup`, usa el modelo de recontextualizacion configurado para mockups.
+9. Output is persisted in the private bucket and linked to `tryon_assets` with a stable `gs://` reference.
+10. Job status moves to `completed` or `failed`.
+11. User downloads through `/api/ai/tryon/jobs/:id/download`, which validates ownership and returns a signed URL.
 
 ## Gemini Integration
 
@@ -125,6 +127,9 @@ AI_GEMINI_TEMPERATURE=0.2
 GCP_PROJECT_ID=e-comerce-leon
 GCP_REGION=us-central1
 VERTEX_TRYON_MODEL=virtual-try-on-001
+AI_PREVIEW_MOCKUP_MODEL=imagen-product-recontext-preview-06-30
+AI_PREVIEW_MOCKUP_API_VERSION=
+AI_PREVIEW_MOCKUP_TIMEOUT_MS=120000
 VERTEX_TRYON_PUBLISHER=google
 AI_TRYON_TIMEOUT_MS=120000
 AI_TRYON_POLL_INTERVAL_MS=4000

@@ -15,6 +15,9 @@ export const processTryOnJobTrigger = onDocumentCreated(
       "GCP_PROJECT_ID",
       "GCP_REGION",
       "VERTEX_TRYON_MODEL",
+      "AI_PREVIEW_MOCKUP_MODEL",
+      "AI_PREVIEW_MOCKUP_API_VERSION",
+      "AI_PREVIEW_MOCKUP_TIMEOUT_MS",
       "AI_STORAGE_BUCKET",
       "GCS_TRYON_BUCKET",
     ],
@@ -23,7 +26,11 @@ export const processTryOnJobTrigger = onDocumentCreated(
     serviceAccount: "vertex-tryon-sa@e-comerce-leon.iam.gserviceaccount.com",
   },
   async (event) => {
-    assertAiConfig({ requireGemini: false, requireTryOn: true });
+    assertAiConfig({
+      requireGemini: false,
+      requireTryOn: true,
+      requirePreviewMockup: true,
+    });
     const jobId = event.params.jobId;
     triggerLogger.info("tryon_trigger_received", {
       jobId,

@@ -110,7 +110,7 @@ const tools: RuntimeAiToolDefinition[] = [
   }),
   defineTool({
     name: "create_tryon_job",
-    description: "Solicita la creacion de un job de virtual try-on para el usuario autenticado.",
+    description: "Solicita la creacion de una vista previa visual del producto para el usuario autenticado. El backend decide si sera try-on corporal o mockup segun el tipo de producto.",
     schema: createTryOnJobInput,
     roles: [RolUsuario.CLIENTE, RolUsuario.EMPLEADO, RolUsuario.ADMIN],
     execute: async (input, context) => ({

@@ -214,7 +214,11 @@ router.post(
  * @swagger
  * /api/ai/tryon/jobs:
  *   post:
- *     summary: Crear job de virtual try-on
+ *     summary: Crear job de preview visual AI
+ *     description: |
+ *       El backend clasifica el producto y decide si la salida sera `body_tryon`,
+ *       `accessory_mockup` o `prop_mockup`. Productos ambiguos o no compatibles
+ *       se rechazan con un codigo de error estable.
  *     tags: [AI]
  *     security:
  *       - BearerAuth: []
@@ -226,9 +230,19 @@ router.post(
  *             $ref: '#/components/schemas/CreateTryOnJob'
  *     responses:
  *       201:
- *         $ref: '#/components/responses/201Created'
+ *         description: Job creado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/AiTryOnJob'
  *       400:
- *         $ref: '#/components/responses/400BadRequest'
+ *         description: Producto no compatible o preview no clasificable
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  */
@@ -261,7 +275,7 @@ router.get(
  * @swagger
  * /api/ai/tryon/jobs/{id}:
  *   get:
- *     summary: Obtener estado de un job de try-on
+ *     summary: Obtener estado de un job de preview AI
  *     tags: [AI]
  *     security:
  *       - BearerAuth: []
@@ -273,7 +287,17 @@ router.get(
  *           type: string
  *     responses:
  *       200:
- *         $ref: '#/components/responses/200Success'
+ *         description: Estado actual del job
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/AiTryOnJob'
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  *       403:
