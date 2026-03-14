@@ -134,7 +134,9 @@ export const aiConfig = {
       "gemini-2.5-flash-image",
     fallbackRegion:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_REGION ||
-      "global",
+      process.env.GCP_REGION ||
+      process.env.GOOGLE_CLOUD_LOCATION ||
+      "us-central1",
     fallbackApiVersion:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_API_VERSION || "v1",
     timeoutMs: toInt(process.env.AI_PREVIEW_MOCKUP_TIMEOUT_MS, 120000),
