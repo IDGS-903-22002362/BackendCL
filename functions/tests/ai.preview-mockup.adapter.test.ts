@@ -1,33 +1,21 @@
 const mockRecontextImage = jest.fn();
-const mockEditImage = jest.fn();
+const mockGenerateContent = jest.fn();
 
 jest.mock("@google/genai", () => ({
   GoogleGenAI: jest.fn().mockImplementation(() => ({
     models: {
       recontextImage: mockRecontextImage,
-      editImage: mockEditImage,
+      generateContent: mockGenerateContent,
     },
   })),
-  EditMode: {
-    EDIT_MODE_PRODUCT_IMAGE: "EDIT_MODE_PRODUCT_IMAGE",
+  Modality: {
+    IMAGE: "IMAGE",
   },
   PersonGeneration: {
     ALLOW_ADULT: "ALLOW_ADULT",
   },
-  RawReferenceImage: class RawReferenceImage {
-    referenceId?: number;
-    referenceImage?: unknown;
-  },
   SafetyFilterLevel: {
     BLOCK_ONLY_HIGH: "BLOCK_ONLY_HIGH",
-  },
-  SubjectReferenceImage: class SubjectReferenceImage {
-    referenceId?: number;
-    referenceImage?: unknown;
-    config?: unknown;
-  },
-  SubjectReferenceType: {
-    SUBJECT_TYPE_PRODUCT: "SUBJECT_TYPE_PRODUCT",
   },
 }));
 
@@ -39,8 +27,8 @@ jest.mock("../src/config/ai.config", () => ({
       region: "us-central1",
       model: "imagen-product-recontext-preview-06-30",
       apiVersion: "v1beta",
-      fallbackModel: "imagen-3.0-capability-001",
-      fallbackRegion: "us-central1",
+      fallbackModel: "gemini-2.5-flash-image",
+      fallbackRegion: "global",
       fallbackApiVersion: "v1",
       timeoutMs: 2500,
     },
@@ -135,18 +123,24 @@ describe("Vertex preview mockup adapter", () => {
     );
   });
 
-  it("usa editImage como fallback cuando recontext no esta disponible", async () => {
+  it("usa Gemini Image como fallback cuando recontext no esta disponible", async () => {
     mockRecontextImage.mockRejectedValue({
       status: 404,
       message:
         "Image editing failed with the following error: imagen-product-recontext-preview-06-30 is unavailable.",
     });
-    mockEditImage.mockResolvedValue({
-      generatedImages: [
+    mockGenerateContent.mockResolvedValue({
+      candidates: [
         {
-          image: {
-            imageBytes: "ZmFsbGJhY2staW1hZ2U=",
-            mimeType: "image/png",
+          content: {
+            parts: [
+              {
+                inlineData: {
+                  data: "ZmFsbGJhY2staW1hZ2U=",
+                  mimeType: "image/png",
+                },
+              },
+            ],
           },
         },
       ],
@@ -169,17 +163,26 @@ describe("Vertex preview mockup adapter", () => {
     });
 
     expect(mockRecontextImage).toHaveBeenCalledTimes(1);
-    expect(mockEditImage).toHaveBeenCalledTimes(1);
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
 
-    const fallbackRequest = mockEditImage.mock.calls[0][0];
-    expect(fallbackRequest.model).toBe("imagen-3.0-capability-001");
-    expect(fallbackRequest.prompt).toContain(
-      "Usa la referencia [2] como el producto exacto que debe aparecer en la imagen final.",
+    const fallbackRequest = mockGenerateContent.mock.calls[0][0];
+    expect(fallbackRequest.model).toBe("gemini-2.5-flash-image");
+    expect(fallbackRequest.contents[0].parts[0].text).toContain(
+      "La segunda imagen es la foto oficial del producto.",
     );
-    expect(fallbackRequest.config.editMode).toBe("EDIT_MODE_PRODUCT_IMAGE");
-    expect(fallbackRequest.config.negativePrompt).toContain(
-      "No colocar gorras en el torso ni calcetas en manos, torso o cabeza.",
-    );
+    expect(fallbackRequest.config.responseModalities).toEqual(["IMAGE"]);
+    expect(fallbackRequest.config.imageConfig).toMatchObject({
+      aspectRatio: "3:4",
+      imageSize: "1K",
+      personGeneration: "ALLOW_ADULT",
+    });
+    expect(fallbackRequest.contents[0].parts).toHaveLength(3);
+    expect(fallbackRequest.contents[0].parts[1]).toMatchObject({
+      inlineData: {
+        data: "cGVyc29u",
+        mimeType: "image/png",
+      },
+    });
 
     expect(result).toMatchObject({
       outputImageBytesBase64: "ZmFsbGJhY2staW1hZ2U=",
