@@ -129,6 +129,16 @@ export const aiConfig = {
       process.env.VERTEX_IMAGE_MOCKUP_MODEL ||
       "imagen-product-recontext-preview-06-30",
     apiVersion: process.env.AI_PREVIEW_MOCKUP_API_VERSION,
+    fallbackModel:
+      process.env.AI_PREVIEW_MOCKUP_FALLBACK_MODEL ||
+      "imagen-3.0-capability-001",
+    fallbackRegion:
+      process.env.AI_PREVIEW_MOCKUP_FALLBACK_REGION ||
+      process.env.GCP_REGION ||
+      process.env.GOOGLE_CLOUD_LOCATION ||
+      "us-central1",
+    fallbackApiVersion:
+      process.env.AI_PREVIEW_MOCKUP_FALLBACK_API_VERSION || "v1",
     timeoutMs: toInt(process.env.AI_PREVIEW_MOCKUP_TIMEOUT_MS, 120000),
   },
   uploads: {
@@ -171,6 +181,8 @@ export const getAiRuntimeSummary = () => ({
   tryOnRegion: aiConfig.tryOn.region,
   tryOnModel: aiConfig.tryOn.model,
   previewMockupModel: aiConfig.previewMockup.model,
+  previewMockupFallbackModel: aiConfig.previewMockup.fallbackModel,
+  previewMockupFallbackRegion: aiConfig.previewMockup.fallbackRegion,
   storageBucket: aiConfig.storage.bucket,
 });
 
