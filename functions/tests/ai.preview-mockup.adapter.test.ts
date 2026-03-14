@@ -28,7 +28,7 @@ jest.mock("../src/config/ai.config", () => ({
       model: "imagen-product-recontext-preview-06-30",
       apiVersion: "v1beta",
       fallbackModel: "gemini-2.5-flash-image",
-      fallbackRegion: "global",
+      fallbackRegion: "us-central1",
       fallbackApiVersion: "v1",
       timeoutMs: 2500,
     },
