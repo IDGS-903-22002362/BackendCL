@@ -26,6 +26,7 @@ import stripeRoutes from "./stripe.routes";
 import inventoryRoutes from "./inventory.routes";
 import plantillaRoutes from "./plantilla.routes";
 import aiRoutes from "./ai.routes";
+import notificationsRoutes from "./notifications.routes";
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.use("/stripe", stripeRoutes);
 router.use("/inventario", inventoryRoutes);
 router.use("/plantilla", plantillaRoutes);
 router.use("/ai", aiRoutes);
+router.use("/notificaciones", notificationsRoutes);
 
 // Futuros módulos:
 
