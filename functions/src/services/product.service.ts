@@ -101,6 +101,56 @@ export interface AssistantProductSearchResult extends Producto {
  * Encapsula las operaciones CRUD y consultas de productos
  */
 export class ProductService {
+  private async enqueueProductLifecycleEvents(
+    previousProduct: Producto,
+    nextProduct: Producto,
+    triggerSource: string,
+  ): Promise<void> {
+    try {
+      const { default: notificationEventService } = await import(
+        "./notifications/notification-event.service"
+      );
+      if (
+        previousProduct.existencias <= 0 &&
+        nextProduct.existencias > 0 &&
+        nextProduct.activo
+      ) {
+        await notificationEventService.enqueueProductAudienceEvents({
+          eventType: "product_restocked",
+          productId: nextProduct.id || "",
+          sourceData: {
+            productName: nextProduct.descripcion,
+            precioPublico: nextProduct.precioPublico,
+            existenciasAntes: previousProduct.existencias,
+            existenciasDespues: nextProduct.existencias,
+            stockTransition: `${previousProduct.existencias}->${nextProduct.existencias}`,
+            restockedAt: new Date().toISOString(),
+          },
+          triggerSource,
+        });
+      }
+
+      if (nextProduct.precioPublico < previousProduct.precioPublico) {
+        await notificationEventService.enqueueProductAudienceEvents({
+          eventType: "price_drop",
+          productId: nextProduct.id || "",
+          sourceData: {
+            productName: nextProduct.descripcion,
+            precioAnterior: previousProduct.precioPublico,
+            precioNuevo: nextProduct.precioPublico,
+          },
+          triggerSource,
+        });
+      }
+    } catch (error) {
+      console.warn("notification_product_event_enqueue_failed", {
+        productoId: nextProduct.id,
+        triggerSource,
+        reason: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   private normalizeSearchText(value: string): string {
     return value
       .normalize("NFD")
@@ -721,6 +771,12 @@ export class ProductService {
       const updatedDoc = await docRef.get();
       const updatedProducto = this.normalizeProduct(updatedDoc.id, updatedDoc.data()!);
 
+      await this.enqueueProductLifecycleEvents(
+        productoActual,
+        updatedProducto,
+        "product_update",
+      );
+
       console.log(`Producto actualizado: ${updatedProducto.descripcion}`);
       return updatedProducto;
     } catch (error) {
@@ -1009,6 +1065,10 @@ export class ProductService {
               typeof (now as { toDate?: () => Date }).toDate === "function"
                 ? (now as { toDate: () => Date }).toDate()
                 : (now as unknown as Date),
+            previousExistencias: Math.max(
+              0,
+              Math.floor(Number(data.existencias ?? 0)),
+            ),
           } as ProductStockUpdateResult;
         },
       );
@@ -1019,6 +1079,22 @@ export class ProductService {
         if (alert) {
           await stockAlertService.notifyRealtime([alert]);
         }
+      }
+
+      const updatedProduct = await this.getProductById(productoId);
+      const previousExistencias = (
+        result as ProductStockUpdateResult & { previousExistencias?: number }
+      ).previousExistencias;
+      if (updatedProduct) {
+        await this.enqueueProductLifecycleEvents(
+          {
+            ...updatedProduct,
+            existencias: previousExistencias ?? updatedProduct.existencias,
+            precioPublico: updatedProduct.precioPublico,
+          },
+          updatedProduct,
+          "product_stock_update",
+        );
       }
 
       return result;
@@ -1193,6 +1269,11 @@ export class ProductService {
               cambios,
             } as ReplaceProductSizeInventoryResult,
             lowStockActive: lowStockSnapshot.totalAlertas > 0,
+            previousExistencias: this.getDerivedExistencias(
+              tallaIds,
+              inventarioActual,
+              data.existencias,
+            ),
           };
         },
       );
@@ -1202,6 +1283,19 @@ export class ProductService {
         if (alert) {
           await stockAlertService.notifyRealtime([alert]);
         }
+      }
+
+      const updatedProduct = await this.getProductById(productoId);
+      if (updatedProduct) {
+        await this.enqueueProductLifecycleEvents(
+          {
+            ...updatedProduct,
+            existencias: txResult.previousExistencias ?? updatedProduct.existencias,
+            precioPublico: updatedProduct.precioPublico,
+          },
+          updatedProduct,
+          "product_replace_size_inventory",
+        );
       }
 
       return txResult.result;

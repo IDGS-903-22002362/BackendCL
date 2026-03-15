@@ -67,6 +67,13 @@ import {
 } from "../middleware/validators/ai-public-chat.validator";
 import { createTryOnJobSchema } from "../middleware/validators/ai-tryon.validator";
 import { uploadAiFileBodySchema } from "../middleware/validators/ai-file.validator";
+import {
+  enqueueNotificationEventSchema,
+  manualNotificationTestSchema,
+  registerDeviceTokenSchema,
+  updateDeviceTokenSchema,
+  updateNotificationPreferencesSchema,
+} from "../middleware/validators/notification.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -169,6 +176,10 @@ const swaggerDefinition = {
     {
       name: "AI",
       description: "Chat AI, uploads y try-on para e-commerce",
+    },
+    {
+      name: "Notifications",
+      description: "Push notifications, preferencias y dispositivos móviles",
     },
     {
       name: "AI Admin",
@@ -288,6 +299,15 @@ const swaggerDefinition = {
       SendPublicAiMessage: zodToJsonSchema(sendPublicAiMessageSchema),
       CreateTryOnJob: zodToJsonSchema(createTryOnJobSchema),
       UploadAiFileBody: zodToJsonSchema(uploadAiFileBodySchema),
+      RegisterDeviceToken: zodToJsonSchema(registerDeviceTokenSchema),
+      UpdateDeviceToken: zodToJsonSchema(updateDeviceTokenSchema),
+      UpdateNotificationPreferences: zodToJsonSchema(
+        updateNotificationPreferencesSchema,
+      ),
+      ManualNotificationTest: zodToJsonSchema(manualNotificationTestSchema),
+      EnqueueNotificationEvent: zodToJsonSchema(
+        enqueueNotificationEventSchema,
+      ),
       AiProductCategorySnapshot: {
         type: "object",
         properties: {

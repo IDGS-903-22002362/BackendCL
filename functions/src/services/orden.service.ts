@@ -44,6 +44,34 @@ const TASA_IVA = 0; // 0% temporal (cambiar a 0.16 cuando se requiera 16%)
  * Encapsula las operaciones de creación y gestión de órdenes
  */
 export class OrdenService {
+  private async enqueueOrderNotificationEvent(
+    eventType: "order_created" | "order_shipped" | "order_delivered",
+    orden: Orden,
+  ): Promise<void> {
+    try {
+      const { default: notificationEventService } = await import(
+        "./notifications/notification-event.service"
+      );
+      await notificationEventService.enqueueEvent({
+        eventType,
+        userId: orden.usuarioId,
+        orderId: orden.id,
+        sourceData: {
+          orderTotal: orden.total,
+          metodoPago: orden.metodoPago,
+          estado: orden.estado,
+        },
+        triggerSource: "orden_service",
+      });
+    } catch (error) {
+      console.error("⚠️ No se pudo encolar evento de notificación de orden:", {
+        eventType,
+        orderId: orden.id,
+        message: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   private resolveStockContextForItem(
     producto: Producto,
     item: { cantidad: number; tallaId?: string; productoId: string },
@@ -251,6 +279,7 @@ export class OrdenService {
       // TODO: Notificaciones (ÉPICA 11 - TASK-079):
       // - Enviar email al usuario con detalles de la orden
       // - Registrar en logs de auditoría
+      await this.enqueueOrderNotificationEvent("order_created", ordenCreada);
 
       return ordenCreada;
     } catch (error) {
@@ -339,7 +368,17 @@ export class OrdenService {
         `✅ Estado de orden ${ordenId} actualizado exitosamente a ${nuevoEstado}`,
       );
 
-      // TODO: Enviar notificación al usuario según nuevo estado (ÉPICA 11 - TASK-078 a 082)
+      if (
+        nuevoEstado === EstadoOrden.ENVIADA ||
+        nuevoEstado === EstadoOrden.ENTREGADA
+      ) {
+        await this.enqueueOrderNotificationEvent(
+          nuevoEstado === EstadoOrden.ENVIADA
+            ? "order_shipped"
+            : "order_delivered",
+          ordenActualizada,
+        );
+      }
 
       return ordenActualizada;
     } catch (error) {
