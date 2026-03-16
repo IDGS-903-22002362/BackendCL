@@ -263,10 +263,18 @@ export class UserAppService {
    */
   async createUser(usuarioData: CrearUsuarioAppDTO): Promise<UsuarioApp> {
     try {
+      // 1️⃣ CREAR EN FIREBASE AUTH primero
+      const authUser = await admin.auth().createUser({
+        email: usuarioData.email.toLowerCase(),
+        password: usuarioData.password,
+        displayName: usuarioData.nombre,
+      });
+
+      // 2️⃣ USAR el uid generado por Firebase (no uno random)
       const now = admin.firestore.Timestamp.now();
 
       const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
-        uid: usuarioData.uid,
+        uid: authUser.uid,  // ← UID auténtico de Firebase
         provider: "email",
         nombre: usuarioData.nombre,
         email: usuarioData.email.toLowerCase(),
@@ -287,22 +295,21 @@ export class UserAppService {
       if (emailExists) {
         throw new Error("El correo electrónico ya está registrado");
       }
-      console.log("CREANDO USUARIO CON UID:", usuarioData.uid);
 
-      // Aqui se hace la asignación del mismo uid en el id
+      // 3️⃣ CREAR EN FIRESTORE con el uid auténtico
       const docRef = firestoreApp
         .collection(USUARIOSAPP_COLLECTION)
-        .doc(usuarioData.uid);
+        .doc(authUser.uid);
 
       await docRef.set(nuevoUsuarioData);
 
       return {
-        id: usuarioData.uid,
+        id: authUser.uid,
         ...nuevoUsuarioData,
       } as UsuarioApp;
 
     } catch (error) {
-      console.error(" Error al crear usuario:", error);
+      console.error("Error al crear usuario:", error);
       throw new Error(
         error instanceof Error ? error.message : "Error al crear el usuario",
       );

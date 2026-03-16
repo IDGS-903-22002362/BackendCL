@@ -1,5 +1,10 @@
 export type OrigenNoticia = "app" | "instagram" | "facebook" | "x" | "youtube";
 export type CategoriaNoticia = "femenil" | "varonil";
+export interface IAContenido {
+    tituloIA: string;
+    resumenCorto: string;
+    contenidoFormateado: string;
+}
 
 export interface Noticia {
     id: string;
@@ -15,5 +20,5 @@ export interface Noticia {
     likes: number;
     createdAt: Date;
     updatedAt: Date;
-    ia?: string;
+    ia?: IAContenido;
 }

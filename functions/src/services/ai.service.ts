@@ -13,35 +13,38 @@ class AIService {
         model: "gemini-pro-latest"
     });
 
-    async generarContenidoIA(contenido: string): Promise<string> {
-
+    async generarContenidoIA(contenido: string): Promise<any> {
         if (!contenido) throw new Error("Contenido nulo");
 
-        try {
+        // 1. Pedimos explícitamente un JSON
+        const prompt = `
+Actúa como un editor profesional de noticias deportivas.
+Analiza el siguiente contenido y devuelve EXCLUSIVAMENTE un objeto JSON con este formato exacto:
 
-            const prompt = `
-Actúa como un editor profesional de noticias.
-
-Resume el siguiente contenido en máximo 3 párrafos.
-Mantén un tono informativo y objetivo.
+{
+  "resumen": "Tu resumen aquí, máximo 200 caracteres, sin saltos de línea"
+}
 
 Contenido:
 ${contenido}
-
-Resumen:
 `;
 
-            const result = await this.model.generateContent(prompt);
-
-            if (!result.response) {
-                throw new Error("Respuesta vacía de Gemini");
+        // 2. Usamos generationConfig para asegurar que sea JSON
+        const result = await this.model.generateContent({
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+                responseMimeType: "application/json" // Esto es clave
             }
+        });
 
-            return result.response.text();
+        const text = result.response.text();
 
+        try {
+            // 3. Ahora sí, esto funcionará porque la respuesta será un JSON real
+            return JSON.parse(text);
         } catch (error) {
-            console.error("❌ Error en Gemini AI Service:", error);
-            throw new Error("No se pudo generar el resumen con Inteligencia Artificial.");
+            console.error("Error parseando:", text);
+            throw new Error("La IA no devolvió un JSON válido");
         }
     }
 }

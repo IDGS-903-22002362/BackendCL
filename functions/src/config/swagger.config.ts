@@ -58,6 +58,11 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import {
+  createGallerySchema,
+  deleteGalleryImageSchema,
+  deleteGalleryVideoSchema,
+} from "../middleware/validators/gallery.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -123,6 +128,10 @@ const swaggerDefinition = {
     {
       name: "News",
       description: "Gestión de noticias del sistema",
+    },
+    {
+      name: "Gallery",
+      description: "Gestión de galería de fotos y reels",
     },
     {
       name: "Users",
@@ -264,6 +273,10 @@ const swaggerDefinition = {
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+
+      CreateGallery: zodToJsonSchema(createGallerySchema),
+      DeleteGalleryImage: zodToJsonSchema(deleteGalleryImageSchema),
+      DeleteGalleryVideo: zodToJsonSchema(deleteGalleryVideoSchema),
 
       CreateCategory: zodToJsonSchema(createCategorySchema),
       UpdateCategory: zodToJsonSchema(updateCategorySchema),
@@ -547,6 +560,64 @@ const swaggerDefinition = {
             type: "string",
             format: "date-time",
             example: "2026-02-23T15:10:00Z",
+          },
+        },
+      },
+      Gallery: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            example: "gallery_12345",
+          },
+          descripcion: {
+            type: "string",
+            example: "Fotos del entrenamiento del primer equipo",
+          },
+          imagenes: {
+            type: "array",
+            items: {
+              type: "string",
+              format: "uri",
+            },
+            example: [
+              "https://storage.googleapis.com/.../imagen1.jpg",
+              "https://storage.googleapis.com/.../imagen2.jpg",
+            ],
+          },
+          videos: {
+            type: "array",
+            items: {
+              type: "string",
+              format: "uri",
+            },
+            example: [
+              "https://storage.googleapis.com/.../video1.mp4",
+            ],
+          },
+          usuarioId: {
+            type: "string",
+            nullable: true,
+            example: "firebase_uid_xyz",
+          },
+          autorNombre: {
+            type: "string",
+            nullable: true,
+            example: "Juan Pérez",
+          },
+          estatus: {
+            type: "boolean",
+            example: true,
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-10T18:20:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-10T18:25:00Z",
           },
         },
       },

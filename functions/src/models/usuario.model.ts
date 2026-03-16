@@ -13,6 +13,7 @@ export enum RolUsuario {
   ADMIN = "ADMIN", // Administrador con acceso total
   EMPLEADO = "EMPLEADO", // Empleado con permisos de gestión
   CLIENTE = "CLIENTE", // Cliente regular del sistema
+  EMPLEADO_CLUB = "EMPLEADO_CLUB", // Empleado con acceso limitado a funciones del club
 }
 
 /**
@@ -39,15 +40,15 @@ export interface UsuarioApp {
   updatedAt: Timestamp; // Última actualización
 }
 export interface CrearUsuarioAppDTO {
-  uid: string;
+  // Elimina este campo -->  uid: string;
   nombre: string;
   email: string;
-  rol?: RolUsuario; // Opcional, por defecto CLIENTE
+  rol?: RolUsuario;
   telefono?: string;
   fechaNacimiento?: Date;
-  edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
-  genero: string // sexo de la persona.
-
+  edad: number;
+  genero: string;
+  password: string;  // ← AGREGAR ESTO
 }
 
 /**

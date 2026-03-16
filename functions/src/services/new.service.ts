@@ -256,7 +256,7 @@ export class NewService {
         });
     }
 
-    async generarIAParaNoticia(id: string): Promise<void> {
+    async generarIAParaNoticia(id: string): Promise<any> {
         const docRef = this.collection.doc(id);
         const snapshot = await docRef.get();
 
