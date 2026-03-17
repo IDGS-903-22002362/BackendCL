@@ -4,8 +4,7 @@ import storageService from "../../services/storage.service";
 import { firestoreApp } from "../../config/app.firebase";
 import { deleteGalleryImageSchema, deleteGalleryVideoSchema } from "../../middleware/validators/gallery.validator";
 
-export const create = async (req: Request, res: Response) => {
-
+export const create = async (req: Request, res: Response): Promise<Response> => {
     try {
 
         const data = req.body;
@@ -22,23 +21,22 @@ export const create = async (req: Request, res: Response) => {
 
         const gallery = await galleryService.create(data, usuarioId, autorNombre);
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             data: gallery
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error al crear galería"
         });
 
     }
-
 };
 
-export const uploadImages = async (req: Request, res: Response) => {
+export const uploadImages = async (req: Request, res: Response): Promise<Response> => {
 
     try {
 
@@ -71,14 +69,14 @@ export const uploadImages = async (req: Request, res: Response) => {
             imagenes: updated
         });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             urls
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error al subir imágenes"
         });
@@ -87,7 +85,7 @@ export const uploadImages = async (req: Request, res: Response) => {
 
 };
 
-export const uploadVideos = async (req: Request, res: Response) => {
+export const uploadVideos = async (req: Request, res: Response): Promise<Response> => {
 
     try {
 
@@ -120,14 +118,14 @@ export const uploadVideos = async (req: Request, res: Response) => {
             videos: updated
         });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             urls
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error al subir videos"
         });
@@ -136,7 +134,7 @@ export const uploadVideos = async (req: Request, res: Response) => {
 
 };
 
-export const deleteImage = async (req: Request, res: Response) => {
+export const deleteImage = async (req: Request, res: Response): Promise<Response> => {
     try {
 
         const { id } = req.params;
@@ -145,14 +143,14 @@ export const deleteImage = async (req: Request, res: Response) => {
 
         await galleryService.deleteImage(id, parsed.imageUrl);
 
-        res.json({
+        return res.json({
             success: true,
             message: "Imagen eliminada correctamente",
         });
 
     } catch (error: any) {
 
-        res.status(400).json({
+        return res.status(400).json({
             success: false,
             message: error.message,
         });
@@ -160,7 +158,7 @@ export const deleteImage = async (req: Request, res: Response) => {
     }
 };
 
-export const deleteVideo = async (req: Request, res: Response) => {
+export const deleteVideo = async (req: Request, res: Response): Promise<Response> => {
     try {
 
         const { id } = req.params;
@@ -169,14 +167,14 @@ export const deleteVideo = async (req: Request, res: Response) => {
 
         await galleryService.deleteVideo(id, parsed.videoUrl);
 
-        res.json({
+        return res.json({
             success: true,
             message: "Video eliminado correctamente",
         });
 
     } catch (error: any) {
 
-        res.status(400).json({
+        return res.status(400).json({
             success: false,
             message: error.message,
         });

@@ -1,13 +1,13 @@
 import { Request, Response } from "express";
 import galleryService from "../../services/galeria.service";
 
-export const getAll = async (_req: Request, res: Response) => {
+export const getAll = async (_req: Request, res: Response): Promise<Response> => {
 
     try {
 
         const galleries = await galleryService.getAll();
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             count: galleries.length,
             data: galleries
@@ -15,7 +15,7 @@ export const getAll = async (_req: Request, res: Response) => {
 
     } catch (error) {
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error al obtener galerías"
         });
@@ -24,7 +24,7 @@ export const getAll = async (_req: Request, res: Response) => {
 
 };
 
-export const getById = async (req: Request, res: Response) => {
+export const getById = async (req: Request, res: Response): Promise<Response> => {
 
     try {
 
@@ -39,14 +39,14 @@ export const getById = async (req: Request, res: Response) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             data: gallery
         });
 
     } catch (error) {
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "Error al obtener galería"
         });
