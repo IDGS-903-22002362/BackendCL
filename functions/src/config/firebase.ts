@@ -2,6 +2,7 @@ import { admin } from "./firebase.admin";
 import { getFirestore } from "firebase-admin/firestore";
 import * as path from "path";
 import * as fs from "fs";
+import { STORE_FIRESTORE_DATABASE } from "./firestore.constants";
 
 let serviceAccount;
 
@@ -46,7 +47,7 @@ if (!tiendaApp) {
   tiendaApp = admin.initializeApp(config, "TIENDA_APP");
 }
 
-export const firestoreTienda = getFirestore(tiendaApp, "tiendacl");
+export const firestoreTienda = getFirestore(tiendaApp, STORE_FIRESTORE_DATABASE);
 // Permitir valores undefined en lugar de lanzar errores (ej. notas, costoEnvio)
 firestoreTienda.settings({ ignoreUndefinedProperties: true });
 export const storageTienda = tiendaApp.storage();

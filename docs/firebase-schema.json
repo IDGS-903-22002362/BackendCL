@@ -109,6 +109,10 @@
           "type": "string[]"
         },
         {
+          "name": "inventarioPorTalla",
+          "type": "array<{tallaId:string,cantidad:number}>"
+        },
+        {
           "name": "imagenes",
           "type": "string[]"
         },

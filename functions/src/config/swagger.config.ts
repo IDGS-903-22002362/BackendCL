@@ -5,6 +5,7 @@ import {
   updateProductSchema,
   deleteImageSchema,
   updateProductStockSchema,
+  replaceSizeInventorySchema,
 } from "../middleware/validators/product.validator";
 import {
   createCategorySchema,
@@ -58,6 +59,21 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
+import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
+import {
+  createPublicAiSessionSchema,
+  sendPublicAiMessageSchema,
+} from "../middleware/validators/ai-public-chat.validator";
+import { createTryOnJobSchema } from "../middleware/validators/ai-tryon.validator";
+import { uploadAiFileBodySchema } from "../middleware/validators/ai-file.validator";
+import {
+  enqueueNotificationEventSchema,
+  manualNotificationTestSchema,
+  registerDeviceTokenSchema,
+  updateDeviceTokenSchema,
+  updateNotificationPreferencesSchema,
+} from "../middleware/validators/notification.validator";
 import {
   createGallerySchema,
   deleteGalleryImageSchema,
@@ -167,6 +183,18 @@ const swaggerDefinition = {
       description: "Autenticación y autorización de usuarios",
     },
     {
+      name: "AI",
+      description: "Chat AI, uploads y try-on para e-commerce",
+    },
+    {
+      name: "Notifications",
+      description: "Push notifications, preferencias y dispositivos móviles",
+    },
+    {
+      name: "AI Admin",
+      description: "Observabilidad y administración del módulo AI",
+    },
+    {
       name: "Debug",
       description:
         "Endpoints de diagnóstico (solo desarrollo) - DEPRECATED en producción",
@@ -269,10 +297,94 @@ const swaggerDefinition = {
       UpdateProduct: zodToJsonSchema(updateProductSchema),
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
+      ReplaceSizeInventory: zodToJsonSchema(replaceSizeInventorySchema),
 
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+      CreateAiSession: zodToJsonSchema(createAiSessionSchema),
+      CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
+      SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
+      SendPublicAiMessage: zodToJsonSchema(sendPublicAiMessageSchema),
+      CreateTryOnJob: zodToJsonSchema(createTryOnJobSchema),
+      UploadAiFileBody: zodToJsonSchema(uploadAiFileBodySchema),
+      RegisterDeviceToken: zodToJsonSchema(registerDeviceTokenSchema),
+      UpdateDeviceToken: zodToJsonSchema(updateDeviceTokenSchema),
+      UpdateNotificationPreferences: zodToJsonSchema(
+        updateNotificationPreferencesSchema,
+      ),
+      ManualNotificationTest: zodToJsonSchema(manualNotificationTestSchema),
+      EnqueueNotificationEvent: zodToJsonSchema(
+        enqueueNotificationEventSchema,
+      ),
+      AiProductCategorySnapshot: {
+        type: "object",
+        properties: {
+          categoryId: { type: "string", example: "gorra" },
+          categoryName: { type: "string", nullable: true, example: "Gorra" },
+          lineId: { type: "string", example: "souvenir" },
+          lineName: { type: "string", nullable: true, example: "Souvenir" },
+          productDescription: {
+            type: "string",
+            example: "Gorra Oficial Verde con Logo Bordado",
+          },
+        },
+      },
+      AiTryOnJob: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "job_123" },
+          userId: { type: "string", example: "uid_123" },
+          sessionId: { type: "string", example: "session_123" },
+          productId: { type: "string", example: "prod_123" },
+          inputUserImageAssetId: { type: "string", example: "asset_123" },
+          inputUserImageUrl: {
+            type: "string",
+            example: "gs://e-comerce-leon-ai-private/ai/uploads/uid_123/foto.png",
+          },
+          inputProductImageUrl: {
+            type: "string",
+            example: "gs://bucket/productos/gorra.png",
+          },
+          previewMode: {
+            type: "string",
+            enum: ["body_tryon", "accessory_mockup", "prop_mockup", "unsupported"],
+            example: "accessory_mockup",
+          },
+          productPreviewType: {
+            type: "string",
+            enum: ["apparel", "accessory", "prop", "unknown"],
+            example: "accessory",
+          },
+          classificationSource: {
+            type: "string",
+            enum: [
+              "category_id",
+              "category_name",
+              "line_name",
+              "description_keyword",
+              "unclassified",
+            ],
+            example: "category_id",
+          },
+          productCategorySnapshot: {
+            $ref: "#/components/schemas/AiProductCategorySnapshot",
+          },
+          status: {
+            type: "string",
+            enum: ["queued", "processing", "completed", "failed"],
+            example: "queued",
+          },
+          errorCode: {
+            type: "string",
+            example: "PRODUCT_PREVIEW_UNSUPPORTED",
+          },
+          errorMessage: {
+            type: "string",
+            example: "El producto seleccionado no es compatible con una vista previa AI confiable",
+          },
+        },
+      },
 
       CreateGallery: zodToJsonSchema(createGallerySchema),
       DeleteGalleryImage: zodToJsonSchema(deleteGalleryImageSchema),
@@ -337,10 +449,44 @@ const swaggerDefinition = {
         type: "object",
         properties: {
           productoId: { type: "string", example: "prod_12345" },
+          tallaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["s", "m", "l"],
+          },
           existencias: { type: "integer", example: 18 },
           inventarioPorTalla: {
             type: "array",
             items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+        },
+      },
+      ReplaceSizeInventoryResult: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_12345" },
+          tallaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["s", "m", "l"],
+          },
+          existencias: { type: "integer", example: 15 },
+          inventarioPorTalla: {
+            type: "array",
+            items: { $ref: "#/components/schemas/InventoryBySizeItem" },
+          },
+          cambios: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                tallaId: { type: "string", example: "m" },
+                cantidadAnterior: { type: "integer", example: 5 },
+                cantidadNueva: { type: "integer", example: 9 },
+                diferencia: { type: "integer", example: 4 },
+                movimientoId: { type: "string", example: "mov_abc123" },
+              },
+            },
           },
         },
       },

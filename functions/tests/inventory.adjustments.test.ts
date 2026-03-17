@@ -90,6 +90,7 @@ describe("TASK-067 - Ajustes de inventario", () => {
   it("registra ajuste desde cantidadFisica y calcula diferencia", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_1",
+      tallaIds: [],
       existencias: 12,
       inventarioPorTalla: [],
     });
@@ -137,6 +138,7 @@ describe("TASK-067 - Ajustes de inventario", () => {
   it("exige tallaId cuando el producto maneja inventario por talla", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_2",
+      tallaIds: ["m"],
       existencias: 20,
       inventarioPorTalla: [{ tallaId: "m", cantidad: 10 }],
     });
@@ -157,6 +159,7 @@ describe("TASK-067 - Ajustes de inventario", () => {
   it("reutiliza el ajuste cuando se repite idempotencyKey", async () => {
     getStockBySizeMock.mockResolvedValue({
       productoId: "prod_3",
+      tallaIds: [],
       existencias: 6,
       inventarioPorTalla: [],
     });

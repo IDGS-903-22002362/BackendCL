@@ -125,6 +125,7 @@ describe("TASK-066 - Alertas de stock bajo", () => {
           lineaId: "jersey",
           categoriaId: "hombre",
           existencias: 20,
+          tallaIds: ["m", "l"],
           inventarioPorTalla: [
             { tallaId: "m", cantidad: 1 },
             { tallaId: "l", cantidad: 9 },

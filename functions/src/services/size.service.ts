@@ -5,8 +5,14 @@
 
 import { firestoreTienda } from "../config/firebase";
 import { Talla, CrearTallaDTO } from "../models/catalogo.model";
+import {
+  completeInventarioPorTalla,
+  normalizeInventarioPorTallaEntries,
+  normalizeTallaIds,
+} from "../utils/size-inventory.util";
 
 const COLLECTION_NAME = "tallas";
+const PRODUCTS_COLLECTION_NAME = "productos";
 
 /**
  * Obtener todas las tallas
@@ -183,6 +189,89 @@ export async function updateSize(
   }
 }
 
+export async function getSizeInventory(id: string): Promise<{
+  talla: Talla;
+  resumen: { totalProductos: number; totalUnidades: number };
+  productos: Array<{
+    productoId: string;
+    clave: string;
+    descripcion: string;
+    cantidad: number;
+    existencias: number;
+  }>;
+}> {
+  const talla = await getSizeById(id);
+  if (!talla) {
+    throw new Error(`Talla con ID "${id}" no encontrada`);
+  }
+
+  const snapshot = await firestoreTienda
+    .collection(PRODUCTS_COLLECTION_NAME)
+    .where("activo", "==", true)
+    .where("tallaIds", "array-contains", id)
+    .get();
+
+  const productos = snapshot.docs
+    .map((doc) => {
+      const data = doc.data();
+      const tallaIds = normalizeTallaIds(data.tallaIds);
+      const inventarioPorTalla = completeInventarioPorTalla(
+        tallaIds,
+        data.inventarioPorTalla,
+      );
+      const cantidad =
+        inventarioPorTalla.find((item) => item.tallaId === id)?.cantidad ?? 0;
+      const existencias = inventarioPorTalla.reduce(
+        (acc, item) => acc + item.cantidad,
+        0,
+      );
+
+      return {
+        productoId: doc.id,
+        clave: String(data.clave ?? ""),
+        descripcion: String(data.descripcion ?? ""),
+        cantidad,
+        existencias,
+      };
+    })
+    .sort((a, b) => a.descripcion.localeCompare(b.descripcion));
+
+  const totalUnidades = productos.reduce(
+    (acc, producto) => acc + producto.cantidad,
+    0,
+  );
+
+  return {
+    talla,
+    resumen: {
+      totalProductos: productos.length,
+      totalUnidades,
+    },
+    productos,
+  };
+}
+
+async function findProductsUsingSize(sizeId: string): Promise<string[]> {
+  const snapshot = await firestoreTienda.collection(PRODUCTS_COLLECTION_NAME).get();
+  const productIds: string[] = [];
+
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data();
+    const tallaIds = normalizeTallaIds(data.tallaIds);
+    const inventarioPorTalla = normalizeInventarioPorTallaEntries(
+      data.inventarioPorTalla,
+    );
+    const inTallaIds = tallaIds.includes(sizeId);
+    const inInventory = inventarioPorTalla.some((item) => item.tallaId === sizeId);
+
+    if (inTallaIds || inInventory) {
+      productIds.push(doc.id);
+    }
+  });
+
+  return productIds;
+}
+
 /**
  * Eliminar talla (eliminación física ya que no tiene campo 'activo')
  * @param id ID de la talla
@@ -194,6 +283,13 @@ export async function deleteSize(id: string): Promise<void> {
 
     if (!doc.exists) {
       throw new Error(`Talla con ID "${id}" no encontrada`);
+    }
+
+    const productsUsingSize = await findProductsUsingSize(id);
+    if (productsUsingSize.length > 0) {
+      throw new Error(
+        `No se puede eliminar la talla "${id}" porque está en uso por ${productsUsingSize.length} producto(s)`,
+      );
     }
 
     // Eliminar el documento físicamente

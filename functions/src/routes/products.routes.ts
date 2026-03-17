@@ -17,6 +17,7 @@ import {
   updateProductSchema,
   deleteImageSchema,
   updateProductStockSchema,
+  replaceSizeInventorySchema,
 } from "../middleware/validators/product.validator";
 import {
   idParamSchema,
@@ -453,7 +454,7 @@ router.put(
  *       Actualiza stock general o stock por talla de un producto y registra movimiento de inventario.
  *
  *       **Reglas:**
- *       - Si el producto usa inventario por talla, `tallaId` es requerido.
+ *       - Si el producto tiene `tallaIds`, `tallaId` es requerido.
  *       - Si no usa inventario por talla, se actualiza stock general (`existencias`).
  *       - La cantidad no puede ser negativa.
  *       - Solo administradores/empleados pueden ejecutar esta operación.
@@ -514,6 +515,79 @@ router.put(
   validateParams(idParamSchema),
   validateBody(updateProductStockSchema),
   commandController.updateStock,
+);
+
+/**
+ * @swagger
+ * /api/productos/{id}/inventario-tallas:
+ *   put:
+ *     summary: Reemplazar inventario por talla (masivo)
+ *     description: |
+ *       Reemplaza completamente el inventario por talla del producto.
+ *       Las tallas omitidas se guardan con cantidad 0.
+ *
+ *       **Reglas:**
+ *       - Solo aplica para productos con `tallaIds`.
+ *       - Si se envía una talla fuera de `tallaIds`, responde 400.
+ *       - Registra movimientos de ajuste por cada talla modificada.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ReplaceSizeInventory'
+ *           example:
+ *             inventarioPorTalla:
+ *               - tallaId: "s"
+ *                 cantidad: 3
+ *               - tallaId: "m"
+ *                 cantidad: 12
+ *             motivo: "Conteo físico por tallas"
+ *             referencia: "INV-2026-150"
+ *     responses:
+ *       200:
+ *         description: Inventario por talla actualizado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Inventario por talla actualizado exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/ReplaceSizeInventoryResult'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/:id/inventario-tallas",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  validateBody(replaceSizeInventorySchema),
+  commandController.replaceSizeInventory,
 );
 
 /**
