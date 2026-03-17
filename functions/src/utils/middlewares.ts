@@ -10,7 +10,6 @@ export const authMiddleware = async (
   next: NextFunction,
 ): Promise<void> => {
   const authHeader = req.headers.authorization;
-  console.log("Authorization header recibido:", authHeader);
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     res.status(401).json({ message: "No autorizado. Token requerido" });
     return;

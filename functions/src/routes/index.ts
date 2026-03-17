@@ -25,6 +25,8 @@ import pagosRoutes from "./pagos.routes";
 import stripeRoutes from "./stripe.routes";
 import inventoryRoutes from "./inventory.routes";
 import plantillaRoutes from "./plantilla.routes";
+import aiRoutes from "./ai.routes";
+import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
 
 const router = Router();
@@ -48,6 +50,8 @@ router.use("/stripe", stripeRoutes);
 router.use("/inventario", inventoryRoutes);
 router.use("/plantilla", plantillaRoutes);
 router.use("/galeria", galeriaRoutes);
+router.use("/ai", aiRoutes);
+router.use("/notificaciones", notificationsRoutes);
 
 // Futuros módulos:
 

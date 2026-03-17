@@ -1,6 +1,7 @@
 import { admin } from "./firebase.admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { getMessaging } from "firebase-admin/messaging";
 import * as path from "path";
 import * as fs from "fs";
 
@@ -28,7 +29,8 @@ if (process.env.SERVICE_ACCOUNT_APP_OFICIAL) {
   }
 }
 
-let appOficial = admin.apps.find((app) => app?.name === "APP_OFICIAL");
+const adminApps = Array.isArray(admin.apps) ? admin.apps : [];
+let appOficial = adminApps.find((app) => app?.name === "APP_OFICIAL");
 
 if (!appOficial) {
   const config: any = {
@@ -36,7 +38,11 @@ if (!appOficial) {
   };
 
   // Solo agregar credenciales si no estamos en Cloud Functions
-  if (!isCloudFunction && serviceAccount) {
+  if (
+    !isCloudFunction &&
+    serviceAccount &&
+    typeof admin.credential?.cert === "function"
+  ) {
     config.credential = admin.credential.cert(serviceAccount);
   }
 
@@ -45,6 +51,7 @@ if (!appOficial) {
 
 export const firestoreApp = getFirestore(appOficial);
 export const authAppOficial = getAuth(appOficial);
+export const messagingAppOficial = getMessaging(appOficial);
 
 console.log("🔥 App oficial inicializada:", {
   appName: appOficial.name,

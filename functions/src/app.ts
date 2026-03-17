@@ -1,3 +1,4 @@
+import "./config/env.bootstrap";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -6,22 +7,13 @@ import swaggerUi from "swagger-ui-express";
 import routes from "./routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
-import dotenv from "dotenv";
-import path from "path";
-
-// Base env file (safe for deploy tooling) + local override for development.
-dotenv.config({
-  path: path.resolve(__dirname, "../.env"),
-});
-dotenv.config({
-  path: path.resolve(__dirname, "../.env.local"),
-  override: true,
-});
+import { requestContextMiddleware } from "./middleware/request-context.middleware";
 
 const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: true }));
+app.use(requestContextMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: '50mb' }));

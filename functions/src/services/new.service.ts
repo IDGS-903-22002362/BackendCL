@@ -138,7 +138,6 @@ export class NewService {
 
     async getAllNews(): Promise<Noticia[]> {
         const snapshot = await this.collection
-            .where("estatus", "==", true)
             .get();
 
         return snapshot.docs.map(doc => this.mapDocToNoticia(doc));

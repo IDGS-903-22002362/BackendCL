@@ -248,6 +248,65 @@ const wait = (ms: number): Promise<void> => {
 };
 
 class PagoService {
+  private async enqueueOrderConfirmedNotification(
+    ordenId: string,
+    userId: string,
+    sourceData: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const { default: notificationEventService } = await import(
+        "./notifications/notification-event.service"
+      );
+      await notificationEventService.enqueueEvent({
+        eventType: "order_confirmed",
+        userId,
+        orderId: ordenId,
+        sourceData,
+        triggerSource: "stripe_webhook",
+      });
+    } catch (error) {
+      console.warn("notification_order_confirmed_enqueue_failed", {
+        ordenId,
+        userId,
+        reason: parseWebhookErrorMessage(error),
+      });
+    }
+  }
+
+  getSupportedPaymentMethods(): Array<{
+    code: MetodoPago;
+    label: string;
+    availableOnline: boolean;
+  }> {
+    return [
+      {
+        code: MetodoPago.TARJETA,
+        label: "Tarjeta",
+        availableOnline: true,
+      },
+      {
+        code: MetodoPago.TRANSFERENCIA,
+        label: "Transferencia",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.EFECTIVO,
+        label: "Efectivo",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.PAYPAL,
+        label: "PayPal",
+        availableOnline: false,
+      },
+      {
+        code: MetodoPago.MERCADOPAGO,
+        label: "Mercado Pago",
+        availableOnline: false,
+      },
+    ];
+  }
+
   private getStartPaymentLockRef(
     ordenId: string,
     userId: string,
@@ -1678,6 +1737,19 @@ class PagoService {
       });
     });
 
+    const orderSnapshot = await pagoMatch.ordenRef.get();
+    const orderData = orderSnapshot.data() as Orden | undefined;
+    if (orderData?.usuarioId) {
+      await this.enqueueOrderConfirmedNotification(
+        pagoMatch.ordenId,
+        orderData.usuarioId,
+        {
+          paymentIntentId: paymentIntent.id,
+          providerStatus: paymentIntent.status,
+        },
+      );
+    }
+
     return {
       outcome: "processed",
       eventId: event.id,
@@ -1819,6 +1891,23 @@ class PagoService {
         updatedAt: now,
       });
     });
+
+    const orderSnapshot = await pagoMatch.ordenRef.get();
+    const orderData = orderSnapshot.data() as Orden | undefined;
+    if (orderData?.usuarioId) {
+      await this.enqueueOrderConfirmedNotification(
+        pagoMatch.ordenId,
+        orderData.usuarioId,
+        {
+          checkoutSessionId: session.id,
+          paymentIntentId:
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : undefined,
+          providerStatus: session.payment_status || "paid",
+        },
+      );
+    }
 
     return {
       outcome: "processed",

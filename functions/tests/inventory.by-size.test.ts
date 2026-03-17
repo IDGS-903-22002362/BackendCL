@@ -49,6 +49,13 @@ jest.mock("../src/config/firebase.admin", () => ({
   },
 }));
 
+jest.mock("../src/services/stock-alert.service", () => ({
+  __esModule: true,
+  default: {
+    notifyRealtime: jest.fn(),
+  },
+}));
+
 jest.mock("../src/services/orden.service", () => ({
   __esModule: true,
   default: {
@@ -102,6 +109,7 @@ describe("TASK-063 - Inventario por talla", () => {
     expect(stock).not.toBeNull();
     expect(stock).toEqual({
       productoId: "prod_1",
+      tallaIds: ["s", "m"],
       existencias: 8,
       inventarioPorTalla: [
         { tallaId: "s", cantidad: 3 },

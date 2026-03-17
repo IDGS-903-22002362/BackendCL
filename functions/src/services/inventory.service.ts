@@ -11,6 +11,10 @@ import {
   TipoMovimientoInventario,
 } from "../models/inventario.model";
 import productService from "./product.service";
+import {
+  completeInventarioPorTalla,
+  normalizeTallaIds,
+} from "../utils/size-inventory.util";
 
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
 const ORDENES_COLLECTION = "ordenes";
@@ -27,16 +31,26 @@ class InventoryService {
       throw new Error(`Producto con ID ${productoId} no encontrado`);
     }
 
-    if (stock.inventarioPorTalla.length > 0) {
+    const tallaIds = normalizeTallaIds(stock.tallaIds);
+    const usaInventarioPorTalla = tallaIds.length > 0;
+
+    if (usaInventarioPorTalla) {
       if (!tallaId) {
         throw new Error(
           "Se requiere tallaId para registrar movimiento en productos con inventario por talla",
         );
       }
 
-      const registroTalla = stock.inventarioPorTalla.find(
-        (item) => item.tallaId === tallaId,
+      if (!tallaIds.includes(tallaId)) {
+        throw new Error(
+          `La talla "${tallaId}" no pertenece al producto ${productoId}`,
+        );
+      }
+      const inventarioPorTalla = completeInventarioPorTalla(
+        tallaIds,
+        stock.inventarioPorTalla,
       );
+      const registroTalla = inventarioPorTalla.find((item) => item.tallaId === tallaId);
 
       return {
         cantidadActual: registroTalla?.cantidad ?? 0,
