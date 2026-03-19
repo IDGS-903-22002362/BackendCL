@@ -21,7 +21,7 @@ import { RolUsuario } from "../../models/usuario.model";
  * - Recalcula totales en servidor (ignora valores del cliente)
  * - Establece estado PENDIENTE automáticamente
  * - Reduce stock automáticamente al crear la orden
- * - NO requiere autenticación por ahora (agregar cuando TASK-032 esté lista)
+ * - Requiere autenticación y usa req.user.uid como fuente de verdad para usuarioId
  *
  * @param req.body - CrearOrdenDTO ya validado por Zod middleware
  * @returns 201 - Orden creada exitosamente
@@ -30,12 +30,22 @@ import { RolUsuario } from "../../models/usuario.model";
  */
 export const create = async (req: Request, res: Response) => {
   try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autorizado. Se requiere autenticación.",
+      });
+    }
+
     // Body ya validado por middleware de Zod (validateBody)
     // Tipos garantizados: usuarioId, items[], direccionEnvio, metodoPago
-    const ordenData = req.body;
+    const ordenData = {
+      ...req.body,
+      usuarioId: req.user.uid,
+    };
 
     console.log(
-      `📦 POST /api/ordenes - Intentando crear orden para usuario: ${ordenData.usuarioId}`,
+      `📦 POST /api/ordenes - Intentando crear orden para usuario autenticado: ${req.user.uid}`,
     );
 
     // Llamar al servicio (recalcula totales internamente)

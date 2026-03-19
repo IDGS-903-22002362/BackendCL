@@ -1,6 +1,10 @@
 import { Timestamp } from "firebase-admin/firestore";
 import notificationConfig from "../../config/notification.config";
 import {
+  resolveNotificationLocale,
+  resolveNotificationTimezone,
+} from "../../config/notification.config";
+import {
   NotificationEventType,
   NotificationPreferenceDocument,
 } from "../../models/notificacion.model";
@@ -58,9 +62,14 @@ class NotificationPreferencesService {
         startHour: notificationConfig.defaults.quietHours.startHour,
         endHour: notificationConfig.defaults.quietHours.endHour,
       },
-      timezone:
-        timezoneCandidate?.trim() || notificationConfig.defaults.timezone,
-      locale: localeCandidate?.trim() || notificationConfig.defaults.locale,
+      timezone: resolveNotificationTimezone(
+        timezoneCandidate,
+        notificationConfig.defaults.timezone,
+      ),
+      locale: resolveNotificationLocale(
+        localeCandidate,
+        notificationConfig.defaults.locale,
+      ),
       maxMarketingPerDay: notificationConfig.defaults.marketingMaxPerDay,
       createdAt: now,
       updatedAt: now,
@@ -103,8 +112,19 @@ class NotificationPreferencesService {
     await preferencesRef.set(
       {
         ...patch,
-        ...(patch.timezone ? { timezone: patch.timezone.trim() } : {}),
-        ...(patch.locale ? { locale: patch.locale.trim() } : {}),
+        ...(patch.timezone
+          ? {
+              timezone: resolveNotificationTimezone(
+                patch.timezone,
+                current.timezone,
+              ),
+            }
+          : {}),
+        ...(patch.locale
+          ? {
+              locale: resolveNotificationLocale(patch.locale, current.locale),
+            }
+          : {}),
         ...(patch.quietHours ? { quietHours: nextQuietHours } : {}),
         updatedAt: Timestamp.now(),
       },
