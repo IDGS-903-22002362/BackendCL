@@ -220,4 +220,30 @@ router.delete(
     command.deleteVideo
 );
 
+/**
+ * @swagger
+ * /api/galeria/{id}:
+ *   delete:
+ *     summary: Eliminar (desactivar) una galería
+ *     description: Realiza un borrado lógico cambiando estatus a false
+ *     tags: [Galeria]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la galería
+ *     responses:
+ *       200:
+ *         description: Galería eliminada correctamente
+ *       404:
+ *         description: Galería no encontrada
+ */
+router.delete("/:id", authMiddleware, command.deleteGallery);
+
+router.put('/:id/reactivar', authMiddleware, command.reactivate);
+
 export default router;

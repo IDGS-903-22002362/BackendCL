@@ -276,6 +276,37 @@ export class NewService {
             updatedAt: admin.firestore.Timestamp.now(),
         });
     }
+
+    async reactivateNew(id: string): Promise<Noticia> {
+        try {
+            const docRef = this.collection.doc(id);
+            const doc = await docRef.get();
+
+            if (!doc.exists) {
+                throw new Error(`Noticia con ID ${id} no encontrada`);
+            }
+
+            // Usamos el mapper para obtener la noticia con el formato correcto
+            const noticia = this.mapDocToNoticia(doc);
+
+            // Si ya está activa, la devolvemos directamente
+            if (noticia.estatus) {
+                return noticia;
+            }
+
+            const now = admin.firestore.Timestamp.now();
+            await docRef.update({
+                estatus: true,
+                updatedAt: now,
+            });
+
+            const updatedDoc = await docRef.get();
+            return this.mapDocToNoticia(updatedDoc);
+        } catch (error) {
+            console.error('Error al reactivar noticia:', error);
+            throw new Error(error instanceof Error ? error.message : 'Error al reactivar la noticia');
+        }
+    }
 }
 
 // Exportar instancia única del servicio (Singleton)

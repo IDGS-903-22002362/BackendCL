@@ -317,3 +317,23 @@ export const syncInstagramNoticias = async (_req: Request, res: Response) => {
     });
   }
 };
+
+export const reactivate = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const noticiaReactivada = await newService.reactivateNew(id);
+    return res.status(200).json({
+      success: true,
+      message: 'Noticia reactivada exitosamente',
+      data: noticiaReactivada,
+    });
+  } catch (error) {
+    const statusCode = error instanceof Error && error.message.includes('no encontrado') ? 404 : 500;
+    return res.status(statusCode).json({
+      success: false,
+      message: 'Error al reactivar la noticia',
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
+  }
+};

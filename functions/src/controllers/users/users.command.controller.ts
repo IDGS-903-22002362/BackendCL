@@ -202,6 +202,30 @@ export const remove = async (req: Request, res: Response) => {
     }
 };
 
+export const reactivate = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        // Opcional: verificar permisos (solo SUPER_ADMIN o ADMIN)
+        // if (req.user.rol !== 'SUPER_ADMIN' && req.user.rol !== 'ADMIN') {
+        //   return res.status(403).json({ success: false, message: 'No tienes permisos' });
+        // }
+
+        const usuarioReactivado = await userAppService.reactivateUser(id);
+        return res.status(200).json({
+            success: true,
+            message: 'Usuario reactivado exitosamente',
+            data: usuarioReactivado,
+        });
+    } catch (error) {
+        const statusCode = error instanceof Error && error.message.includes('no encontrado') ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            message: 'Error al reactivar el usuario',
+            error: error instanceof Error ? error.message : 'Error desconocido',
+        });
+    }
+};
+
 export const sumarPuntos = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
