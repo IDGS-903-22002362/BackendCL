@@ -29,8 +29,7 @@ export class UserAppService {
     try {
       // Consultar colección de productos (sin orderBy para evitar índice compuesto)
       const snapshot = await firestoreApp
-        .collection(USUARIOSAPP_COLLECTION)
-        .where("activo", "==", true) // Filtrar solo productos activos
+        .collection(USUARIOSAPP_COLLECTION)// Filtrar solo productos activos
         .get();
 
       // Si no hay usuarios, retornar array vacío
@@ -433,6 +432,34 @@ export class UserAppService {
     });
     const updatedDoc = await doc.ref.get();
     return { id: updatedDoc.id, ...updatedDoc.data() } as UsuarioApp;
+  }
+
+  async reactivateUser(id: string): Promise<UsuarioApp> {
+    try {
+      const docRef = firestoreApp.collection(USUARIOSAPP_COLLECTION).doc(id);
+      const doc = await docRef.get();
+
+      if (!doc.exists) {
+        throw new Error(`Usuario con ID ${id} no encontrado`);
+      }
+
+      const userData = doc.data() as UsuarioApp;
+      if (userData.activo) {
+        return { id: doc.id, ...userData } as UsuarioApp; // ya está activo
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      await docRef.update({
+        activo: true,
+        updatedAt: now,
+      });
+
+      const updatedDoc = await docRef.get();
+      return { id: updatedDoc.id, ...updatedDoc.data() } as UsuarioApp;
+    } catch (error) {
+      console.error('Error al reactivar usuario:', error);
+      throw new Error(error instanceof Error ? error.message : 'Error al reactivar el usuario');
+    }
   }
 }
 

@@ -181,3 +181,42 @@ export const deleteVideo = async (req: Request, res: Response): Promise<Response
 
     }
 };
+export const deleteGallery = async (req: Request, res: Response): Promise<Response> => {
+    try {
+        const { id } = req.params;
+
+        // Llama al servicio que realiza el borrado lógico (estatus = false)
+        await galleryService.delete(id);
+
+        return res.json({
+            success: true,
+            message: "Galería eliminada correctamente (desactivada)",
+        });
+    } catch (error: any) {
+        const statusCode = error.message.includes('no encontrada') ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            message: error.message || "Error al eliminar la galería",
+        });
+    }
+};
+
+export const reactivate = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+
+        const galeriaReactivada = await galleryService.reactivateGallery(id);
+        return res.status(200).json({
+            success: true,
+            message: 'Galeria reactivada exitosamente',
+            data: galeriaReactivada,
+        });
+    } catch (error) {
+        const statusCode = error instanceof Error && error.message.includes('no encontrado') ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            message: 'Error al reactivar la galeria',
+            error: error instanceof Error ? error.message : 'Error desconocido',
+        });
+    }
+};

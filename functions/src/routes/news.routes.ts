@@ -302,5 +302,7 @@ router.post(
     commandController.like
 );
 
+router.put('/:id/reactivar', authMiddleware, commandController.reactivate);
+
 
 export default router;

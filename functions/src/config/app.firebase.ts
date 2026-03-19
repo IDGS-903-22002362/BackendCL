@@ -50,6 +50,7 @@ if (!appOficial) {
 }
 
 export const firestoreApp = getFirestore(appOficial);
+firestoreApp.settings({ ignoreUndefinedProperties: true });
 export const authAppOficial = getAuth(appOficial);
 export const messagingAppOficial = getMessaging(appOficial);
 

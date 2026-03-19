@@ -58,7 +58,6 @@ class GalleryService {
     async getAll(): Promise<Galeria[]> {
 
         const snapshot = await this.collection
-            .where("estatus", "==", true)
             .get();
 
         return snapshot.docs.map(doc => this.mapDoc(doc));
@@ -96,21 +95,6 @@ class GalleryService {
         return gallery;
     }
 
-    async delete(id: string) {
-
-        const docRef = this.collection.doc(id);
-
-        const snapshot = await docRef.get();
-
-        if (!snapshot.exists) {
-            throw new Error("Galería no encontrada");
-        }
-
-        await docRef.update({
-            estatus: false,
-            updatedAt: admin.firestore.Timestamp.now()
-        });
-    }
 
     async deleteImage(id: string, imageUrl: string) {
 
@@ -160,6 +144,49 @@ class GalleryService {
         });
 
         return true;
+    }
+
+    async reactivateGallery(id: string): Promise<Galeria> {
+        try {
+            const docRef = this.collection.doc(id);
+            const doc = await docRef.get();
+
+            if (!doc.exists) {
+                throw new Error(`Galeria con ID ${id} no encontrada`);
+            }
+
+            // Usamos el mapper para obtener la noticia con el formato correcto
+            const galeria = this.mapDoc(doc);
+
+            // Si ya está activa, la devolvemos directamente
+            if (galeria.estatus) {
+                return galeria;
+            }
+
+            const now = admin.firestore.Timestamp.now();
+            await docRef.update({
+                estatus: true,
+                updatedAt: now,
+            });
+
+            const updatedDoc = await docRef.get();
+            return this.mapDoc(updatedDoc);
+        } catch (error) {
+            console.error('Error al reactivar galeria:', error);
+            throw new Error(error instanceof Error ? error.message : 'Error al reactivar la galeria');
+        }
+    }
+
+    async delete(id: string) {
+        const docRef = this.collection.doc(id);
+        const snapshot = await docRef.get();
+        if (!snapshot.exists) {
+            throw new Error("Galería no encontrada");
+        }
+        await docRef.update({
+            estatus: false,
+            updatedAt: admin.firestore.Timestamp.now()
+        });
     }
 
 }

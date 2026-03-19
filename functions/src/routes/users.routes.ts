@@ -625,4 +625,8 @@ router.get("/me/getpuntos", authMiddleware, queryController.getMisPuntos);
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
+
+
+
+router.put('/:id/reactivar', authMiddleware, commandController.reactivate);
 export default router;
