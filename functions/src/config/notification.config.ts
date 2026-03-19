@@ -1,3 +1,50 @@
+const DEFAULT_NOTIFICATION_TIMEZONE = "America/Mexico_City";
+const DEFAULT_NOTIFICATION_LOCALE = "es-MX";
+
+const toTrimmedString = (value: string | undefined): string | undefined => {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+};
+
+const isValidTimezone = (value: string): boolean => {
+  try {
+    Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const resolveNotificationTimezone = (
+  value: string | undefined,
+  fallback = DEFAULT_NOTIFICATION_TIMEZONE,
+): string => {
+  const candidate = toTrimmedString(value);
+  if (candidate && isValidTimezone(candidate)) {
+    return candidate;
+  }
+
+  const normalizedFallback =
+    toTrimmedString(fallback) || DEFAULT_NOTIFICATION_TIMEZONE;
+
+  return isValidTimezone(normalizedFallback)
+    ? normalizedFallback
+    : DEFAULT_NOTIFICATION_TIMEZONE;
+};
+
+export const resolveNotificationLocale = (
+  value: string | undefined,
+  fallback = DEFAULT_NOTIFICATION_LOCALE,
+): string => toTrimmedString(value) || toTrimmedString(fallback) || DEFAULT_NOTIFICATION_LOCALE;
+
+export const resolveOptionalNotificationTimezone = (
+  value: string | undefined,
+  fallback = DEFAULT_NOTIFICATION_TIMEZONE,
+): string | undefined => {
+  const candidate = toTrimmedString(value);
+  return candidate ? resolveNotificationTimezone(candidate, fallback) : undefined;
+};
+
 const toInt = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
@@ -14,9 +61,8 @@ const toBool = (value: string | undefined, fallback: boolean): boolean => {
 
 export const notificationConfig = {
   defaults: {
-    timezone:
-      process.env.NOTIFICATIONS_DEFAULT_TIMEZONE || "America/Mexico_City",
-    locale: process.env.NOTIFICATIONS_DEFAULT_LOCALE || "es-MX",
+    timezone: resolveNotificationTimezone(process.env.NOTIFICATIONS_DEFAULT_TIMEZONE),
+    locale: resolveNotificationLocale(process.env.NOTIFICATIONS_DEFAULT_LOCALE),
     quietHours: {
       enabled: toBool(process.env.NOTIFICATIONS_QUIET_HOURS_ENABLED, true),
       startHour: toInt(process.env.NOTIFICATIONS_QUIET_HOURS_START, 22),
@@ -80,11 +126,11 @@ export const notificationConfig = {
     ),
   },
   ai: {
-    promptVersion: process.env.AI_NOTIFICATION_PROMPT_VERSION || "v1",
+    promptVersion: toTrimmedString(process.env.AI_NOTIFICATION_PROMPT_VERSION) || "v1",
     modelVersion:
-      process.env.GEMINI_MODEL_SUMMARY ||
-      process.env.GEMINI_MODEL_FAST ||
-      process.env.GEMINI_MODEL_PRIMARY ||
+      toTrimmedString(process.env.GEMINI_MODEL_SUMMARY) ||
+      toTrimmedString(process.env.GEMINI_MODEL_FAST) ||
+      toTrimmedString(process.env.GEMINI_MODEL_PRIMARY) ||
       "gemini-fallback",
   },
 };

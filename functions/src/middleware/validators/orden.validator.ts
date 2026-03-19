@@ -145,11 +145,11 @@ export const createOrdenSchema = z
   .object({
     usuarioId: z
       .string({
-        required_error: "El ID del usuario es requerido",
         invalid_type_error: "El ID del usuario debe ser una cadena de texto",
       })
       .trim()
-      .min(1, "El ID del usuario no puede estar vacío"),
+      .min(1, "El ID del usuario no puede estar vacío")
+      .optional(),
 
     items: z
       .array(itemOrdenSchema, {
