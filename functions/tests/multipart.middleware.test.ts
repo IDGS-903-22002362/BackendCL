@@ -8,7 +8,8 @@ const runMultipartMiddleware = async (
   const middleware = parseMultipartImages({
     fieldName: "file",
     maxFiles: 1,
-    maxFileSizeBytes: 5 * 1024 * 1024,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   });
 
   return new Promise((resolve, reject) => {
@@ -65,6 +66,34 @@ describe("parseMultipartImages", () => {
     tempFiles.push((req.files as Express.Multer.File[])[0].path);
   });
 
+  it.each([
+    ["image/png", "preview.png"],
+    ["image/webp", "preview.webp"],
+    ["image/gif", "preview.gif"],
+  ])("acepta archivos %s configurados", async (mimeType, filename) => {
+    const form = new FormData();
+    form.append("file", Buffer.from("fake-image-buffer"), {
+      filename,
+      contentType: mimeType,
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      rawBody: Buffer;
+      body: Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      rawBody: form.getBuffer(),
+      body: {},
+    };
+
+    await runMultipartMiddleware(req);
+
+    expect((req.files as Express.Multer.File[])[0].mimetype).toBe(mimeType);
+    tempFiles.push((req.files as Express.Multer.File[])[0].path);
+  });
+
   it("rechaza multipart sin boundary con un 400 controlado", async () => {
     const req: {
       headers: Record<string, string>;
@@ -86,9 +115,38 @@ describe("parseMultipartImages", () => {
     );
   });
 
+  it.each([
+    ["image/svg+xml", "vector.svg"],
+    ["image/heic", "portrait.heic"],
+    ["application/pdf", "manual.pdf"],
+  ])("rechaza archivos con mime type %s", async (mimeType, filename) => {
+    const form = new FormData();
+    form.append("file", Buffer.from("fake-image-buffer"), {
+      filename,
+      contentType: mimeType,
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      rawBody: Buffer;
+      body: Record<string, unknown>;
+    } = {
+      headers: form.getHeaders(),
+      rawBody: form.getBuffer(),
+      body: {},
+    };
+
+    await expect(runMultipartMiddleware(req)).rejects.toEqual(
+      expect.objectContaining({
+        statusCode: 400,
+        message: expect.stringContaining("Tipo de archivo no permitido"),
+      }),
+    );
+  });
+
   it("rechaza archivos mayores al límite configurado", async () => {
     const form = new FormData();
-    form.append("file", Buffer.alloc(6 * 1024 * 1024, 1), {
+    form.append("file", Buffer.alloc(11 * 1024 * 1024, 1), {
       filename: "big.png",
       contentType: "image/png",
     });

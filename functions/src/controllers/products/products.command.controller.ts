@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { promises as fs } from "fs";
 import productService from "../../services/product.service";
 import storageService from "../../services/storage.service";
 
@@ -114,9 +115,10 @@ export const remove = async (req: Request, res: Response) => {
 };
 
 export const uploadImages = async (req: Request, res: Response) => {
+  const files = (req.files as Express.Multer.File[]) || [];
+
   try {
     const { id } = req.params;
-    const files = req.files as Express.Multer.File[];
 
     if (!files || files.length === 0) {
       return res
@@ -133,11 +135,12 @@ export const uploadImages = async (req: Request, res: Response) => {
     }
 
     const imagenesData = files.map((file) => ({
-      buffer: file.buffer,
+      filePath: file.path,
       originalName: file.originalname,
+      mimeType: file.mimetype,
     }));
 
-    const urls = await storageService.uploadMultipleFiles(
+    const urls = await storageService.uploadMultipleFilesFromPath(
       imagenesData,
       "productos",
     );
@@ -158,6 +161,12 @@ export const uploadImages = async (req: Request, res: Response) => {
       message: "Error al subir las imágenes",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
+  } finally {
+    await Promise.allSettled(
+      files
+        .filter((file) => Boolean(file.path))
+        .map(async (file) => fs.unlink(file.path)),
+    );
   }
 };
 
