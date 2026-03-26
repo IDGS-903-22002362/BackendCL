@@ -24,9 +24,17 @@ import {
   searchTermSchema,
   categoriaIdParamSchema,
   lineaIdParamSchema,
+  productoDetalleParamsSchema,
 } from "../middleware/validators/common.validator";
 import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { productoIdParamSchema } from "../middleware/validators/carrito.validator";
+import { createDetalleProductoSchema } from "../middleware/validators/detalleProducto.validator";
+import * as detalleQueryController from "../controllers/detalleProducto/detalleProducto.query.controller";
+import * as detalleCommandController from "../controllers/detalleProducto/detalleProducto.command.controller";
+import {
+  updateDetalleProductoSchema,
+} from "../middleware/validators/detalleProducto.validator";
 
 const router = Router();
 
@@ -759,6 +767,292 @@ router.delete(
   validateParams(idParamSchema),
   validateBody(deleteImageSchema),
   commandController.deleteImage,
+);
+
+
+// ==========================================
+// DETALLES DEL PRODUCTO (Subcolección)
+// ==========================================
+
+/**
+ * @swagger
+ * /api/productos/{productoId}/detalles:
+ *   get:
+ *     summary: Listar todos los detalles de un producto
+ *     description: Obtiene todos los detalles asociados a un producto específico. Ordenados por fecha de creación descendente.
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: productoId
+ *         required: true
+ *         description: ID del producto padre
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     responses:
+ *       200:
+ *         description: Lista de detalles obtenida exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: integer
+ *                   example: 3
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/DetalleProducto'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:productoId/detalles",
+  validateParams(productoIdParamSchema),
+  detalleQueryController.getDetallesByProducto
+);
+
+/**
+ * @swagger
+ * /api/productos/{productoId}/detalles/{detalleId}:
+ *   get:
+ *     summary: Obtener un detalle específico por ID
+ *     description: Retorna un detalle concreto de un producto.
+ *     tags: [Products]
+ *     parameters:
+ *       - in: path
+ *         name: productoId
+ *         required: true
+ *         description: ID del producto padre
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         description: ID del detalle
+ *         schema:
+ *           type: string
+ *           example: "det_abc123"
+ *     responses:
+ *       200:
+ *         description: Detalle encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   $ref: '#/components/schemas/DetalleProducto'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/:productoId/detalles/:detalleId",
+  validateParams(productoDetalleParamsSchema),
+  detalleQueryController.getDetalleById
+);
+
+/**
+ * @swagger
+ * /api/productos/{productoId}/detalles:
+ *   post:
+ *     summary: Crear un nuevo detalle para un producto
+ *     description: Agrega un detalle a la subcolección del producto. Actualiza automáticamente el array `detalleIds` en el producto padre.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productoId
+ *         required: true
+ *         description: ID del producto padre
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateDetalleProducto'
+ *           example:
+ *             descripcion: "Tela 100% algodón, diseño oficial del club."
+ *     responses:
+ *       201:
+ *         description: Detalle creado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Detalle creado exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/DetalleProducto'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         description: Producto no encontrado o inactivo
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "El producto con ID prod_12345 está inactivo y no puede recibir detalles"
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/:productoId/detalles",
+  authMiddleware,
+  requireAdmin,
+  validateParams(productoIdParamSchema),
+  validateBody(createDetalleProductoSchema),
+  detalleCommandController.createDetalle
+);
+
+/**
+ * @swagger
+ * /api/productos/{productoId}/detalles/{detalleId}:
+ *   put:
+ *     summary: Actualizar un detalle existente
+ *     description: Modifica la descripción de un detalle. No actualiza el array `detalleIds` del producto padre.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productoId
+ *         required: true
+ *         description: ID del producto padre
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         description: ID del detalle a actualizar
+ *         schema:
+ *           type: string
+ *           example: "det_abc123"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateDetalleProducto'
+ *           example:
+ *             descripcion: "Tela 100% algodón peinado, diseño oficial del club."
+ *     responses:
+ *       200:
+ *         description: Detalle actualizado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Detalle actualizado exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/DetalleProducto'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/:productoId/detalles/:detalleId",
+  authMiddleware,
+  requireAdmin,
+  validateParams(productoDetalleParamsSchema),
+  validateBody(updateDetalleProductoSchema),
+  detalleCommandController.updateDetalle
+);
+
+/**
+ * @swagger
+ * /api/productos/{productoId}/detalles/{detalleId}:
+ *   delete:
+ *     summary: Eliminar un detalle
+ *     description: Elimina un detalle de la subcolección y remueve su ID del array `detalleIds` en el producto padre.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productoId
+ *         required: true
+ *         description: ID del producto padre
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *       - in: path
+ *         name: detalleId
+ *         required: true
+ *         description: ID del detalle a eliminar
+ *         schema:
+ *           type: string
+ *           example: "det_abc123"
+ *     responses:
+ *       200:
+ *         description: Detalle eliminado exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Detalle eliminado exitosamente"
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.delete(
+  "/:productoId/detalles/:detalleId",
+  authMiddleware,
+  requireAdmin,
+  validateParams(productoDetalleParamsSchema),
+  detalleCommandController.deleteDetalle
 );
 
 export default router;

@@ -72,3 +72,25 @@ export const jugadorParamSchema = z.object({
       "El nombre del jugador solo puede contener letras, números, guiones y guiones bajos",
     ),
 });
+
+/**
+ * Schema para validar parámetros de productoId y detalleId en rutas de detalles
+ * /productos/:productoId/detalles/:detalleId
+ */
+export const productoDetalleParamsSchema = z.object({
+  productoId: z
+    .string({
+      required_error: "El ID del producto es requerido",
+      invalid_type_error: "El ID del producto debe ser una cadena de texto",
+    })
+    .min(1, "El ID del producto no puede estar vacío")
+    .max(100, "El ID del producto es demasiado largo"),
+
+  detalleId: z
+    .string({
+      required_error: "El ID del detalle es requerido",
+      invalid_type_error: "El ID del detalle debe ser una cadena de texto",
+    })
+    .min(1, "El ID del detalle no puede estar vacío")
+    .max(100, "El ID del detalle es demasiado largo"),
+});

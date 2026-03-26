@@ -19,6 +19,14 @@ export interface StockMinimoPorTalla {
   minimo: number;
 }
 
+export interface DetalleProducto {
+  id?: string;
+  descripcion: string;
+  productoId: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
 /**
  * Interface principal de Producto
  * Representa un artículo en la colección 'productos' de Firestore
@@ -38,6 +46,7 @@ export interface Producto {
   stockMinimoGlobal: number; // Umbral mínimo global para alertas de stock bajo
   stockMinimoPorTalla: StockMinimoPorTalla[]; // Umbrales mínimos opcionales por talla
   imagenes: string[]; // Array de URLs de imágenes del producto
+  detalleIds: string[]; // Array de IDs de detalles relacionados (opcional)
   activo: boolean; // Si el producto está disponible para venta
   createdAt: Timestamp; // Fecha de creación
   updatedAt: Timestamp; // Fecha de última actualización
@@ -61,6 +70,7 @@ export interface CrearProductoDTO {
   stockMinimoGlobal: number;
   stockMinimoPorTalla: StockMinimoPorTalla[];
   imagenes: string[];
+  detalleIds: string[];
   activo: boolean;
 }
 
@@ -82,6 +92,7 @@ export interface ActualizarProductoDTO {
   stockMinimoGlobal?: number;
   stockMinimoPorTalla?: StockMinimoPorTalla[];
   imagenes?: string[];
+  detalleIds: string[];
   activo?: boolean;
 }
 
