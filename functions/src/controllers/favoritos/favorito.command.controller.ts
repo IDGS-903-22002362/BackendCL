@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import favoritoService from "../../services/favorito.service";
-import { ListFavoritosQuery } from "../models/favorito.model";
 
 export const createFavorito = async (req: Request, res: Response) => {
   try {
