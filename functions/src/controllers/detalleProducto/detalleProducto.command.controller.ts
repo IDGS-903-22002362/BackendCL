@@ -6,7 +6,7 @@ import detalleProductoService from "../../services/detalleProducto.service";
 import { createDetalleProductoSchema, updateDetalleProductoSchema } from "../../middleware/validators/detalleProducto.validator";
 
 /**
- * Obtiene todos los detalles de un producto.
+ * Obtiene todos los detalles de un producto
  * GET /api/productos/:productoId/detalles
  */
 export const getDetallesByProducto = async (req: Request, res: Response) => {
@@ -30,7 +30,7 @@ export const getDetallesByProducto = async (req: Request, res: Response) => {
 };
 
 /**
- * Obtiene un detalle específico por ID.
+ * Obtiene un detalle específico por ID
  * GET /api/productos/:productoId/detalles/:detalleId
  */
 export const getDetalleById = async (req: Request, res: Response) => {
@@ -60,7 +60,7 @@ export const getDetalleById = async (req: Request, res: Response) => {
 };
 
 /**
- * Crea un nuevo detalle para un producto.
+ * Crea un nuevo detalle para un producto
  * POST /api/productos/:productoId/detalles
  */
 export const createDetalle = async (req: Request, res: Response) => {
@@ -105,7 +105,7 @@ export const createDetalle = async (req: Request, res: Response) => {
 };
 
 /**
- * Actualiza un detalle existente.
+ * Actualiza un detalle existente
  * PUT /api/productos/:productoId/detalles/:detalleId
  */
 export const updateDetalle = async (req: Request, res: Response) => {
@@ -144,7 +144,7 @@ export const updateDetalle = async (req: Request, res: Response) => {
 };
 
 /**
- * Elimina un detalle.
+ * Elimina un detalle
  * DELETE /api/productos/:productoId/detalles/:detalleId
  */
 export const deleteDetalle = async (req: Request, res: Response) => {
