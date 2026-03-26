@@ -4,6 +4,7 @@
  */
 
 import { storageTienda } from "../config/firebase";
+import { promises as fs } from "fs";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 
@@ -24,7 +25,8 @@ export class StorageService {
   async uploadFile(
     file: Buffer,
     originalName: string,
-    folder: string = "productos"
+    folder: string = "productos",
+    mimeType?: string,
   ): Promise<string> {
     try {
       // Generar nombre único para el archivo
@@ -35,7 +37,7 @@ export class StorageService {
       const fileUpload = this.bucket.file(fileName);
 
       // Determinar el tipo de contenido
-      const contentType = this.getContentType(fileExtension);
+      const contentType = this.getContentType(fileExtension, mimeType);
 
       // Subir el archivo
       await fileUpload.save(file, {
@@ -66,18 +68,68 @@ export class StorageService {
    * @returns Promise con array de URLs públicas
    */
   async uploadMultipleFiles(
-    files: Array<{ buffer: Buffer; originalName: string }>,
-    folder: string = "productos"
+    files: Array<{ buffer: Buffer; originalName: string; mimeType?: string }>,
+    folder: string = "productos",
   ): Promise<string[]> {
     try {
       const uploadPromises = files.map((file) =>
-        this.uploadFile(file.buffer, file.originalName, folder)
+        this.uploadFile(
+          file.buffer,
+          file.originalName,
+          folder,
+          file.mimeType,
+        )
       );
 
       const urls = await Promise.all(uploadPromises);
       return urls;
     } catch (error) {
       console.error("❌ Error al subir múltiples archivos:", error);
+      throw new Error("Error al subir los archivos");
+    }
+  }
+
+  /**
+   * Sube un archivo temporal a Firebase Storage
+   * @param filePath - Ruta temporal local del archivo
+   * @param originalName - Nombre original del archivo
+   * @param folder - Carpeta donde se guardará (ej: 'productos', 'categorias')
+   * @param mimeType - MIME type validado previamente
+   * @returns Promise con la URL pública del archivo
+   */
+  async uploadFileFromPath(
+    filePath: string,
+    originalName: string,
+    folder: string = "productos",
+    mimeType?: string,
+  ): Promise<string> {
+    const fileBuffer = await fs.readFile(filePath);
+    return this.uploadFile(fileBuffer, originalName, folder, mimeType);
+  }
+
+  /**
+   * Sube múltiples archivos temporales
+   * @param files - Array de rutas temporales y nombres originales
+   * @param folder - Carpeta donde se guardarán
+   * @returns Promise con array de URLs públicas
+   */
+  async uploadMultipleFilesFromPath(
+    files: Array<{ filePath: string; originalName: string; mimeType?: string }>,
+    folder: string = "productos",
+  ): Promise<string[]> {
+    try {
+      const uploadPromises = files.map((file) =>
+        this.uploadFileFromPath(
+          file.filePath,
+          file.originalName,
+          folder,
+          file.mimeType,
+        ),
+      );
+
+      return await Promise.all(uploadPromises);
+    } catch (error) {
+      console.error("❌ Error al subir múltiples archivos desde path:", error);
       throw new Error("Error al subir los archivos");
     }
   }
@@ -124,7 +176,11 @@ export class StorageService {
    * @param extension - Extensión del archivo (con punto)
    * @returns Tipo MIME del archivo
    */
-  private getContentType(extension: string): string {
+  private getContentType(extension: string, mimeType?: string): string {
+    if (mimeType) {
+      return mimeType;
+    }
+
     const contentTypes: { [key: string]: string } = {
       ".jpg": "image/jpeg",
       ".jpeg": "image/jpeg",
