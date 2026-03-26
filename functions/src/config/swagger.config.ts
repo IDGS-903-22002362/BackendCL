@@ -79,6 +79,10 @@ import {
   deleteGalleryImageSchema,
   deleteGalleryVideoSchema,
 } from "../middleware/validators/gallery.validator";
+import {
+  createDetalleProductoSchema,
+  updateDetalleProductoSchema,
+} from "../middleware/validators/detalleProducto.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -298,7 +302,8 @@ const swaggerDefinition = {
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
       ReplaceSizeInventory: zodToJsonSchema(replaceSizeInventorySchema),
-
+      CreateDetalleProducto: zodToJsonSchema(createDetalleProductoSchema),
+      UpdateDetalleProducto: zodToJsonSchema(updateDetalleProductoSchema),
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
@@ -708,6 +713,39 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
+      },
+      DetalleProducto: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "ID único del detalle (documento en subcolección)",
+            example: "det_abc123",
+          },
+          descripcion: {
+            type: "string",
+            description: "Descripción o texto del detalle",
+            example: "Tela 100% algodón, diseño oficial del club.",
+          },
+          productoId: {
+            type: "string",
+            description: "ID del producto padre al que pertenece este detalle",
+            example: "prod_12345",
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            description: "Fecha de creación del detalle",
+            example: "2024-01-15T10:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            description: "Fecha de última modificación",
+            example: "2024-01-20T14:20:00Z",
+          },
+        },
+        required: ["descripcion", "productoId"],
       },
       Gallery: {
         type: "object",

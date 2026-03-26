@@ -165,6 +165,15 @@ export const createProductSchema = z
       .optional()
       .default([]),
 
+    detalleIds: z
+      .array(z.string().min(1, "Los IDs del detalle no pueden estar vacíos"), {
+        invalid_type_error: "Los IDs del detalle deben ser un array",
+      })
+      .max(50, "No se pueden asignar más de 50 detalles")
+      .refine(hasUniqueStringValues, "No se permiten detalles duplicados")
+      .optional()
+      .default([]),
+
     activo: z
       .boolean({
         invalid_type_error: "El campo activo debe ser un booleano",
@@ -277,6 +286,15 @@ export const updateProductSchema = z
       .array(z.string().url("Las URLs de imágenes deben ser válidas"))
       .max(10, "No se pueden asignar más de 10 imágenes")
       .optional(),
+
+    detalleIds: z
+      .array(z.string().min(1, "Los IDs del detalle no pueden estar vacíos"), {
+        invalid_type_error: "Los IDs del detalle deben ser un array",
+      })
+      .max(50, "No se pueden asignar más de 50 detalles")
+      .refine(hasUniqueStringValues, "No se permiten detalles duplicados")
+      .optional()
+      .default([]),
 
     activo: z
       .boolean({
