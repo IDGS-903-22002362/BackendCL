@@ -1,6 +1,6 @@
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
-import { Favorito, FavoritoConProducto } from "../models/favorito.model";
+import { Favorito, FavoritoConProducto } from "../models/favoritos.model";
 import productService from "./product.service";
 
 const FAVORITOS_COLLECTION = "favoritos";
