@@ -1,4 +1,5 @@
 import "./config/env.bootstrap";
+import { syncAllCron } from "./jobs/sync.cron";
 /**
  * FIREBASE FUNCTIONS ENTRY POINTOteooooooooo
  * ---------------------------------------------------------------------
@@ -107,3 +108,5 @@ export const inactiveUserNotifications = enqueueInactiveUserNotifications;
 export const campaignNotifications = enqueueCampaignNotifications;
 export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
+
+  export const syncAllData = syncAllCron;
