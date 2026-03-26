@@ -151,70 +151,6 @@ export class UserAppService {
     return !snapshot.empty;
   }
 
-  /**
-     * Obtiene productos por categoría
-     * @param categoriaId - ID de la categoría
-     * @returns Promise con array de productos de la categoría
-     
-    async getProductsByCategory(categoriaId: string): Promise<UsuarioApp[]> {
-        try {
-            const snapshot = await firestore
-                .collection(USUARIOSAPP_COLLECTION)
-                .where("categoriaId", "==", categoriaId)
-                .where("activo", "==", true)
-                .get();
-
-            const productos: UsuarioApp[] = snapshot.docs.map(
-                (doc) =>
-                ({
-                    id: doc.id,
-                    ...doc.data(),
-                } as UsuarioApp)
-            );
-
-            // Ordenar alfabéticamente en memoria
-            productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
-
-            return productos;
-        } catch (error) {
-            console.error("❌ Error al obtener productos por categoría:", error);
-            throw new Error("Error al obtener productos por categoría");
-        }
-    }
-        */
-
-  /**
-     * Obtiene productos por línea
-     * @param lineaId - ID de la línea
-     * @returns Promise con array de productos de la línea
-     
-    async getProductsByLine(lineaId: string): Promise<UsuarioApp[]> {
-        try {
-            const snapshot = await firestore
-                .collection(USUARIOSAPP_COLLECTION)
-                .where("lineaId", "==", lineaId)
-                .where("activo", "==", true)
-                .get();
-
-            const productos: Producto[] = snapshot.docs.map(
-                (doc) =>
-                ({
-                    id: doc.id,
-                    ...doc.data(),
-                } as Producto)
-            );
-
-            // Ordenar alfabéticamente en memoria
-            productos.sort((a, b) => a.descripcion.localeCompare(b.descripcion));
-
-            return productos;
-        } catch (error) {
-            console.error("Error al obtener productos por línea:", error);
-            throw new Error("Error al obtener productos por línea");
-        }
-    }
-
-    */
 
   /**
    * Busca productos por texto en descripción o clave
@@ -262,14 +198,14 @@ export class UserAppService {
    */
   async createUser(usuarioData: CrearUsuarioAppDTO): Promise<UsuarioApp> {
     try {
-      // 1️⃣ CREAR EN FIREBASE AUTH primero
+      // 1 CREAR EN FIREBASE AUTH primero
       const authUser = await admin.auth().createUser({
         email: usuarioData.email.toLowerCase(),
         password: usuarioData.password,
         displayName: usuarioData.nombre,
       });
 
-      // 2️⃣ USAR el uid generado por Firebase (no uno random)
+      // 2 USAR el uid generado por Firebase (no uno random)
       const now = admin.firestore.Timestamp.now();
 
       const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
@@ -295,7 +231,7 @@ export class UserAppService {
         throw new Error("El correo electrónico ya está registrado");
       }
 
-      // 3️⃣ CREAR EN FIRESTORE con el uid auténtico
+      // 3 CREAR EN FIRESTORE con el uid auténtico
       const docRef = firestoreApp
         .collection(USUARIOSAPP_COLLECTION)
         .doc(authUser.uid);

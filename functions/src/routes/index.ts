@@ -28,6 +28,7 @@ import plantillaRoutes from "./plantilla.routes";
 import aiRoutes from "./ai.routes";
 import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
+import favoritosRoutes from "./favorito.routes";
 
 const router = Router();
 
@@ -52,6 +53,7 @@ router.use("/plantilla", plantillaRoutes);
 router.use("/galeria", galeriaRoutes);
 router.use("/ai", aiRoutes);
 router.use("/notificaciones", notificationsRoutes);
+router.use("/favoritos", favoritosRoutes);
 
 // Futuros módulos:
 
