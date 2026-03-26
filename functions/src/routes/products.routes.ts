@@ -638,7 +638,7 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
  * /api/productos/{id}/imagenes:
  *   post:
  *     summary: Subir imágenes del producto
- *     description: Sube hasta 5 imágenes al producto. Las imágenes se almacenan en Firebase Storage. Máximo 5MB por imagen.
+ *     description: Sube hasta 5 imágenes al producto. Las imágenes se almacenan en Firebase Storage. Máximo 10MB por imagen. Tipos soportados: JPEG, PNG, WEBP y GIF.
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -659,7 +659,7 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
  *                 items:
  *                   type: string
  *                   format: binary
- *                 description: Archivos de imagen (máximo 5, 5MB cada uno)
+ *                 description: Archivos de imagen JPEG, PNG, WEBP o GIF (máximo 5, 10MB cada uno)
  *                 maxItems: 5
  *     responses:
  *       200:
@@ -678,7 +678,7 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
  *                 data:
  *                   type: object
  *                   properties:
- *                     imagenes:
+ *                     urls:
  *                       type: array
  *                       items:
  *                         type: string
@@ -704,7 +704,8 @@ router.post(
   parseMultipartImages({
     fieldName: "imagenes",
     maxFiles: 5,
-    maxFileSizeBytes: 5 * 1024 * 1024,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   }),
   commandController.uploadImages,
 );
