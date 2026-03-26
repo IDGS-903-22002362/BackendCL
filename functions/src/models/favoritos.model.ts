@@ -1,7 +1,7 @@
 import { Timestamp } from "firebase-admin/firestore";
 
 /**
- * Interface para Favorito
+ * Interface para Favorito.
  * Representa la relación usuario-producto en la colección 'favoritos'
  */
 export interface Favorito {
