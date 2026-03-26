@@ -133,6 +133,7 @@ export class FavoritoService {
 
   /**
    * Verifica si un producto está en favoritos de un usuario.
+   * Retorna true si está, false si no.
    */
   async isFavorito(usuarioId: string, productoId: string): Promise<boolean> {
     const snapshot = await firestoreTienda
