@@ -40,8 +40,10 @@ const router = Router();
  *       - IVA = 0% (temporal)
  *       - Estado inicial: PENDIENTE
  *       - Reduce stock automáticamente al crear la orden
- *       - NO requiere autenticación por ahora (agregar en versión futura)
+ *       - Requiere autenticación con Bearer token
  *     tags: [Orders]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -232,10 +234,17 @@ const router = Router();
  *                     - campo: "direccionEnvio.telefono"
  *                       mensaje: "El teléfono debe tener exactamente 10 dígitos"
  *                       codigo: "invalid_string"
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/", validateBody(createOrdenSchema), commandController.create);
+router.post(
+  "/",
+  authMiddleware,
+  validateBody(createOrdenSchema),
+  commandController.create,
+);
 
 /**
  * @swagger

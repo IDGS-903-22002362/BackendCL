@@ -7,7 +7,7 @@
  * - IVA = 0% (simplificación temporal, cambiar cuando se requiera)
  * - REDUCE STOCK automáticamente al crear orden (transacciones Firestore)
  * - RESTAURA STOCK automáticamente al cancelar orden (transacciones Firestore)
- * - Sin autenticación por ahora (agregar cuando TASK-032 esté completa)
+ * - Usuario autenticado definido en controller (req.user.uid)
  */
 
 import { Timestamp } from "firebase-admin/firestore";
@@ -49,9 +49,8 @@ export class OrdenService {
     orden: Orden,
   ): Promise<void> {
     try {
-      const { default: notificationEventService } = await import(
-        "./notifications/notification-event.service"
-      );
+      const { default: notificationEventService } =
+        await import("./notifications/notification-event.service");
       await notificationEventService.enqueueEvent({
         eventType,
         userId: orden.usuarioId,
@@ -108,7 +107,8 @@ export class OrdenService {
       producto.inventarioPorTalla,
     );
     const cantidadDisponible =
-      inventarioPorTalla.find((size) => size.tallaId === tallaId)?.cantidad ?? 0;
+      inventarioPorTalla.find((size) => size.tallaId === tallaId)?.cantidad ??
+      0;
 
     return {
       available: cantidadDisponible,
