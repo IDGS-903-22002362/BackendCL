@@ -116,7 +116,7 @@ export class FavoritoService {
         const producto = productoMap.get(fav.productoId);
         if (!producto) return null;
         return {
-          id: fav.id,
+          id: fav.id!,
           usuarioId: fav.usuarioId,
           createdAt: fav.createdAt,
           producto: {

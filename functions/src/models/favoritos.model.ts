@@ -5,7 +5,7 @@ import { Timestamp } from "firebase-admin/firestore";
  * Representa la relación usuario-producto en la colección 'favoritos'
  */
 export interface Favorito {
-  id?: string;            // ID del documento en Firestore
+  id: string;            // ID del documento en Firestore
   usuarioId: string;      // uid del usuario (coincide con su documento en usuariosApp)
   productoId: string;     // ID del producto
   createdAt: Timestamp;   // Cuándo se agregó a favoritos
