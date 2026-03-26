@@ -1,5 +1,7 @@
 import { Timestamp } from "firebase-admin/firestore";
-import notificationConfig from "../../config/notification.config";
+import notificationConfig, {
+  resolveNotificationTimezone,
+} from "../../config/notification.config";
 import { firestoreTienda } from "../../config/firebase";
 import {
   NotificationDeliveryRecord,
@@ -244,6 +246,10 @@ class NotificationEligibilityService {
     const preference = await notificationPreferencesService.getPreferences(
       event.userId,
     );
+    const preferenceTimezone = resolveNotificationTimezone(
+      preference.timezone,
+      notificationConfig.defaults.timezone,
+    );
 
     if (!notificationPreferencesService.isEventEnabled(preference, event.eventType)) {
       return {
@@ -251,33 +257,34 @@ class NotificationEligibilityService {
         reason: "preferences_disabled",
         devices: [],
         preference,
-        localDayKey: getNotificationDayKey(
-          new Date(),
-          preference.timezone || notificationConfig.defaults.timezone,
-        ),
-        timezone: preference.timezone || notificationConfig.defaults.timezone,
+        localDayKey: getNotificationDayKey(new Date(), preferenceTimezone),
+        timezone: preferenceTimezone,
       };
     }
 
     const devices = await deviceTokenService.getActiveTokens(event.userId);
     if (devices.length === 0) {
+      this.baseLogger.warn("notification_no_active_tokens", {
+        eventId: event.id,
+        eventType: event.eventType,
+        userId: event.userId,
+        timezone: preferenceTimezone,
+      });
+
       return {
         allowed: false,
         reason: "no_active_tokens",
         devices: [],
         preference,
-        localDayKey: getNotificationDayKey(
-          new Date(),
-          preference.timezone || notificationConfig.defaults.timezone,
-        ),
-        timezone: preference.timezone || notificationConfig.defaults.timezone,
+        localDayKey: getNotificationDayKey(new Date(), preferenceTimezone),
+        timezone: preferenceTimezone,
       };
     }
 
-    const timezone =
-      preference.timezone ||
-      devices[0]?.timezone ||
-      notificationConfig.defaults.timezone;
+    const timezone = resolveNotificationTimezone(
+      preference.timezone || devices[0]?.timezone,
+      notificationConfig.defaults.timezone,
+    );
     const now = new Date();
     const localDayKey = getNotificationDayKey(now, timezone);
 

@@ -1,4 +1,7 @@
 import { Timestamp } from "firebase-admin/firestore";
+import notificationConfig, {
+  resolveOptionalNotificationTimezone,
+} from "../../config/notification.config";
 import { DevicePushToken } from "../../models/notificacion.model";
 import logger from "../../utils/logger";
 import { notificationCollections } from "./collections";
@@ -53,7 +56,10 @@ class DeviceTokenService {
       platform: input.platform,
       enabled: true,
       locale: input.locale?.trim(),
-      timezone: input.timezone?.trim(),
+      timezone: resolveOptionalNotificationTimezone(
+        input.timezone,
+        notificationConfig.defaults.timezone,
+      ),
       appVersion: input.appVersion?.trim(),
       buildNumber: input.buildNumber?.trim(),
       lastSeenAt: now,
@@ -78,6 +84,7 @@ class DeviceTokenService {
       userId,
       deviceId: input.deviceId,
       platform: input.platform,
+      timezone: payload.timezone,
     });
 
     return {
@@ -108,7 +115,14 @@ class DeviceTokenService {
           ? { platform: input.platform }
           : {}),
         ...("locale" in input ? { locale: input.locale?.trim() } : {}),
-        ...("timezone" in input ? { timezone: input.timezone?.trim() } : {}),
+        ...("timezone" in input
+          ? {
+              timezone: resolveOptionalNotificationTimezone(
+                input.timezone,
+                notificationConfig.defaults.timezone,
+              ),
+            }
+          : {}),
         ...("appVersion" in input
           ? { appVersion: input.appVersion?.trim() }
           : {}),
@@ -125,6 +139,13 @@ class DeviceTokenService {
     );
 
     const savedSnapshot = await deviceRef.get();
+    this.baseLogger.info("device_token_updated", {
+      userId,
+      deviceId,
+      enabled:
+        "enabled" in input && input.enabled !== undefined ? input.enabled : undefined,
+    });
+
     return {
       id: savedSnapshot.id,
       ...(savedSnapshot.data() as DevicePushToken),
@@ -146,6 +167,11 @@ class DeviceTokenService {
       },
       { merge: true },
     );
+
+    this.baseLogger.info("device_token_disabled", {
+      userId,
+      deviceId,
+    });
   }
 
   async getActiveTokens(userId: string): Promise<DevicePushToken[]> {
@@ -156,6 +182,11 @@ class DeviceTokenService {
       .collection(notificationCollections.userDeviceTokens)
       .where("enabled", "==", true)
       .get();
+    if (snapshot.empty) {
+      this.baseLogger.warn("device_tokens_not_found", {
+        userId,
+      });
+    }
 
     return snapshot.docs
       .map((doc) => ({
