@@ -11,6 +11,7 @@ type MultipartImagesOptions = {
   fieldName: string;
   maxFiles: number;
   maxFileSizeBytes: number;
+  allowedMimeTypes?: string[];
 };
 
 const BYTES_PER_MB = 1024 * 1024;
@@ -20,6 +21,7 @@ export const parseMultipartImages = ({
   fieldName,
   maxFiles,
   maxFileSizeBytes,
+  allowedMimeTypes,
 }: MultipartImagesOptions) => {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const contentType = req.headers["content-type"];
@@ -110,9 +112,22 @@ export const parseMultipartImages = ({
 
       const { filename, encoding, mimeType } = info;
 
-      if (!mimeType.startsWith("image/")) {
+      const normalizedMimeType = mimeType.toLowerCase();
+      const hasAllowedMimeTypes =
+        Array.isArray(allowedMimeTypes) && allowedMimeTypes.length > 0;
+
+      if (
+        !normalizedMimeType.startsWith("image/") ||
+        (hasAllowedMimeTypes &&
+          !allowedMimeTypes.includes(normalizedMimeType))
+      ) {
         setParsingError(
-          new ApiError(400, "Solo se permiten archivos de imagen"),
+          new ApiError(
+            400,
+            hasAllowedMimeTypes
+              ? `Tipo de archivo no permitido. Tipos soportados: ${allowedMimeTypes.join(", ")}`
+              : "Solo se permiten archivos de imagen",
+          ),
         );
         stream.resume();
         return;
@@ -165,7 +180,7 @@ export const parseMultipartImages = ({
           fieldname: name,
           originalname: filename || "imagen",
           encoding,
-          mimetype: mimeType,
+          mimetype: normalizedMimeType,
           size,
           destination: path.dirname(tempFilePath),
           filename: path.basename(tempFilePath),
