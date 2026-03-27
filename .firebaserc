@@ -1,6 +1,6 @@
 {
   "projects": {
-    "default": "app-oficial-leon",
+    "default": "e-comerce-leon",
     "appoficial": "app-oficial-leon",
     "tiendacl": "e-comerce-leon"
   },
