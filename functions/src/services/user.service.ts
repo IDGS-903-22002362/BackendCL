@@ -5,6 +5,7 @@
 
 import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
+import pointsService from "./puntos.service";
 import {
   CrearUsuarioAppDTO,
   RolUsuario,
@@ -353,21 +354,7 @@ export class UserAppService {
   }
 
   async addPoints(uid: string, points: number): Promise<UsuarioApp> {
-    const snapshot = await firestoreApp
-      .collection(USUARIOSAPP_COLLECTION)
-      .where("uid", "==", uid)
-      .limit(1)
-      .get();
-    if (snapshot.empty) throw new Error("Usuario no encontrado");
-    const doc = snapshot.docs[0];
-    const userData = doc.data();
-    const nuevosPuntos = (userData.puntosActuales || 0) + points;
-    await doc.ref.update({
-      puntosActuales: nuevosPuntos,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    const updatedDoc = await doc.ref.get();
-    return { id: updatedDoc.id, ...updatedDoc.data() } as UsuarioApp;
+    return pointsService.addPoints(uid, points);
   }
 
   async reactivateUser(id: string): Promise<UsuarioApp> {
