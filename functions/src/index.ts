@@ -1,10 +1,3 @@
-import "./config/env.bootstrap";
-import { syncLigaMxData } from "./liga-mx.cron";
-import { processPointsExpiration } from "./puntos-expiracion.cron";
-
-export const ligaMxSync = syncLigaMxData;
-export const puntosExpiracionDiaria = processPointsExpiration;
-
 
 
 import "./config/env.bootstrap";
