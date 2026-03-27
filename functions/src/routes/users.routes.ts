@@ -599,6 +599,12 @@ router.get(
  */
 router.get("/me/getpuntos", authMiddleware, queryController.getMisPuntos);
 
+router.get(
+  "/me/puntos/historial",
+  authMiddleware,
+  queryController.getMiHistorialPuntos,
+);
+
 /**
  * @swagger
  * /api/usuarios/me/puntos/sumar:

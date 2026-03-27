@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
+import pointsService from "../../services/puntos.service";
 
 /**
  * Controller: Users Command (Escritura)
@@ -230,7 +231,10 @@ export const sumarPuntos = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
         const puntosASumar = 5;
-        const usuario = await userAppService.addPoints(uid, puntosASumar); // método nuevo
+        const usuario = await pointsService.addPoints(uid, puntosASumar, {
+            origen: "promo",
+            descripcion: "Bonificación automática por interacción",
+        });
         return res.status(200).json({
             success: true,
             puntos: usuario.puntosActuales,

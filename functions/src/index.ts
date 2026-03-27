@@ -1,5 +1,13 @@
 import "./config/env.bootstrap";
-import { syncAllCron } from "./jobs/sync.cron";
+import { syncLigaMxData } from "./liga-mx.cron";
+import { processPointsExpiration } from "./puntos-expiracion.cron";
+
+export const ligaMxSync = syncLigaMxData;
+export const puntosExpiracionDiaria = processPointsExpiration;
+
+
+
+import "./config/env.bootstrap";
 /**
  * FIREBASE FUNCTIONS ENTRY POINTOteooooooooo
  * ---------------------------------------------------------------------
@@ -109,4 +117,3 @@ export const campaignNotifications = enqueueCampaignNotifications;
 export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
 
-  export const syncAllData = syncAllCron;

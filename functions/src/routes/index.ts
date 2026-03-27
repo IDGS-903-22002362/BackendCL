@@ -29,6 +29,7 @@ import aiRoutes from "./ai.routes";
 import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
 import favoritosRoutes from "./favorito.routes";
+import ligaMxRoutes from "./liga-mx.routes";
 
 const router = Router();
 
@@ -54,6 +55,7 @@ router.use("/galeria", galeriaRoutes);
 router.use("/ai", aiRoutes);
 router.use("/notificaciones", notificationsRoutes);
 router.use("/favoritos", favoritosRoutes);
+router.use("/liga-mx", ligaMxRoutes);
 
 // Futuros módulos:
 
