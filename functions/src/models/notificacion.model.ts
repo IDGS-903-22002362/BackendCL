@@ -8,6 +8,7 @@ export type NotificationEventType =
   | "cart_abandoned"
   | "product_restocked"
   | "price_drop"
+  | "product_rating_reminder"
   | "inactive_user"
   | "promo_campaign"
   | "matchday_campaign"
@@ -67,6 +68,7 @@ export interface NotificationPreferenceDocument {
   cartRemindersEnabled: boolean;
   restockEnabled: boolean;
   priceDropEnabled: boolean;
+  ratingRemindersEnabled: boolean;
   marketingEnabled: boolean;
   matchdayEnabled: boolean;
   reactivationEnabled: boolean;

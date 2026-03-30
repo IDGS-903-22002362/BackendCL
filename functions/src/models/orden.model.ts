@@ -101,6 +101,7 @@ export interface Orden {
   transportista?: string; // Nombre del transportista
   costoEnvio?: number; // Costo de envío (si aplica)
   notas?: string; // Notas adicionales del cliente
+  deliveredAt?: Timestamp; // Fecha efectiva en la que la orden quedó entregada
 
   // Campos de auditoría
   createdAt: Timestamp; // Fecha de creación de la orden

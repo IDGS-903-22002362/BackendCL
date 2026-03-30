@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { promises as fs } from "fs";
 import productService from "../../services/product.service";
+import productRatingService from "../../services/product-rating.service";
 import storageService from "../../services/storage.service";
 
 /**
@@ -316,6 +317,62 @@ export const replaceSizeInventory = async (req: Request, res: Response) => {
           : statusCode === 404
             ? "Producto no encontrado"
             : "Error al actualizar inventario por talla",
+      error:
+        statusCode === 500 && error instanceof Error
+          ? error.message
+          : undefined,
+    });
+  }
+};
+
+export const rateProduct = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autenticado",
+      });
+    }
+
+    const result = await productRatingService.upsertProductRating(
+      req.params.id,
+      req.user.uid,
+      req.body.score,
+    );
+
+    return res.status(result.created ? 201 : 200).json({
+      success: true,
+      message: result.created
+        ? "Calificación registrada exitosamente"
+        : "Calificación actualizada exitosamente",
+      data: result.rating,
+    });
+  } catch (error) {
+    console.error("Error en POST /api/productos/:id/calificacion:", error);
+
+    let statusCode = 500;
+    if (error instanceof Error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("no encontrado")) {
+        statusCode = 404;
+      } else if (
+        msg.includes("solo puedes calificar") ||
+        msg.includes("entregados")
+      ) {
+        statusCode = 403;
+      }
+    }
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Producto no encontrado"
+          : statusCode === 403
+            ? error instanceof Error
+              ? error.message
+              : "No tienes permisos para calificar este producto"
+            : "Error al registrar la calificación",
       error:
         statusCode === 500 && error instanceof Error
           ? error.message

@@ -6,6 +6,7 @@ import {
   deleteImageSchema,
   updateProductStockSchema,
   replaceSizeInventorySchema,
+  rateProductSchema,
 } from "../middleware/validators/product.validator";
 import {
   createCategorySchema,
@@ -303,6 +304,7 @@ const swaggerDefinition = {
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
       ReplaceSizeInventory: zodToJsonSchema(replaceSizeInventorySchema),
+      RateProduct: zodToJsonSchema(rateProductSchema),
       CreateDetalleProducto: zodToJsonSchema(createDetalleProductoSchema),
       UpdateDetalleProducto: zodToJsonSchema(updateDetalleProductoSchema),
       CreateNews: zodToJsonSchema(createNewSchema),
@@ -665,6 +667,14 @@ const swaggerDefinition = {
             items: { type: "string", format: "uri" },
             example: ["https://storage.googleapis.com/.../jersey-001.jpg"],
           },
+          detalleIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["det_1", "det_2"],
+          },
+          ratingSummary: {
+            $ref: "#/components/schemas/ProductRatingSummary",
+          },
           activo: { type: "boolean", example: true },
           createdAt: {
             type: "string",
@@ -677,6 +687,104 @@ const swaggerDefinition = {
             example: "2024-01-20T14:20:00Z",
           },
         },
+      },
+      ProductRatingSummary: {
+        type: "object",
+        properties: {
+          average: {
+            type: "number",
+            example: 4.67,
+          },
+          count: {
+            type: "integer",
+            example: 12,
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+        required: ["average", "count"],
+      },
+      ProductRatingEligibility: {
+        type: "object",
+        properties: {
+          canRate: {
+            type: "boolean",
+            example: true,
+          },
+          reason: {
+            type: "string",
+            enum: ["eligible", "purchase_required", "not_delivered"],
+            example: "eligible",
+          },
+        },
+        required: ["canRate", "reason"],
+      },
+      ProductRatingSnapshot: {
+        type: "object",
+        nullable: true,
+        properties: {
+          score: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5,
+            example: 5,
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+      },
+      ProductRating: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "prod_123__uid_123" },
+          productId: { type: "string", example: "prod_123" },
+          userId: { type: "string", example: "uid_123" },
+          score: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5,
+            example: 4,
+          },
+          eligibleOrderId: { type: "string", example: "order_123" },
+          eligibleDeliveredAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-29T18:00:00Z",
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+      },
+      ProductDetail: {
+        allOf: [
+          { $ref: "#/components/schemas/Product" },
+          {
+            type: "object",
+            properties: {
+              ratingEligibility: {
+                $ref: "#/components/schemas/ProductRatingEligibility",
+              },
+              myRating: {
+                $ref: "#/components/schemas/ProductRatingSnapshot",
+              },
+            },
+          },
+        ],
       },
       News: {
         type: "object",
