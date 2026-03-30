@@ -36,6 +36,7 @@ export interface UsuarioApp {
   edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
   genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
+  historialPuntos?: HistorialPuntosUsuario;
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
 }
@@ -65,7 +66,34 @@ export interface MovimientoPuntos {
   origen: OrigenPuntos; // De dónde proviene el movimiento
   referencia?: string; // ID de orden, ticket, promoción, etc.
   descripcion?: string; // Descripción adicional del movimiento
+  cicloAnual?: number;
+  etiquetaCiclo?: string;
   createdAt: Timestamp; // Fecha del movimiento
+}
+
+export interface ResumenPuntosAnual {
+  ciclo: number;
+  etiqueta: string;
+  fechaInicio: Timestamp;
+  fechaFinProgramada: Timestamp;
+  fechaExpiracionAplicada: Timestamp | null;
+  saldoInicial: number;
+  puntosGanados: number;
+  puntosCanjeados: number;
+  puntosBonificados: number;
+  puntosAjustados: number;
+  puntosExpirados: number;
+  saldoAntesDeExpirar: number;
+  saldoFinal: number;
+  totalMovimientos: number;
+  ultimoMovimientoAt: Timestamp | null;
+}
+
+export interface HistorialPuntosUsuario {
+  ultimoCicloProcesado: number;
+  cicloActual: number;
+  proximaExpiracionProgramada: Timestamp;
+  resumenes: Record<string, ResumenPuntosAnual>;
 }
 
 /**

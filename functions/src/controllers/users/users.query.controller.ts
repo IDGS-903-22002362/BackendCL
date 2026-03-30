@@ -3,6 +3,7 @@ import userAppService from "../../services/user.service";
 import ordenService from "../../services/orden.service";
 import { RolUsuario } from "../../models/usuario.model";
 import { mapFirebaseError } from "../../utils/firebase-error.util";
+import pointsService from "../../services/puntos.service";
 
 /**
  * Controller: Products Query (Lectura)
@@ -76,16 +77,33 @@ export const getById = async (req: Request, res: Response) => {
 export const getMisPuntos = async (req: Request, res: Response) => {
   try {
     const uid = (req as any).user.uid;
-    const usuario = await userAppService.getUserByUid(uid); // Necesitamos este método en el servicio
-    if (!usuario) {
-      return res.status(404).json({ success: false, message: "Usuario no encontrado" });
-    }
+    const vista = await pointsService.obtenerVistaPuntosUsuario(uid, 10);
+
     return res.status(200).json({
       success: true,
-      puntos: usuario.puntosActuales,
+      puntos: vista.usuario.puntosActuales,
+      cicloActual: vista.historial.cicloActual,
+      proximaExpiracionProgramada: vista.historial.proximaExpiracionProgramada,
+      historialPuntos: vista.historial,
+      movimientosRecientes: vista.movimientosRecientes,
     });
   } catch (error) {
     console.error("Error al obtener puntos:", error);
+    return res.status(500).json({ success: false, message: "Error interno" });
+  }
+};
+
+export const getMiHistorialPuntos = async (req: Request, res: Response) => {
+  try {
+    const uid = (req as any).user.uid;
+    const vista = await pointsService.obtenerVistaPuntosUsuario(uid, 50);
+
+    return res.status(200).json({
+      success: true,
+      data: vista,
+    });
+  } catch (error) {
+    console.error("Error al obtener historial de puntos:", error);
     return res.status(500).json({ success: false, message: "Error interno" });
   }
 };
