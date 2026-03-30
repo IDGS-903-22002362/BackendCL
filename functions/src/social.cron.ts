@@ -1,8 +1,8 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { logger } from "firebase-functions";
-import { firestore } from "firebase-admin";
 
 import instagramService from "./services/instagram.service";
+import { firestoreApp } from "./config/app.firebase";
 
 const SCHEDULE_CONFIG = {
   schedule: "every 1 hours",
@@ -12,7 +12,7 @@ const SCHEDULE_CONFIG = {
 export const syncInstagramPosts = onSchedule(
   SCHEDULE_CONFIG,
   async (): Promise<void> => {
-    const db = firestore();
+    const db = firestoreApp;
 
     try {
       logger.info("Iniciando sincronización de Instagram");
