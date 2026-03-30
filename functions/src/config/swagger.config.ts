@@ -74,6 +74,7 @@ import {
   updateDeviceTokenSchema,
   updateNotificationPreferencesSchema,
 } from "../middleware/validators/notification.validator";
+import { assignUserPointsSchema } from "../middleware/validators/user-points.validator";
 import {
   createGallerySchema,
   deleteGalleryImageSchema,
@@ -437,6 +438,7 @@ const swaggerDefinition = {
       RegisterInventoryAdjustment: zodToJsonSchema(
         registerInventoryAdjustmentSchema,
       ),
+      AssignUserPoints: zodToJsonSchema(assignUserPointsSchema),
       ListInventoryMovementsQuery: zodToJsonSchema(
         listInventoryMovementsQuerySchema,
       ),

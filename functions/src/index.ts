@@ -1,5 +1,3 @@
-
-
 import "./config/env.bootstrap";
 /**
  * FIREBASE FUNCTIONS ENTRY POINTOteooooooooo
