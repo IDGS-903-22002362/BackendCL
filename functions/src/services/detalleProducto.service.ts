@@ -1,223 +1,345 @@
-// services/detalleProducto.service.ts
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
 import { DetalleProducto } from "../models/producto.model";
+import logger from "../utils/logger";
 
 const PRODUCTOS_COLLECTION = "productos";
+const detalleProductoLogger = logger.child({
+  component: "detalle-producto-service",
+});
 
-/**
- * Servicio para manejar la subcolección de detalles de un producto.
- * Cada detalle se almacena en: productos/{productoId}/detalles/{detalleId}
- * El array detalleIds en el producto padre se mantiene sincronizado.
- */
+type ProductoSnapshotLike = {
+  exists: boolean;
+  data: () => FirebaseFirestore.DocumentData | undefined;
+};
+
+export class DetalleProductoServiceError extends Error {
+  constructor(
+    public readonly code:
+      | "INVALID_ARGUMENT"
+      | "NOT_FOUND"
+      | "CONFLICT"
+      | "INTERNAL",
+    message: string,
+  ) {
+    super(message);
+    this.name = "DetalleProductoServiceError";
+  }
+}
+
 export class DetalleProductoService {
-    /**
-     * Obtiene todos los detalles de un producto.
-     * @param productoId - ID del producto padre.
-     * @returns Lista de detalles ordenados por fecha de creación (descendente).
-     */
-    async getDetallesByProducto(productoId: string): Promise<DetalleProducto[]> {
-        try {
-            const snapshot = await firestoreTienda
-                .collection(PRODUCTOS_COLLECTION)
-                .doc(productoId)
-                .collection("detalles")
-                .orderBy("createdAt", "desc") // asumiendo que agregamos createdAt
-                .get();
+  private getProductoRef(productoId: string) {
+    return firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(productoId);
+  }
 
-            const detalles: DetalleProducto[] = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-            })) as DetalleProducto[];
+  private getDetalleRef(productoId: string, detalleId: string) {
+    return this.getProductoRef(productoId).collection("detalles").doc(detalleId);
+  }
 
-            return detalles;
-        } catch (error) {
-            console.error(`Error al obtener detalles del producto ${productoId}:`, error);
-            throw new Error("Error al obtener detalles del producto");
-        }
+  private ensureValidIds(productoId: string, detalleId?: string): void {
+    if (!productoId.trim()) {
+      throw new DetalleProductoServiceError(
+        "INVALID_ARGUMENT",
+        "productoId es requerido",
+      );
     }
 
-    /**
-     * Obtiene un detalle específico por ID.
-     * @param productoId - ID del producto padre.
-     * @param detalleId - ID del detalle.
-     * @returns El detalle o null si no existe.
-     */
-    async getDetalleById(productoId: string, detalleId: string): Promise<DetalleProducto | null> {
-        try {
-            const doc = await firestoreTienda
-                .collection(PRODUCTOS_COLLECTION)
-                .doc(productoId)
-                .collection("detalles")
-                .doc(detalleId)
-                .get();
+    if (detalleId !== undefined && !detalleId.trim()) {
+      throw new DetalleProductoServiceError(
+        "INVALID_ARGUMENT",
+        "detalleId es requerido",
+      );
+    }
+  }
 
-            if (!doc.exists) {
-                return null;
-            }
-
-            return {
-                id: doc.id,
-                ...doc.data(),
-            } as DetalleProducto;
-        } catch (error) {
-            console.error(`Error al obtener detalle ${detalleId} del producto ${productoId}:`, error);
-            throw new Error("Error al obtener el detalle");
-        }
+  private ensureProductoDisponible(
+    productoId: string,
+    productoDoc: ProductoSnapshotLike,
+  ): FirebaseFirestore.DocumentData {
+    if (!productoDoc.exists) {
+      throw new DetalleProductoServiceError(
+        "NOT_FOUND",
+        `Producto con ID ${productoId} no encontrado`,
+      );
     }
 
-    /**
-     * Crea un nuevo detalle para un producto.
-     * Se ejecuta en una transacción para asegurar que el producto exista y se actualice el array detalleIds.
-     * @param productoId - ID del producto padre.
-     * @param data - Datos del detalle (descripción).
-     * @returns El detalle creado con su ID.
-     */
-    async createDetalle(
-        productoId: string,
-        data: { descripcion: string }
-    ): Promise<DetalleProducto> {
-        const productoRef = firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(productoId);
-        const now = admin.firestore.Timestamp.now();
-
-        try {
-            const result = await firestoreTienda.runTransaction(async (transaction) => {
-                // Verificar que el producto existe y está activo
-                const productoDoc = await transaction.get(productoRef);
-                if (!productoDoc.exists) {
-                    throw new Error(`Producto con ID ${productoId} no encontrado`);
-                }
-                const productoData = productoDoc.data();
-                if (productoData?.activo === false) {
-                    throw new Error(`El producto con ID ${productoId} está inactivo y no puede recibir detalles`);
-                }
-
-                // Crear referencia al nuevo detalle (subcolección)
-                const detalleRef = productoRef.collection("detalles").doc();
-                const nuevoDetalle: Omit<DetalleProducto, "id"> = {
-                    descripcion: data.descripcion,
-                    productoId,
-                    createdAt: now,
-                    updatedAt: now,
-                };
-
-                transaction.set(detalleRef, nuevoDetalle);
-
-                // Actualizar el array detalleIds en el producto
-                const currentDetalleIds = productoData?.detalleIds || [];
-                const newDetalleIds = [...currentDetalleIds, detalleRef.id];
-                transaction.update(productoRef, {
-                    detalleIds: newDetalleIds,
-                    updatedAt: now,
-                });
-
-                return {
-                    id: detalleRef.id,
-                    ...nuevoDetalle,
-                } as DetalleProducto;
-            });
-
-            return result;
-        } catch (error) {
-            console.error(`Error al crear detalle para producto ${productoId}:`, error);
-            throw new Error(
-                error instanceof Error ? error.message : "Error al crear el detalle"
-            );
-        }
+    const productoData = productoDoc.data();
+    if (!productoData) {
+      throw new DetalleProductoServiceError(
+        "NOT_FOUND",
+        `Producto con ID ${productoId} no encontrado`,
+      );
     }
 
-    /**
-     * Actualiza un detalle existente.
-     * No modifica el array detalleIds del producto, solo la descripción.
-     * @param productoId - ID del producto padre.
-     * @param detalleId - ID del detalle.
-     * @param data - Datos a actualizar (descripción opcional).
-     * @returns El detalle actualizado.
-     */
-    async updateDetalle(
-        productoId: string,
-        detalleId: string,
-        data: { descripcion?: string }
-    ): Promise<DetalleProducto> {
-        const detalleRef = firestoreTienda
-            .collection(PRODUCTOS_COLLECTION)
-            .doc(productoId)
-            .collection("detalles")
-            .doc(detalleId);
-
-        const now = admin.firestore.Timestamp.now();
-
-        try {
-            const detalleDoc = await detalleRef.get();
-            if (!detalleDoc.exists) {
-                throw new Error(`Detalle con ID ${detalleId} no encontrado en el producto ${productoId}`);
-            }
-
-            const updatePayload: any = {
-                updatedAt: now,
-            };
-            if (data.descripcion !== undefined) {
-                updatePayload.descripcion = data.descripcion;
-            }
-
-            await detalleRef.update(updatePayload);
-
-            const updatedDoc = await detalleRef.get();
-            return {
-                id: updatedDoc.id,
-                ...updatedDoc.data(),
-            } as DetalleProducto;
-        } catch (error) {
-            console.error(`Error al actualizar detalle ${detalleId}:`, error);
-            throw new Error(
-                error instanceof Error ? error.message : "Error al actualizar el detalle"
-            );
-        }
+    if (productoData.activo === false) {
+      throw new DetalleProductoServiceError(
+        "NOT_FOUND",
+        `Producto con ID ${productoId} no encontrado`,
+      );
     }
 
-    /**
-     * Elimina un detalle y actualiza el array detalleIds del producto.
-     * Se ejecuta en transacción.
-     * @param productoId - ID del producto padre.
-     * @param detalleId - ID del detalle.
-     */
-    async deleteDetalle(productoId: string, detalleId: string): Promise<void> {
-        const productoRef = firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(productoId);
-        const detalleRef = productoRef.collection("detalles").doc(detalleId);
-        const now = admin.firestore.Timestamp.now();
+    return productoData;
+  }
 
-        try {
-            await firestoreTienda.runTransaction(async (transaction) => {
-                // 1 Lecturas: obtener ambos documentos primero
-                const detalleDoc = await transaction.get(detalleRef);
-                const productoDoc = await transaction.get(productoRef);
+  private normalizeDetalle(
+    detalleId: string,
+    productoId: string,
+    data: FirebaseFirestore.DocumentData | undefined,
+  ): DetalleProducto {
+    return {
+      id: detalleId,
+      descripcion: String(data?.descripcion ?? ""),
+      productoId,
+      createdAt: data?.createdAt,
+      updatedAt: data?.updatedAt,
+    };
+  }
 
-                // Validar existencia
-                if (!detalleDoc.exists) {
-                    throw new Error(`Detalle con ID ${detalleId} no encontrado en el producto ${productoId}`);
-                }
-                if (!productoDoc.exists) {
-                    throw new Error(`Producto con ID ${productoId} no encontrado`);
-                }
+  async getDetallesByProducto(productoId: string): Promise<DetalleProducto[]> {
+    try {
+      this.ensureValidIds(productoId);
+      const productoRef = this.getProductoRef(productoId);
+      const productoDoc = await productoRef.get();
+      this.ensureProductoDisponible(productoId, productoDoc);
 
-                // 2 Escrituras: eliminar detalle y actualizar producto
-                transaction.delete(detalleRef);
+      const snapshot = await productoRef
+        .collection("detalles")
+        .orderBy("createdAt", "desc")
+        .get();
 
-                const productoData = productoDoc.data();
-                const currentDetalleIds = productoData?.detalleIds || [];
-                const newDetalleIds = currentDetalleIds.filter((id: string) => id !== detalleId);
-                transaction.update(productoRef, {
-                    detalleIds: newDetalleIds,
-                    updatedAt: now,
-                });
-            });
-        } catch (error) {
-            console.error(`Error al eliminar detalle ${detalleId}:`, error);
-            throw new Error(
-                error instanceof Error ? error.message : "Error al eliminar el detalle"
-            );
-        }
+      return snapshot.docs.map((doc) =>
+        this.normalizeDetalle(doc.id, productoId, doc.data()),
+      );
+    } catch (error) {
+      detalleProductoLogger.error("detalle_list_failed", {
+        productoId,
+        errorCode:
+          error instanceof DetalleProductoServiceError ? error.code : "INTERNAL",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+      if (error instanceof DetalleProductoServiceError) {
+        throw error;
+      }
+
+      throw new DetalleProductoServiceError(
+        "INTERNAL",
+        "Error al obtener detalles del producto",
+      );
     }
+  }
+
+  async getDetalleById(
+    productoId: string,
+    detalleId: string,
+  ): Promise<DetalleProducto | null> {
+    try {
+      this.ensureValidIds(productoId, detalleId);
+      const productoRef = this.getProductoRef(productoId);
+      const productoDoc = await productoRef.get();
+      this.ensureProductoDisponible(productoId, productoDoc);
+
+      const detalleDoc = await productoRef.collection("detalles").doc(detalleId).get();
+      if (!detalleDoc.exists) {
+        return null;
+      }
+
+      const detalleData = detalleDoc.data();
+      if (detalleData?.productoId && detalleData.productoId !== productoId) {
+        throw new DetalleProductoServiceError(
+          "CONFLICT",
+          `Detalle con ID ${detalleId} no pertenece al producto ${productoId}`,
+        );
+      }
+
+      return this.normalizeDetalle(detalleDoc.id, productoId, detalleData);
+    } catch (error) {
+      detalleProductoLogger.error("detalle_get_failed", {
+        productoId,
+        detalleId,
+        errorCode:
+          error instanceof DetalleProductoServiceError ? error.code : "INTERNAL",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+      if (error instanceof DetalleProductoServiceError) {
+        throw error;
+      }
+
+      throw new DetalleProductoServiceError("INTERNAL", "Error al obtener el detalle");
+    }
+  }
+
+  async createDetalle(
+    productoId: string,
+    data: { descripcion: string },
+  ): Promise<DetalleProducto> {
+    this.ensureValidIds(productoId);
+    const productoRef = this.getProductoRef(productoId);
+    const now = admin.firestore.Timestamp.now();
+
+    try {
+      return await firestoreTienda.runTransaction(async (transaction) => {
+        const productoDoc = await transaction.get(productoRef);
+        const productoData = this.ensureProductoDisponible(productoId, productoDoc);
+
+        const detalleRef = productoRef.collection("detalles").doc();
+        const nuevoDetalle: Omit<DetalleProducto, "id"> = {
+          descripcion: data.descripcion,
+          productoId,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        transaction.set(detalleRef, nuevoDetalle);
+
+        const currentDetalleIds = Array.isArray(productoData.detalleIds)
+          ? productoData.detalleIds.filter(
+              (id: unknown): id is string => typeof id === "string",
+            )
+          : [];
+        const newDetalleIds = Array.from(new Set([...currentDetalleIds, detalleRef.id]));
+
+        transaction.update(productoRef, {
+          detalleIds: newDetalleIds,
+          updatedAt: now,
+        });
+
+        return {
+          id: detalleRef.id,
+          ...nuevoDetalle,
+        };
+      });
+    } catch (error) {
+      detalleProductoLogger.error("detalle_create_failed", {
+        productoId,
+        errorCode:
+          error instanceof DetalleProductoServiceError ? error.code : "INTERNAL",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+      if (error instanceof DetalleProductoServiceError) {
+        throw error;
+      }
+
+      throw new DetalleProductoServiceError("INTERNAL", "Error al crear el detalle");
+    }
+  }
+
+  async updateDetalle(
+    productoId: string,
+    detalleId: string,
+    data: { descripcion?: string },
+  ): Promise<DetalleProducto> {
+    this.ensureValidIds(productoId, detalleId);
+    const productoRef = this.getProductoRef(productoId);
+    const detalleRef = this.getDetalleRef(productoId, detalleId);
+    const now = admin.firestore.Timestamp.now();
+
+    try {
+      const productoDoc = await productoRef.get();
+      this.ensureProductoDisponible(productoId, productoDoc);
+
+      const detalleDoc = await detalleRef.get();
+      if (!detalleDoc.exists) {
+        throw new DetalleProductoServiceError(
+          "NOT_FOUND",
+          `Detalle con ID ${detalleId} no encontrado en el producto ${productoId}`,
+        );
+      }
+
+      const detalleData = detalleDoc.data();
+      if (detalleData?.productoId && detalleData.productoId !== productoId) {
+        throw new DetalleProductoServiceError(
+          "CONFLICT",
+          `Detalle con ID ${detalleId} no pertenece al producto ${productoId}`,
+        );
+      }
+
+      const updatePayload: { updatedAt: unknown; descripcion?: string } = {
+        updatedAt: now,
+      };
+
+      if (data.descripcion !== undefined) {
+        updatePayload.descripcion = data.descripcion;
+      }
+
+      await detalleRef.update(updatePayload);
+
+      const updatedDoc = await detalleRef.get();
+      return this.normalizeDetalle(updatedDoc.id, productoId, updatedDoc.data());
+    } catch (error) {
+      detalleProductoLogger.error("detalle_update_failed", {
+        productoId,
+        detalleId,
+        errorCode:
+          error instanceof DetalleProductoServiceError ? error.code : "INTERNAL",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+      if (error instanceof DetalleProductoServiceError) {
+        throw error;
+      }
+
+      throw new DetalleProductoServiceError(
+        "INTERNAL",
+        "Error al actualizar el detalle",
+      );
+    }
+  }
+
+  async deleteDetalle(productoId: string, detalleId: string): Promise<void> {
+    this.ensureValidIds(productoId, detalleId);
+    const productoRef = this.getProductoRef(productoId);
+    const detalleRef = this.getDetalleRef(productoId, detalleId);
+    const now = admin.firestore.Timestamp.now();
+
+    try {
+      await firestoreTienda.runTransaction(async (transaction) => {
+        const detalleDoc = await transaction.get(detalleRef);
+        const productoDoc = await transaction.get(productoRef);
+        const productoData = this.ensureProductoDisponible(productoId, productoDoc);
+
+        if (!detalleDoc.exists) {
+          throw new DetalleProductoServiceError(
+            "NOT_FOUND",
+            `Detalle con ID ${detalleId} no encontrado en el producto ${productoId}`,
+          );
+        }
+
+        const detalleData = detalleDoc.data();
+        if (detalleData?.productoId && detalleData.productoId !== productoId) {
+          throw new DetalleProductoServiceError(
+            "CONFLICT",
+            `Detalle con ID ${detalleId} no pertenece al producto ${productoId}`,
+          );
+        }
+
+        transaction.delete(detalleRef);
+
+        const currentDetalleIds = Array.isArray(productoData.detalleIds)
+          ? productoData.detalleIds.filter(
+              (id: unknown): id is string => typeof id === "string",
+            )
+          : [];
+        const newDetalleIds = currentDetalleIds.filter((id) => id !== detalleId);
+
+        transaction.update(productoRef, {
+          detalleIds: newDetalleIds,
+          updatedAt: now,
+        });
+      });
+    } catch (error) {
+      detalleProductoLogger.error("detalle_delete_failed", {
+        productoId,
+        detalleId,
+        errorCode:
+          error instanceof DetalleProductoServiceError ? error.code : "INTERNAL",
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+      if (error instanceof DetalleProductoServiceError) {
+        throw error;
+      }
+
+      throw new DetalleProductoServiceError("INTERNAL", "Error al eliminar el detalle");
+    }
+  }
 }
 
 export default new DetalleProductoService();

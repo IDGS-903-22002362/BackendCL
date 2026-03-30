@@ -85,6 +85,7 @@ import {
   createDetalleProductoSchema,
   updateDetalleProductoSchema,
 } from "../middleware/validators/detalleProducto.validator";
+import { createFavoritoSchema } from "../middleware/validators/favorito.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -158,6 +159,10 @@ const swaggerDefinition = {
     {
       name: "Users",
       description: "Gestión de usuarios de la aplicación",
+    },
+    {
+      name: "Favoritos",
+      description: "Favoritos del usuario autenticado",
     },
     {
       name: "Orders",
@@ -307,6 +312,7 @@ const swaggerDefinition = {
       RateProduct: zodToJsonSchema(rateProductSchema),
       CreateDetalleProducto: zodToJsonSchema(createDetalleProductoSchema),
       UpdateDetalleProducto: zodToJsonSchema(updateDetalleProductoSchema),
+      CreateFavorito: zodToJsonSchema(createFavoritoSchema),
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
@@ -776,6 +782,12 @@ const swaggerDefinition = {
           {
             type: "object",
             properties: {
+              isFavorito: {
+                type: "boolean",
+                description:
+                  "Se incluye solo cuando la petición viene autenticada",
+                example: true,
+              },
               ratingEligibility: {
                 $ref: "#/components/schemas/ProductRatingEligibility",
               },
@@ -823,6 +835,54 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
+      FavoritoProductSummary: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "prod_12345" },
+          clave: { type: "string", example: "JERSEY-2026-H" },
+          descripcion: {
+            type: "string",
+            example: "Jersey Oficial Local 2026",
+          },
+          precioPublico: { type: "number", example: 1299.99 },
+          imagenes: {
+            type: "array",
+            items: { type: "string", format: "uri" },
+            example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
+          },
+        },
+        required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
+      },
+      Favorito: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          productoId: { type: "string", example: "prod_12345" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+        },
+        required: ["id", "usuarioId", "productoId", "createdAt"],
+      },
+      FavoritoConProducto: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+          producto: {
+            $ref: "#/components/schemas/FavoritoProductSummary",
+          },
+        },
+        required: ["id", "usuarioId", "createdAt", "producto"],
+      },
       },
       DetalleProducto: {
         type: "object",

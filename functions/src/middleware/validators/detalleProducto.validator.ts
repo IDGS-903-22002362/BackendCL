@@ -31,4 +31,7 @@ export const updateDetalleProductoSchema = z
             .max(500, "La descripción no puede exceder 500 caracteres")
             .optional(),
     })
-    .strict();
+    .strict()
+    .refine((data) => Object.keys(data).length > 0, {
+        message: "Debes enviar al menos un campo para actualizar el detalle",
+    });
