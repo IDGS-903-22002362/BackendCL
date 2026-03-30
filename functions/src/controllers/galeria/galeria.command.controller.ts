@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import galleryService from "../../services/galeria.service";
-import storageService from "../../services/storage.service";
+import storageAppService from "../../services/storageApp.service";
 import { firestoreApp } from "../../config/app.firebase";
 import { deleteGalleryImageSchema, deleteGalleryVideoSchema } from "../../middleware/validators/gallery.validator";
 
@@ -58,7 +58,7 @@ export const uploadImages = async (req: Request, res: Response): Promise<Respons
             originalName: file.originalname
         }));
 
-        const urls = await storageService.uploadMultipleFiles(
+        const urls = await storageAppService.uploadMultipleFiles(
             imagesData,
             "galeria"
         );
@@ -107,7 +107,7 @@ export const uploadVideos = async (req: Request, res: Response): Promise<Respons
             originalName: file.originalname
         }));
 
-        const urls = await storageService.uploadMultipleFiles(
+        const urls = await storageAppService.uploadMultipleFiles(
             videosData,
             "reels"
         );

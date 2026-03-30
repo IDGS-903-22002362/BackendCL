@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import newService from "../../services/new.service";
-import storageService from "../../services/storage.service";
+import storageAppService from "../../services/storageApp.service";
 import instagramService from "../../services/instagram.service";
 import { firestoreApp } from "../../config/app.firebase";
 import { mapFirebaseError } from "../../utils/firebase-error.util";
@@ -135,7 +135,7 @@ export const uploadImages = async (req: Request, res: Response) => {
       originalName: file.originalname,
     }));
 
-    const urls = await storageService.uploadMultipleFiles(
+    const urls = await storageAppService.uploadMultipleFiles(
       imagenesData,
       "noticias",
     );
@@ -197,7 +197,7 @@ export const deleteImage = async (req: Request, res: Response) => {
       });
     }
 
-    await storageService.deleteFile(imageUrl);
+    await storageAppService.deleteFile(imageUrl);
     const imagenesActualizadas = imagenes.filter((url) => url !== imageUrl);
     await newService.updateNew(id, { imagenes: imagenesActualizadas });
 

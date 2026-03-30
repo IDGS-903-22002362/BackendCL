@@ -504,6 +504,11 @@ export const normalizarDetallePartido = (
   narracionRaw: Record<string, unknown>,
   sincronizadoEn: string,
 ): DetallePartidoLigaMxDoc => {
+  const alineacionLocal = alineacionesRaw.local as Record<string, unknown> | undefined;
+  const alineacionVisita =
+    (alineacionesRaw.visita as Record<string, unknown> | undefined) ||
+    (alineacionesRaw.visitante as Record<string, unknown> | undefined);
+
   const payloadSinHash = {
     id: partido.id,
     idPartido: partido.idPartido,
@@ -511,8 +516,8 @@ export const normalizarDetallePartido = (
     temporadaActual: partido.temporadaActual,
     torneoActual: partido.torneoActual,
     alineaciones: {
-      local: normalizarLadoAlineacion(alineacionesRaw.local as Record<string, unknown>),
-      visita: normalizarLadoAlineacion(alineacionesRaw.visita as Record<string, unknown>),
+      local: normalizarLadoAlineacion(alineacionLocal),
+      visita: normalizarLadoAlineacion(alineacionVisita),
     },
     narracion: {
       tiempo: aTextoNullable(narracionRaw.time),
