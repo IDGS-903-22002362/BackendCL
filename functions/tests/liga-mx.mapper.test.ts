@@ -1,5 +1,7 @@
+import { describe, expect, it } from "@jest/globals";
 import {
   construirContextoActual,
+  normalizarDetallePartido,
   normalizarEventoNarracion,
   normalizarJugadorPlantilla,
   normalizarPartidoCalendario,
@@ -150,5 +152,84 @@ describe("liga-mx mapper", () => {
     expect(player.posicion).toBe("Portero");
     expect(event.comentario).toBe("Final del Partido");
     expect(event.videoDisponible).toBe(false);
+  });
+
+  it("maps visitor lineup data when the API uses the visitante key", () => {
+    const partido = normalizarPartidoCalendario(
+      {
+        idPartido: 151216,
+        idDivision: 1,
+        division: "LIGA MX",
+        idTemporada: 76,
+        temporada: "2025-2026",
+        idTorneo: 2,
+        torneo: "Clausura",
+        idClubLocal: 9,
+        clubLocal: "León",
+        idClubVisita: 12566,
+        clubVisita: "Cruz Azul",
+      },
+      "varonil",
+      "2026-03-27T12:00:00.000Z",
+    );
+
+    const detalle = normalizarDetallePartido(
+      partido,
+      {
+        local: {
+          titulares: [
+            {
+              idJugador: 1,
+              nombreJugador: "Local",
+              apellidoPaterno: "Uno",
+              numeroCamiseta: 9,
+              posicion: "Delantero",
+            },
+          ],
+          suplentes: [],
+          cuerpotecnico: [],
+        },
+        visitante: {
+          titulares: [
+            {
+              idJugador: 2,
+              nombreJugador: "Visitante",
+              apellidoPaterno: "Uno",
+              numeroCamiseta: 10,
+              posicion: "Medio",
+            },
+          ],
+          suplentes: [
+            {
+              idJugador: 3,
+              nombreJugador: "Visitante",
+              apellidoPaterno: "Suplente",
+              numeroCamiseta: 18,
+              posicion: "Defensa",
+            },
+          ],
+          cuerpotecnico: [
+            {
+              idCuerpoTecnico: 4,
+              nombreCuerpoTecnico: "DT",
+              apellidoPaterno: "Visitante",
+              posicion: "Director Técnico",
+              siglasCT: "DT",
+            },
+          ],
+        },
+      },
+      {
+        time: "90+3",
+        coordenadas: [],
+      },
+      "2026-03-27T12:00:00.000Z",
+    );
+
+    expect(detalle.alineaciones.local.titulares).toHaveLength(1);
+    expect(detalle.alineaciones.visita.titulares).toHaveLength(1);
+    expect(detalle.alineaciones.visita.suplentes).toHaveLength(1);
+    expect(detalle.alineaciones.visita.cuerpoTecnico).toHaveLength(1);
+    expect(detalle.alineaciones.visita.titulares[0]?.nombreCompleto).toContain("Visitante");
   });
 });
