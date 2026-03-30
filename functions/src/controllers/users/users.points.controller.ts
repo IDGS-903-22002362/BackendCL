@@ -4,11 +4,23 @@ import pointsService from "../../services/puntos.service";
 export const assignPoints = async (req: Request, res: Response) => {
 	try {
 		const { id } = req.params;
-		const { points } = req.body as { points: number };
+		const {
+			points,
+			descripcion,
+			origenId,
+		} = req.body as {
+			points: number;
+			descripcion?: string;
+			origenId?: string;
+		};
+
+		const descripcionMovimiento = descripcion?.trim() || "Asignacion manual de puntos";
+		const origenMovimientoId = origenId?.trim() || "admin-api";
 
 		const usuario = await pointsService.addPoints(id, points, {
 			origen: "admin",
-			descripcion: "Asignacion manual de puntos",
+			origenId: origenMovimientoId,
+			descripcion: descripcionMovimiento,
 		});
 
 		return res.status(200).json({
@@ -18,6 +30,8 @@ export const assignPoints = async (req: Request, res: Response) => {
 				id: usuario.id ?? id,
 				puntosAsignados: points,
 				puntosActuales: usuario.puntosActuales,
+				descripcion: descripcionMovimiento,
+				origenId: origenMovimientoId,
 			},
 		});
 	} catch (error) {

@@ -634,6 +634,8 @@ router.get(
  *               summary: Asignar puntos manualmente
  *               value:
  *                 points: 120
+ *                 descripcion: Ajuste por incidencia resuelta
+ *                 origenId: crm-club-leon
  *     responses:
  *       200:
  *         description: Puntos asignados exitosamente
@@ -660,6 +662,12 @@ router.get(
  *                     puntosActuales:
  *                       type: number
  *                       example: 450
+ *                     descripcion:
+ *                       type: string
+ *                       example: Ajuste por incidencia resuelta
+ *                     origenId:
+ *                       type: string
+ *                       example: crm-club-leon
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  *       404:
