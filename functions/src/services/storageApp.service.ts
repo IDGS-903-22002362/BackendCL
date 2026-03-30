@@ -3,7 +3,7 @@ import { storageAppOficial } from "../config/app.firebase";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
 
-//apunta hacia el proyecto de app-oficial-leon.
+//apunta hacia el proyecto de app-oficial-leon, para almacenar las imagenes de noticias, galería, etc.
 export class StorageNoticiasService {
     private bucket = storageAppOficial.bucket();
 
