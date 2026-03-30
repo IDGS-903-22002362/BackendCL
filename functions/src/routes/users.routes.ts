@@ -8,13 +8,16 @@ import { Router } from "express";
 import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
+import * as pointsController from "../controllers/users/users.points.controller";
 import { authMiddleware } from "../utils/middlewares";
 import {
+  validateBody,
   validateParams,
   validateQuery,
 } from "../middleware/validation.middleware";
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
+import { assignUserPointsSchema } from "../middleware/validators/user-points.validator";
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
 const router = Router();
 
@@ -603,6 +606,76 @@ router.get(
   "/me/puntos/historial",
   authMiddleware,
   queryController.getMiHistorialPuntos,
+);
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/puntos/asignar:
+ *   post:
+ *     summary: Asignar puntos manualmente a un usuario
+ *     description: Agrega una cantidad de puntos al saldo actual del usuario indicado por su ID.
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del usuario en la coleccion usuariosApp
+ *         schema:
+ *           type: string
+ *           example: "uid_usuario_123"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AssignUserPoints'
+ *           examples:
+ *             asignacionManual:
+ *               summary: Asignar puntos manualmente
+ *               value:
+ *                 points: 120
+ *     responses:
+ *       200:
+ *         description: Puntos asignados exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Puntos asignados exitosamente
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "uid_usuario_123"
+ *                     puntosAsignados:
+ *                       type: number
+ *                       example: 120
+ *                     puntosActuales:
+ *                       type: number
+ *                       example: 450
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       404:
+ *         description: Usuario no encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/:id/puntos/asignar",
+  validateParams(idParamSchema),
+  validateBody(assignUserPointsSchema),
+  pointsController.assignPoints,
 );
 
 /**
