@@ -174,6 +174,7 @@ router.get(
  *       Si se envía un token JWT válido, la respuesta puede incluir:
  *       - `ratingEligibility`: si el usuario puede calificar el producto
  *       - `myRating`: la calificación actual del usuario para ese producto
+ *       - `isFavorito`: si el producto ya está marcado como favorito por el usuario
  *     tags: [Products]
  *     parameters:
  *       - in: path

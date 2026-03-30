@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import favoritoService from "../../services/favorito.service";
 import productService from "../../services/product.service";
 import productRatingService from "../../services/product-rating.service";
 
@@ -37,10 +38,11 @@ export const getById = async (req: Request, res: Response) => {
     }
 
     const userId = typeof req.user?.uid === "string" ? req.user.uid : undefined;
-    const ratingContext = userId
+    const userContext = userId
       ? await Promise.all([
           productRatingService.getRatingEligibility(id, userId),
           productRatingService.getUserRating(id, userId),
+          favoritoService.isFavorito(userId, id),
         ])
       : null;
 
@@ -48,10 +50,11 @@ export const getById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...producto,
-        ...(ratingContext
+        ...(userContext
           ? {
-              ratingEligibility: ratingContext[0],
-              myRating: ratingContext[1],
+              ratingEligibility: userContext[0],
+              myRating: userContext[1],
+              isFavorito: userContext[2],
             }
           : {}),
       },

@@ -43,8 +43,35 @@ router.use(authMiddleware);
  *     responses:
  *       200:
  *         description: Lista de favoritos con datos de productos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 count:
+ *                   type: integer
+ *                   example: 2
+ *                 meta:
+ *                   type: object
+ *                   properties:
+ *                     limit:
+ *                       type: integer
+ *                       example: 20
+ *                     offset:
+ *                       type: integer
+ *                       example: 0
+ *                     returned:
+ *                       type: integer
+ *                       example: 2
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/FavoritoConProducto'
  *       401:
- *         description: No autenticado
+ *         $ref: '#/components/responses/401Unauthorized'
  */
 router.get("/", validateQuery(listFavoritosQuerySchema), queryController.getFavoritos);
 
@@ -61,19 +88,32 @@ router.get("/", validateQuery(listFavoritosQuerySchema), queryController.getFavo
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - productoId
- *             properties:
- *               productoId:
- *                 type: string
+ *             $ref: '#/components/schemas/CreateFavorito'
  *     responses:
  *       201:
  *         description: Producto agregado a favoritos
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: "Producto agregado a favoritos"
+ *                 data:
+ *                   $ref: '#/components/schemas/Favorito'
+ *       200:
+ *         description: Producto ya estaba en favoritos
  *       400:
- *         description: Datos inválidos o producto no existe
+ *         $ref: '#/components/responses/400BadRequest'
  *       401:
- *         description: No autenticado
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       409:
+ *         description: Producto inactivo o no elegible para favoritos
  */
 router.post("/", validateBody(createFavoritoSchema), commandController.createFavorito);
 
@@ -95,9 +135,9 @@ router.post("/", validateBody(createFavoritoSchema), commandController.createFav
  *       200:
  *         description: Producto eliminado de favoritos
  *       401:
- *         description: No autenticado
+ *         $ref: '#/components/responses/401Unauthorized'
  *       404:
- *         description: El producto no está en favoritos
+ *         $ref: '#/components/responses/404NotFound'
  */
 router.delete(
   "/:productoId",
@@ -122,8 +162,21 @@ router.delete(
  *     responses:
  *       200:
  *         description: Indica si el producto es favorito
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     esFavorito:
+ *                       type: boolean
+ *                       example: true
  *       401:
- *         description: No autenticado
+ *         $ref: '#/components/responses/401Unauthorized'
  */
 router.get(
   "/check/:productoId",
