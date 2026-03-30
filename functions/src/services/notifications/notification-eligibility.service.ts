@@ -14,6 +14,7 @@ import logger from "../../utils/logger";
 import { notificationCollections } from "./collections";
 import deviceTokenService from "./device-token.service";
 import notificationPreferencesService from "./notification-preferences.service";
+import productRatingService from "../product-rating.service";
 import notificationUserContextService from "./user-context.service";
 import {
   getNotificationDayKey,
@@ -141,6 +142,52 @@ class NotificationEligibilityService {
           if (Number.isFinite(expectedPrice) && product.precioPublico > expectedPrice) {
             return { allowed: false, reason: "price_not_current" };
           }
+        }
+
+        return { allowed: true };
+      }
+      case "product_rating_reminder": {
+        const [orderSnapshot, productSnapshot] = await Promise.all([
+          firestoreTienda
+            .collection(ORDENES_COLLECTION)
+            .doc(event.orderId || "")
+            .get(),
+          firestoreTienda
+            .collection(PRODUCTOS_COLLECTION)
+            .doc(event.productId || "")
+            .get(),
+        ]);
+
+        if (!orderSnapshot.exists) {
+          return { allowed: false, reason: "order_not_found" };
+        }
+
+        if (!productSnapshot.exists) {
+          return { allowed: false, reason: "product_not_found" };
+        }
+
+        const order = orderSnapshot.data() as Orden;
+        if (order.estado !== EstadoOrden.ENTREGADA) {
+          return { allowed: false, reason: "order_not_delivered" };
+        }
+
+        if (order.usuarioId !== event.userId) {
+          return { allowed: false, reason: "order_not_owned" };
+        }
+
+        const containsProduct = Array.isArray(order.items)
+          ? order.items.some((item) => item.productoId === event.productId)
+          : false;
+        if (!containsProduct) {
+          return { allowed: false, reason: "product_not_in_order" };
+        }
+
+        const alreadyRated = await productRatingService.hasUserRatedProduct(
+          event.productId || "",
+          event.userId,
+        );
+        if (alreadyRated) {
+          return { allowed: false, reason: "product_already_rated" };
         }
 
         return { allowed: true };

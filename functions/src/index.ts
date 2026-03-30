@@ -21,6 +21,7 @@ import {
   enqueueAbandonedCartNotifications,
   enqueueCampaignNotifications,
   enqueueInactiveUserNotifications,
+  enqueueProductRatingReminderNotifications,
   enqueueProbableRepurchaseNotifications,
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
@@ -73,6 +74,8 @@ export const api = onRequest(
       "NOTIFICATIONS_CART_ABANDONED_MINUTES",
       "NOTIFICATIONS_CART_COOLDOWN_HOURS",
       "NOTIFICATIONS_PRICE_DROP_COOLDOWN_DAYS",
+      "NOTIFICATIONS_RATING_REMINDER_DELAY_HOURS",
+      "NOTIFICATIONS_RATING_REMINDER_LOOKBACK_DAYS",
       "NOTIFICATIONS_PRODUCT_INTEREST_LOOKBACK_DAYS",
       "NOTIFICATIONS_ORDER_LOOKBACK_DAYS",
       "NOTIFICATIONS_INACTIVE_USER_DAYS",
@@ -82,6 +85,7 @@ export const api = onRequest(
       "NOTIFICATIONS_INACTIVE_USERS_BATCH_SIZE",
       "NOTIFICATIONS_CAMPAIGN_BATCH_SIZE",
       "NOTIFICATIONS_REPURCHASE_BATCH_SIZE",
+      "NOTIFICATIONS_RATING_REMINDER_BATCH_SIZE",
       "AI_NOTIFICATION_PROMPT_VERSION",
       "AI_STORAGE_BUCKET",
       "GCS_TRYON_BUCKET",
@@ -107,3 +111,5 @@ export const inactiveUserNotifications = enqueueInactiveUserNotifications;
 export const campaignNotifications = enqueueCampaignNotifications;
 export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
+export const productRatingReminderNotifications =
+  enqueueProductRatingReminderNotifications;

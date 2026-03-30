@@ -396,3 +396,16 @@ export const replaceSizeInventorySchema = z
       .optional(),
   })
   .strict();
+
+export const rateProductSchema = z
+  .object({
+    score: z
+      .number({
+        required_error: "La calificación es requerida",
+        invalid_type_error: "La calificación debe ser un número",
+      })
+      .int("La calificación debe ser un número entero")
+      .min(1, "La calificación mínima es 1")
+      .max(5, "La calificación máxima es 5"),
+  })
+  .strict();

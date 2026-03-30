@@ -27,6 +27,12 @@ export interface DetalleProducto {
   updatedAt?: Timestamp;
 }
 
+export interface ProductRatingSummary {
+  average: number;
+  count: number;
+  updatedAt?: Timestamp;
+}
+
 /**
  * Interface principal de Producto
  * Representa un artículo en la colección 'productos' de Firestore
@@ -47,6 +53,7 @@ export interface Producto {
   stockMinimoPorTalla: StockMinimoPorTalla[]; // Umbrales mínimos opcionales por talla
   imagenes: string[]; // Array de URLs de imágenes del producto
   detalleIds: string[]; // Array de IDs de detalles relacionados (opcional)
+  ratingSummary: ProductRatingSummary; // Resumen denormalizado de calificaciones
   activo: boolean; // Si el producto está disponible para venta
   createdAt: Timestamp; // Fecha de creación
   updatedAt: Timestamp; // Fecha de última actualización
@@ -71,6 +78,7 @@ export interface CrearProductoDTO {
   stockMinimoPorTalla: StockMinimoPorTalla[];
   imagenes: string[];
   detalleIds: string[];
+  ratingSummary?: ProductRatingSummary;
   activo: boolean;
 }
 
@@ -92,7 +100,8 @@ export interface ActualizarProductoDTO {
   stockMinimoGlobal?: number;
   stockMinimoPorTalla?: StockMinimoPorTalla[];
   imagenes?: string[];
-  detalleIds: string[];
+  detalleIds?: string[];
+  ratingSummary?: ProductRatingSummary;
   activo?: boolean;
 }
 
