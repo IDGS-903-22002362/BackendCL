@@ -35,6 +35,8 @@ let appOficial = adminApps.find((app) => app?.name === "APP_OFICIAL");
 if (!appOficial) {
   const config: any = {
     projectId: "app-oficial-leon",
+    // Agregamos el bucket de Storage correspondiente al mismo proyecto
+    storageBucket: "app-oficial-leon.firebasestorage.app",
   };
 
   // Solo agregar credenciales si no estamos en Cloud Functions
@@ -53,6 +55,9 @@ export const firestoreApp = getFirestore(appOficial);
 firestoreApp.settings({ ignoreUndefinedProperties: true });
 export const authAppOficial = getAuth(appOficial);
 export const messagingAppOficial = getMessaging(appOficial);
+
+// Exportamos el servicio de Storage asociado a esta app
+export const storageAppOficial = appOficial.storage();
 
 console.log("🔥 App oficial inicializada:", {
   appName: appOficial.name,
