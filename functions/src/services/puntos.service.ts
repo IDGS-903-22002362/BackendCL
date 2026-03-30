@@ -27,6 +27,7 @@ const HISTORIAL_PUNTOS_SUBCOLECCION = "historial_puntos_anual";
 interface RegistrarMovimientoOptions {
   tipo: TipoMovimientoPuntos;
   origen: OrigenPuntos;
+  origenId?: string;
   referencia?: string;
   descripcion?: string;
 }
@@ -62,6 +63,7 @@ class PointsService {
     return this.registrarMovimiento(uid, points, {
       tipo: options.tipo ?? TipoMovimientoPuntos.ACUMULACION,
       origen: options.origen ?? "promo",
+      origenId: options.origenId,
       referencia: options.referencia,
       descripcion: options.descripcion,
     });
@@ -249,6 +251,7 @@ class PointsService {
         saldoAnterior,
         saldoNuevo,
         origen: options.origen,
+        origenId: options.origenId,
         referencia: options.referencia,
         descripcion: options.descripcion,
         cicloAnual: cicloActual.numero,
