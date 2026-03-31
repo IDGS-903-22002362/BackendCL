@@ -41,6 +41,7 @@ export interface UpdateProductStockDTO {
   motivo?: string;
   referencia?: string;
   ordenId?: string;
+  ventaPosId?: string;
   usuarioId?: string;
 }
 

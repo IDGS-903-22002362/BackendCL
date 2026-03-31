@@ -5,6 +5,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
 import routes from "./routes";
+import publicPaymentsRoutes from "./routes/payments-public.routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
 import { requestContextMiddleware } from "./middleware/request-context.middleware";
@@ -16,6 +17,7 @@ app.use(cors({ origin: true }));
 app.use(requestContextMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
+app.use("/api/webhooks/aplazo", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -35,6 +37,7 @@ app.use(
   }),
 );
 
+app.use(publicPaymentsRoutes);
 app.use("/api", routes);
 
 // Middleware para rutas no encontradas (404)

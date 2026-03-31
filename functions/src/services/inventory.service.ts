@@ -19,8 +19,58 @@ import {
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
 const ORDENES_COLLECTION = "ordenes";
 const AJUSTES_IDEMPOTENCY_COLLECTION = "inventarioAjustesIdempotency";
+const MOVIMIENTOS_IDEMPOTENCY_COLLECTION = "inventarioMovimientosIdempotency";
+const POS_SALES_COLLECTION = "ventasPos";
 
 class InventoryService {
+  private buildMovementIdempotencyDocId(
+    payload: RegistrarMovimientoInventarioDTO,
+    idempotencyKey: string,
+  ): string {
+    const tallaKey = payload.tallaId?.trim() ?? "_";
+    const rawKey = `${payload.tipo}:${payload.productoId}:${tallaKey}:${idempotencyKey}`;
+    return Buffer.from(rawKey).toString("base64url");
+  }
+
+  private async getCachedMovement(
+    payload: RegistrarMovimientoInventarioDTO,
+    idempotencyKey: string,
+  ): Promise<MovimientoInventario | null> {
+    const snapshot = await firestoreTienda
+      .collection(MOVIMIENTOS_IDEMPOTENCY_COLLECTION)
+      .doc(this.buildMovementIdempotencyDocId(payload, idempotencyKey))
+      .get();
+
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    const data = snapshot.data() as { movimiento?: MovimientoInventario };
+    return data.movimiento ?? null;
+  }
+
+  private async cacheMovement(
+    payload: RegistrarMovimientoInventarioDTO,
+    idempotencyKey: string,
+    movimiento: MovimientoInventario,
+  ): Promise<void> {
+    await firestoreTienda
+      .collection(MOVIMIENTOS_IDEMPOTENCY_COLLECTION)
+      .doc(this.buildMovementIdempotencyDocId(payload, idempotencyKey))
+      .set({
+        idempotencyKey,
+        payload: {
+          tipo: payload.tipo,
+          productoId: payload.productoId,
+          tallaId: payload.tallaId ?? null,
+          referencia: payload.referencia,
+          ordenId: payload.ordenId,
+        },
+        movimiento,
+        createdAt: admin.firestore.Timestamp.now(),
+      });
+  }
+
   private async getCantidadActual(
     productoId: string,
     tallaId?: string,
@@ -73,6 +123,7 @@ class InventoryService {
   private async validateOrdenIfNeeded(
     tipo: TipoMovimientoInventario,
     ordenId?: string,
+    ventaPosId?: string,
   ): Promise<void> {
     if (
       tipo !== TipoMovimientoInventario.VENTA &&
@@ -81,18 +132,29 @@ class InventoryService {
       return;
     }
 
-    if (!ordenId) {
+    if (!ordenId && !ventaPosId) {
       throw new Error(
-        "ordenId es requerido para movimientos tipo venta o devolucion",
+        "ordenId o ventaPosId es requerido para movimientos tipo venta o devolucion",
       );
     }
 
-    const ordenDoc = await firestoreTienda
-      .collection(ORDENES_COLLECTION)
-      .doc(ordenId)
+    if (ordenId) {
+      const ordenDoc = await firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(ordenId)
+        .get();
+      if (!ordenDoc.exists) {
+        throw new Error(`Orden con ID ${ordenId} no encontrada`);
+      }
+      return;
+    }
+
+    const ventaPosDoc = await firestoreTienda
+      .collection(POS_SALES_COLLECTION)
+      .doc(ventaPosId!)
       .get();
-    if (!ordenDoc.exists) {
-      throw new Error(`Orden con ID ${ordenId} no encontrada`);
+    if (!ventaPosDoc.exists) {
+      throw new Error(`Venta POS con ID ${ventaPosId} no encontrada`);
     }
   }
 
@@ -140,8 +202,22 @@ class InventoryService {
     }
 
     const tallaId = payload.tallaId?.trim();
+    const idempotencyKey = payload.idempotencyKey?.trim();
 
-    await this.validateOrdenIfNeeded(tipo, payload.ordenId);
+    if (idempotencyKey) {
+      const cached = await this.getCachedMovement(
+        {
+          ...payload,
+          tallaId,
+        },
+        idempotencyKey,
+      );
+      if (cached) {
+        return cached;
+      }
+    }
+
+    await this.validateOrdenIfNeeded(tipo, payload.ordenId, payload.ventaPosId);
 
     const { cantidadActual, tallaIdFinal } = await this.getCantidadActual(
       payload.productoId,
@@ -161,10 +237,11 @@ class InventoryService {
       motivo: payload.motivo,
       referencia: payload.referencia,
       ordenId: payload.ordenId,
+      ventaPosId: payload.ventaPosId,
       usuarioId: payload.usuarioId,
     });
 
-    return {
+    const movimiento: MovimientoInventario = {
       id: stockResult.movimientoId,
       tipo,
       productoId: stockResult.productoId,
@@ -175,9 +252,23 @@ class InventoryService {
       motivo: payload.motivo,
       referencia: payload.referencia,
       ordenId: payload.ordenId,
+      ventaPosId: payload.ventaPosId,
       usuarioId: payload.usuarioId,
       createdAt: stockResult.createdAt,
     };
+
+    if (idempotencyKey) {
+      await this.cacheMovement(
+        {
+          ...payload,
+          tallaId,
+        },
+        idempotencyKey,
+        movimiento,
+      );
+    }
+
+    return movimiento;
   }
 
   private buildAdjustmentIdempotencyDocId(
