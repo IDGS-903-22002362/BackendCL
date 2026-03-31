@@ -42,12 +42,45 @@ export enum EstadoPago {
   REEMBOLSADO = "REEMBOLSADO", // Pago reembolsado total o parcialmente
 }
 
+export enum PaymentStatus {
+  CREATED = "created",
+  PENDING_PROVIDER = "pending_provider",
+  PENDING_CUSTOMER = "pending_customer",
+  AUTHORIZED = "authorized",
+  PAID = "paid",
+  FAILED = "failed",
+  CANCELED = "canceled",
+  EXPIRED = "expired",
+  REFUNDED = "refunded",
+  PARTIALLY_REFUNDED = "partially_refunded",
+}
+
+export enum PaymentFlowType {
+  ONLINE = "online",
+  IN_STORE = "in_store",
+}
+
+export enum PaymentMethodCode {
+  CARD = "card",
+  CASH = "cash",
+  APLAZO = "aplazo",
+}
+
+export enum RefundState {
+  NONE = "none",
+  REQUESTED = "requested",
+  PROCESSING = "processing",
+  SUCCEEDED = "succeeded",
+  FAILED = "failed",
+}
+
 /**
  * Enum para proveedores de pago
  * Extensible a futuro si se agregan más pasarelas
  */
 export enum ProveedorPago {
   STRIPE = "STRIPE", // Stripe (PaymentIntent / Checkout Session)
+  APLAZO = "APLAZO", // Aplazo (Online / In-Store)
 }
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -57,6 +90,33 @@ export const COLECCION_PAGOS = "pagos";
 
 /** Moneda por defecto (pesos mexicanos) */
 export const CURRENCY_DEFAULT = "mxn";
+
+export interface PaymentPricingSnapshotItem {
+  productoId: string;
+  cantidad: number;
+  precioUnitarioMinor: number;
+  subtotalMinor: number;
+  tallaId?: string;
+}
+
+export interface PaymentPricingSnapshot {
+  subtotalMinor: number;
+  taxMinor: number;
+  shippingMinor: number;
+  totalMinor: number;
+  currency: string;
+  items: PaymentPricingSnapshotItem[];
+}
+
+export interface PaymentFinalizationState {
+  inProgress?: boolean;
+  operationId?: string;
+  finalizedAt?: Timestamp;
+  finalizedBy?: string;
+  lastTerminalStatus?: PaymentStatus;
+  lastError?: string;
+  updatedAt?: Timestamp;
+}
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -74,19 +134,44 @@ export interface Pago {
   // Datos del pago
   provider: ProveedorPago; // Proveedor de pago (STRIPE)
   metodoPago: MetodoPago; // Método de pago seleccionado (TARJETA, TRANSFERENCIA, etc.)
+  paymentMethodCode?: PaymentMethodCode; // Código canónico independiente del proveedor
+  flowType?: PaymentFlowType; // online | in_store
   monto: number; // Monto total del pago en la moneda especificada
+  amountMinor?: number; // Monto total en centavos
   currency: string; // Código de moneda ISO 4217 (ej. "mxn", "usd")
   estado: EstadoPago; // Estado actual del pago
+  status?: PaymentStatus; // Estado canónico provider-agnostic
 
   // Campos de Stripe
   providerStatus?: string; // Status crudo de Stripe (ej. "succeeded", "requires_action")
   paymentIntentId?: string; // ID del PaymentIntent en Stripe (pi_xxx)
   checkoutSessionId?: string; // ID del Checkout Session en Stripe (cs_xxx)
   stripeCustomerId?: string; // ID del customer en Stripe (cus_xxx)
+  providerPaymentId?: string; // ID crudo del pago en proveedor externo
+  providerLoanId?: string; // ID de crédito/préstamo en proveedor externo
+  providerReference?: string; // Referencia externa del proveedor
+  redirectUrl?: string; // URL para redirección del checkout
+  successUrl?: string; // URL de retorno exitosa
+  cancelUrl?: string; // URL de retorno cancelada
+  failureUrl?: string; // URL de retorno fallida
+  webhookUrl?: string; // URL usada al registrar webhook/callback con proveedor
+  expiresAt?: Timestamp; // Expiración local o remota del intento
+  paidAt?: Timestamp; // Fecha canonical de pago confirmado
+  failedAt?: Timestamp; // Fecha canonical de fallo
+  canceledAt?: Timestamp; // Fecha canonical de cancelación
+  expiredAt?: Timestamp; // Fecha canonical de expiración
 
   // Referencias internas
   transaccionId?: string; // ID interno o referencia legible para el cliente
   idempotencyKey: string; // Clave de idempotencia para evitar cobros duplicados
+  ventaPosId?: string; // Referencia a venta POS
+  posSessionId?: string; // Sesión de caja/dispositivo
+  deviceId?: string; // Dispositivo POS que originó el intento
+  customerId?: string; // Cliente interno o usuario
+  customerName?: string; // Snapshot nombre cliente
+  customerEmail?: string; // Snapshot email cliente
+  customerPhone?: string; // Snapshot teléfono cliente
+  pricingSnapshot?: PaymentPricingSnapshot; // Snapshot monetario usado al crear intento
 
   // Fecha de pago
   fechaPago?: Timestamp; // Fecha en que el pago fue confirmado exitosamente
@@ -99,6 +184,11 @@ export interface Pago {
   refundId?: string; // ID del reembolso en Stripe (re_xxx)
   refundAmount?: number; // Monto reembolsado (puede ser parcial)
   refundReason?: string; // Motivo del reembolso
+  refundState?: RefundState; // Estado del subflujo de refund
+  rawCreateRequestSanitized?: Record<string, unknown>; // Request saneado al proveedor
+  rawCreateResponseSanitized?: Record<string, unknown>; // Response saneada del proveedor
+  rawLastWebhookSanitized?: Record<string, unknown>; // Último webhook saneado
+  finalization?: PaymentFinalizationState; // Estado exactly-once de side effects
 
   // Deduplicación de webhooks
   webhookEventIdsProcesados?: string[]; // IDs de eventos de Stripe ya procesados
