@@ -111,6 +111,7 @@ export interface MovimientoInventario {
   motivo?: string;
   referencia?: string;
   ordenId?: string;
+  ventaPosId?: string;
   usuarioId?: string;
   createdAt: Date;
 }
@@ -124,7 +125,9 @@ export interface RegistrarMovimientoInventarioDTO {
   motivo?: string;
   referencia?: string;
   ordenId?: string;
+  ventaPosId?: string;
   usuarioId?: string;
+  idempotencyKey?: string;
 }
 
 export interface RegistrarAjusteInventarioDTO {

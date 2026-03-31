@@ -40,6 +40,7 @@ export enum EstadoOrden {
  */
 export enum MetodoPago {
   TARJETA = "TARJETA", // Tarjeta de crédito/débito
+  APLAZO = "APLAZO", // Crédito Aplazo
   TRANSFERENCIA = "TRANSFERENCIA", // Transferencia bancaria
   EFECTIVO = "EFECTIVO", // Pago en efectivo contra entrega
   PAYPAL = "PAYPAL", // PayPal
