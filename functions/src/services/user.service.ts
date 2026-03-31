@@ -237,12 +237,9 @@ export class UserAppService {
         .collection(USUARIOSAPP_COLLECTION)
         .doc(authUser.uid);
 
-      await docRef.set(nuevoUsuarioData);
+      await docRef.create(nuevoUsuarioData);
 
-      return {
-        id: authUser.uid,
-        ...nuevoUsuarioData,
-      } as UsuarioApp;
+      return pointsService.otorgarBonoBienvenida(authUser.uid);
 
     } catch (error) {
       console.error("Error al crear usuario:", error);

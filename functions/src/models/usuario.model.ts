@@ -37,6 +37,7 @@ export interface UsuarioApp {
   genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
   historialPuntos?: HistorialPuntosUsuario;
+  bonoBienvenidaOtorgadoAt?: Timestamp;
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
 }
