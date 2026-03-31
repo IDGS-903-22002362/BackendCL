@@ -50,6 +50,11 @@ import {
   createStripeSetupIntentSchema,
 } from "../middleware/validators/stripe.validator";
 import {
+  aplazoAdminActionSchema,
+  aplazoInStoreCreateSchema,
+  aplazoOnlineCreateSchema,
+} from "../middleware/validators/payments-v2.validator";
+import {
   listLowStockAlertsQuerySchema,
   registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
@@ -439,6 +444,9 @@ const swaggerDefinition = {
         createStripeBillingPortalSchema,
       ),
       CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
+      CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
+      CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
+      AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,
@@ -1127,7 +1135,7 @@ const swaggerDefinition = {
           userId: { type: "string", example: "firebase_uid_xyz" },
           provider: {
             type: "string",
-            enum: ["STRIPE"],
+            enum: ["STRIPE", "APLAZO"],
             example: "STRIPE",
             description: "Proveedor de pago",
           },
@@ -1139,8 +1147,19 @@ const swaggerDefinition = {
               "EFECTIVO",
               "PAYPAL",
               "MERCADOPAGO",
+              "APLAZO",
             ],
             example: "TARJETA",
+          },
+          flowType: {
+            type: "string",
+            enum: ["online", "in_store"],
+            example: "online",
+          },
+          paymentMethodCode: {
+            type: "string",
+            enum: ["card", "cash", "aplazo"],
+            example: "aplazo",
           },
           monto: {
             type: "number",
@@ -1168,6 +1187,26 @@ const swaggerDefinition = {
             type: "string",
             example: "requires_payment_method",
             description: "Status crudo de Stripe",
+          },
+          providerLoanId: {
+            type: "string",
+            example: "loan_987",
+            description: "ID del préstamo o crédito en el proveedor externo",
+          },
+          providerReference: {
+            type: "string",
+            example: "orden_123",
+            description: "Referencia externa canónica del comercio, por ejemplo cartId",
+          },
+          redirectUrl: {
+            type: "string",
+            example: "https://checkout.aplazo/...",
+            description: "URL de redirección al checkout externo cuando aplica",
+          },
+          expiresAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-31T18:30:00Z",
           },
           paymentIntentId: {
             type: "string",

@@ -30,6 +30,9 @@ import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
 import favoritosRoutes from "./favorito.routes";
 import ligaMxRoutes from "./liga-mx.routes";
+import paymentsV2Routes from "./payments-v2.routes";
+import adminPaymentsRoutes from "./admin-payments.routes";
+import webhooksRoutes from "./webhooks.routes";
 
 const router = Router();
 
@@ -49,6 +52,9 @@ router.use("/ordenes", ordenesRoutes);
 router.use("/carrito", carritoRoutes);
 router.use("/pagos", pagosRoutes);
 router.use("/stripe", stripeRoutes);
+router.use("/payments", paymentsV2Routes);
+router.use("/admin/payments", adminPaymentsRoutes);
+router.use("/webhooks", webhooksRoutes);
 router.use("/inventario", inventoryRoutes);
 router.use("/plantilla", plantillaRoutes);
 router.use("/galeria", galeriaRoutes);
