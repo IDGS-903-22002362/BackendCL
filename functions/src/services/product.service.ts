@@ -8,6 +8,7 @@ import { admin } from "../config/firebase.admin";
 import {
   InventarioPorTalla,
   Producto,
+  ProductRatingSummary,
   StockMinimoPorTalla,
 } from "../models/producto.model";
 import {
@@ -28,6 +29,10 @@ import stockAlertService from "./stock-alert.service";
 const PRODUCTOS_COLLECTION = "productos";
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
 const DEFAULT_STOCK_MINIMO_GLOBAL = 5;
+const DEFAULT_PRODUCT_RATING_SUMMARY: ProductRatingSummary = {
+  average: 0,
+  count: 0,
+};
 
 export interface UpdateProductStockDTO {
   cantidadNueva: number;
@@ -36,6 +41,7 @@ export interface UpdateProductStockDTO {
   motivo?: string;
   referencia?: string;
   ordenId?: string;
+  ventaPosId?: string;
   usuarioId?: string;
 }
 
@@ -297,6 +303,30 @@ export class ProductService {
       inventarioPorTalla,
       data.existencias,
     );
+    const ratingSummaryRaw =
+      typeof data.ratingSummary === "object" && data.ratingSummary !== null
+        ? (data.ratingSummary as {
+            average?: unknown;
+            count?: unknown;
+            updatedAt?: unknown;
+          })
+        : null;
+    const averageRaw = Number(ratingSummaryRaw?.average ?? 0);
+    const countRaw = Number(ratingSummaryRaw?.count ?? 0);
+    const ratingSummary: ProductRatingSummary = {
+      average:
+        Number.isFinite(averageRaw) && averageRaw > 0
+          ? Number(averageRaw.toFixed(2))
+          : DEFAULT_PRODUCT_RATING_SUMMARY.average,
+      count:
+        Number.isFinite(countRaw) && countRaw > 0
+          ? Math.floor(countRaw)
+          : DEFAULT_PRODUCT_RATING_SUMMARY.count,
+      updatedAt:
+        ratingSummaryRaw?.updatedAt instanceof admin.firestore.Timestamp
+          ? ratingSummaryRaw.updatedAt
+          : undefined,
+    };
 
     return {
       id,
@@ -317,6 +347,8 @@ export class ProductService {
         data.stockMinimoPorTalla,
       ),
       imagenes: data.imagenes || [],
+      detalleIds: Array.isArray(data.detalleIds) ? data.detalleIds : [],
+      ratingSummary,
       activo: data.activo,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
@@ -655,6 +687,8 @@ export class ProductService {
           stockMinimoGlobal,
           stockMinimoPorTalla,
           existencias,
+          ratingSummary: productoData.ratingSummary || DEFAULT_PRODUCT_RATING_SUMMARY,
+          ratingTotalScore: 0,
           createdAt: now,
           updatedAt: now,
         });

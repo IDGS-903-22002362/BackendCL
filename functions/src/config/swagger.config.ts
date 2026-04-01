@@ -6,6 +6,7 @@ import {
   deleteImageSchema,
   updateProductStockSchema,
   replaceSizeInventorySchema,
+  rateProductSchema,
 } from "../middleware/validators/product.validator";
 import {
   createCategorySchema,
@@ -49,6 +50,11 @@ import {
   createStripeSetupIntentSchema,
 } from "../middleware/validators/stripe.validator";
 import {
+  aplazoAdminActionSchema,
+  aplazoInStoreCreateSchema,
+  aplazoOnlineCreateSchema,
+} from "../middleware/validators/payments-v2.validator";
+import {
   listLowStockAlertsQuerySchema,
   registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
@@ -84,6 +90,7 @@ import {
   createDetalleProductoSchema,
   updateDetalleProductoSchema,
 } from "../middleware/validators/detalleProducto.validator";
+import { createFavoritoSchema } from "../middleware/validators/favorito.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -157,6 +164,10 @@ const swaggerDefinition = {
     {
       name: "Users",
       description: "Gestión de usuarios de la aplicación",
+    },
+    {
+      name: "Favoritos",
+      description: "Favoritos del usuario autenticado",
     },
     {
       name: "Orders",
@@ -303,8 +314,10 @@ const swaggerDefinition = {
       DeleteImage: zodToJsonSchema(deleteImageSchema),
       UpdateProductStock: zodToJsonSchema(updateProductStockSchema),
       ReplaceSizeInventory: zodToJsonSchema(replaceSizeInventorySchema),
+      RateProduct: zodToJsonSchema(rateProductSchema),
       CreateDetalleProducto: zodToJsonSchema(createDetalleProductoSchema),
       UpdateDetalleProducto: zodToJsonSchema(updateDetalleProductoSchema),
+      CreateFavorito: zodToJsonSchema(createFavoritoSchema),
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
@@ -431,6 +444,9 @@ const swaggerDefinition = {
         createStripeBillingPortalSchema,
       ),
       CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
+      CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
+      CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
+      AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,
@@ -665,6 +681,14 @@ const swaggerDefinition = {
             items: { type: "string", format: "uri" },
             example: ["https://storage.googleapis.com/.../jersey-001.jpg"],
           },
+          detalleIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["det_1", "det_2"],
+          },
+          ratingSummary: {
+            $ref: "#/components/schemas/ProductRatingSummary",
+          },
           activo: { type: "boolean", example: true },
           createdAt: {
             type: "string",
@@ -677,6 +701,110 @@ const swaggerDefinition = {
             example: "2024-01-20T14:20:00Z",
           },
         },
+      },
+      ProductRatingSummary: {
+        type: "object",
+        properties: {
+          average: {
+            type: "number",
+            example: 4.67,
+          },
+          count: {
+            type: "integer",
+            example: 12,
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            nullable: true,
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+        required: ["average", "count"],
+      },
+      ProductRatingEligibility: {
+        type: "object",
+        properties: {
+          canRate: {
+            type: "boolean",
+            example: true,
+          },
+          reason: {
+            type: "string",
+            enum: ["eligible", "purchase_required", "not_delivered"],
+            example: "eligible",
+          },
+        },
+        required: ["canRate", "reason"],
+      },
+      ProductRatingSnapshot: {
+        type: "object",
+        nullable: true,
+        properties: {
+          score: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5,
+            example: 5,
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+      },
+      ProductRating: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "prod_123__uid_123" },
+          productId: { type: "string", example: "prod_123" },
+          userId: { type: "string", example: "uid_123" },
+          score: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5,
+            example: 4,
+          },
+          eligibleOrderId: { type: "string", example: "order_123" },
+          eligibleDeliveredAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-29T18:00:00Z",
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T18:30:00Z",
+          },
+        },
+      },
+      ProductDetail: {
+        allOf: [
+          { $ref: "#/components/schemas/Product" },
+          {
+            type: "object",
+            properties: {
+              isFavorito: {
+                type: "boolean",
+                description:
+                  "Se incluye solo cuando la petición viene autenticada",
+                example: true,
+              },
+              ratingEligibility: {
+                $ref: "#/components/schemas/ProductRatingEligibility",
+              },
+              myRating: {
+                $ref: "#/components/schemas/ProductRatingSnapshot",
+              },
+            },
+          },
+        ],
       },
       News: {
         type: "object",
@@ -715,6 +843,54 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
+      FavoritoProductSummary: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "prod_12345" },
+          clave: { type: "string", example: "JERSEY-2026-H" },
+          descripcion: {
+            type: "string",
+            example: "Jersey Oficial Local 2026",
+          },
+          precioPublico: { type: "number", example: 1299.99 },
+          imagenes: {
+            type: "array",
+            items: { type: "string", format: "uri" },
+            example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
+          },
+        },
+        required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
+      },
+      Favorito: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          productoId: { type: "string", example: "prod_12345" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+        },
+        required: ["id", "usuarioId", "productoId", "createdAt"],
+      },
+      FavoritoConProducto: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+          producto: {
+            $ref: "#/components/schemas/FavoritoProductSummary",
+          },
+        },
+        required: ["id", "usuarioId", "createdAt", "producto"],
+      },
       },
       DetalleProducto: {
         type: "object",
@@ -959,7 +1135,7 @@ const swaggerDefinition = {
           userId: { type: "string", example: "firebase_uid_xyz" },
           provider: {
             type: "string",
-            enum: ["STRIPE"],
+            enum: ["STRIPE", "APLAZO"],
             example: "STRIPE",
             description: "Proveedor de pago",
           },
@@ -971,8 +1147,19 @@ const swaggerDefinition = {
               "EFECTIVO",
               "PAYPAL",
               "MERCADOPAGO",
+              "APLAZO",
             ],
             example: "TARJETA",
+          },
+          flowType: {
+            type: "string",
+            enum: ["online", "in_store"],
+            example: "online",
+          },
+          paymentMethodCode: {
+            type: "string",
+            enum: ["card", "cash", "aplazo"],
+            example: "aplazo",
           },
           monto: {
             type: "number",
@@ -1000,6 +1187,26 @@ const swaggerDefinition = {
             type: "string",
             example: "requires_payment_method",
             description: "Status crudo de Stripe",
+          },
+          providerLoanId: {
+            type: "string",
+            example: "loan_987",
+            description: "ID del préstamo o crédito en el proveedor externo",
+          },
+          providerReference: {
+            type: "string",
+            example: "orden_123",
+            description: "Referencia externa canónica del comercio, por ejemplo cartId",
+          },
+          redirectUrl: {
+            type: "string",
+            example: "https://checkout.aplazo/...",
+            description: "URL de redirección al checkout externo cuando aplica",
+          },
+          expiresAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-31T18:30:00Z",
           },
           paymentIntentId: {
             type: "string",

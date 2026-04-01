@@ -7,13 +7,16 @@ import {
   NotificationEvent,
 } from "../../models/notificacion.model";
 import { Orden } from "../../models/orden.model";
+import { Producto } from "../../models/producto.model";
 import logger from "../../utils/logger";
 import notificationAudienceService from "./notification-audience.service";
 import { notificationCollections } from "./collections";
 import notificationEventService from "./notification-event.service";
+import productRatingService from "../product-rating.service";
 
 const CARRITOS_COLLECTION = "carritos";
 const ORDENES_COLLECTION = "ordenes";
+const PRODUCTOS_COLLECTION = "productos";
 
 class NotificationSchedulerService {
   private readonly baseLogger = logger.child({
@@ -28,6 +31,10 @@ class NotificationSchedulerService {
     return Timestamp.fromDate(
       new Date(Date.now() - days * 24 * 60 * 60 * 1000),
     );
+  }
+
+  private toTimestampFromHoursAgo(hours: number): Timestamp {
+    return Timestamp.fromDate(new Date(Date.now() - hours * 60 * 60 * 1000));
   }
 
   async enqueueAbandonedCarts(): Promise<NotificationEvent[]> {
@@ -166,6 +173,89 @@ class NotificationSchedulerService {
 
     this.baseLogger.info("notification_scheduler_probable_repurchase", {
       candidates: candidates.length,
+      enqueued: results.length,
+    });
+
+    return results;
+  }
+
+  async enqueueProductRatingReminders(): Promise<NotificationEvent[]> {
+    const deliveredBefore = this.toTimestampFromHoursAgo(
+      notificationConfig.windows.ratingReminderDelayHours,
+    );
+    const deliveredAfter = this.toTimestampFromDaysAgo(
+      notificationConfig.windows.ratingReminderLookbackDays,
+    );
+    const snapshot = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .where("estado", "==", "ENTREGADA")
+      .where("deliveredAt", ">=", deliveredAfter)
+      .where("deliveredAt", "<=", deliveredBefore)
+      .limit(notificationConfig.scheduler.ratingReminderBatchSize)
+      .get();
+    const results: NotificationEvent[] = [];
+
+    for (const doc of snapshot.docs) {
+      const order = doc.data() as Orden;
+      const userId = String(order.usuarioId || "").trim();
+
+      if (!userId || !Array.isArray(order.items) || order.items.length === 0) {
+        continue;
+      }
+
+      const uniqueProductIds = Array.from(
+        new Set(
+          order.items
+            .map((item) => item.productoId)
+            .filter((value): value is string => typeof value === "string"),
+        ),
+      );
+
+      for (const productId of uniqueProductIds) {
+        const alreadyRated = await productRatingService.hasUserRatedProduct(
+          productId,
+          userId,
+        );
+
+        if (alreadyRated) {
+          continue;
+        }
+
+        const productSnapshot = await firestoreTienda
+          .collection(PRODUCTOS_COLLECTION)
+          .doc(productId)
+          .get();
+        const product = productSnapshot.exists
+          ? (productSnapshot.data() as Producto)
+          : null;
+
+        const result = await notificationEventService.enqueueEvent({
+          eventType: "product_rating_reminder",
+          userId,
+          productId,
+          orderId: doc.id,
+          sourceData: {
+            eligibleOrderId: doc.id,
+            deliveredAt: order.deliveredAt?.toDate?.().toISOString(),
+            productName: product?.descripcion,
+          },
+          triggerSource: "scheduler_product_rating_reminder",
+        });
+        results.push(result.event);
+
+        if (results.length >= notificationConfig.scheduler.ratingReminderBatchSize) {
+          this.baseLogger.info("notification_scheduler_rating_reminders", {
+            candidateOrders: snapshot.size,
+            enqueued: results.length,
+          });
+
+          return results;
+        }
+      }
+    }
+
+    this.baseLogger.info("notification_scheduler_rating_reminders", {
+      candidateOrders: snapshot.size,
       enqueued: results.length,
     });
 

@@ -86,6 +86,14 @@ export const notificationConfig = {
       process.env.NOTIFICATIONS_PRICE_DROP_COOLDOWN_DAYS,
       7,
     ),
+    ratingReminderDelayHours: toInt(
+      process.env.NOTIFICATIONS_RATING_REMINDER_DELAY_HOURS,
+      24,
+    ),
+    ratingReminderLookbackDays: toInt(
+      process.env.NOTIFICATIONS_RATING_REMINDER_LOOKBACK_DAYS,
+      30,
+    ),
     productInterestLookbackDays: toInt(
       process.env.NOTIFICATIONS_PRODUCT_INTEREST_LOOKBACK_DAYS,
       30,
@@ -122,6 +130,10 @@ export const notificationConfig = {
     ),
     repurchaseBatchSize: toInt(
       process.env.NOTIFICATIONS_REPURCHASE_BATCH_SIZE,
+      200,
+    ),
+    ratingReminderBatchSize: toInt(
+      process.env.NOTIFICATIONS_RATING_REMINDER_BATCH_SIZE,
       200,
     ),
   },

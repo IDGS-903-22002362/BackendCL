@@ -37,6 +37,7 @@ export interface UsuarioApp {
   genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
   historialPuntos?: HistorialPuntosUsuario;
+  bonoBienvenidaOtorgadoAt?: Timestamp;
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
 }
@@ -64,6 +65,7 @@ export interface MovimientoPuntos {
   saldoAnterior: number; // Saldo antes del movimiento
   saldoNuevo: number; // Saldo después del movimiento
   origen: OrigenPuntos; // De dónde proviene el movimiento
+  origenId?: string; // Sistema o integracion que origino el movimiento
   referencia?: string; // ID de orden, ticket, promoción, etc.
   descripcion?: string; // Descripción adicional del movimiento
   cicloAnual?: number;

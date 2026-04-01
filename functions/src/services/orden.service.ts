@@ -351,8 +351,13 @@ export class OrdenService {
 
       // PASO 4: Actualizar estado en Firestore
       const now = admin.firestore.Timestamp.now();
+      const deliveredAt =
+        nuevoEstado === EstadoOrden.ENTREGADA
+          ? orden.deliveredAt || now
+          : orden.deliveredAt;
       await firestoreTienda.collection(ORDENES_COLLECTION).doc(ordenId).update({
         estado: nuevoEstado,
+        ...(deliveredAt ? { deliveredAt } : {}),
         updatedAt: now,
       });
 
@@ -361,6 +366,7 @@ export class OrdenService {
         ...orden,
         id: ordenId,
         estado: nuevoEstado,
+        deliveredAt,
         updatedAt: now,
       };
 
@@ -477,6 +483,7 @@ export class OrdenService {
           transportista: data.transportista,
           costoEnvio: data.costoEnvio,
           notas: data.notas,
+          deliveredAt: data.deliveredAt,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
@@ -569,6 +576,7 @@ export class OrdenService {
         transportista: data.transportista,
         costoEnvio: data.costoEnvio,
         notas: data.notas,
+        deliveredAt: data.deliveredAt,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -955,6 +963,7 @@ export class OrdenService {
           transportista: data.transportista,
           costoEnvio: data.costoEnvio,
           notas: data.notas,
+          deliveredAt: data.deliveredAt,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };

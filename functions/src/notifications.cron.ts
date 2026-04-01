@@ -32,3 +32,11 @@ export const enqueueProbableRepurchaseNotifications = functions.pubsub
     await notificationSchedulerService.enqueueProbableRepurchases();
     return null;
   });
+
+export const enqueueProductRatingReminderNotifications = functions.pubsub
+  .schedule("every day 12:00")
+  .timeZone("America/Mexico_City")
+  .onRun(async () => {
+    await notificationSchedulerService.enqueueProductRatingReminders();
+    return null;
+  });

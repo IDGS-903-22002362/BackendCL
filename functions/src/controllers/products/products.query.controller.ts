@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import favoritoService from "../../services/favorito.service";
 import productService from "../../services/product.service";
+import productRatingService from "../../services/product-rating.service";
 
 /**
  * Controller: Products Query (Lectura)
@@ -35,9 +37,27 @@ export const getById = async (req: Request, res: Response) => {
       });
     }
 
+    const userId = typeof req.user?.uid === "string" ? req.user.uid : undefined;
+    const userContext = userId
+      ? await Promise.all([
+          productRatingService.getRatingEligibility(id, userId),
+          productRatingService.getUserRating(id, userId),
+          favoritoService.isFavorito(userId, id),
+        ])
+      : null;
+
     return res.status(200).json({
       success: true,
-      data: producto,
+      data: {
+        ...producto,
+        ...(userContext
+          ? {
+              ratingEligibility: userContext[0],
+              myRating: userContext[1],
+              isFavorito: userContext[2],
+            }
+          : {}),
+      },
     });
   } catch (error) {
     console.error("Error en GET /api/productos/:id:", error);

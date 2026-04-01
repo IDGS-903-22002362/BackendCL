@@ -23,10 +23,12 @@ const CONFIGURACION_COLLECTION = "configuracion";
 const CONFIGURACION_PUNTOS_DOC = "puntos";
 const MOVIMIENTOS_PUNTOS_SUBCOLECCION = "movimientos_puntos";
 const HISTORIAL_PUNTOS_SUBCOLECCION = "historial_puntos_anual";
+const PUNTOS_BIENVENIDA_REGISTRO = 40;
 
 interface RegistrarMovimientoOptions {
   tipo: TipoMovimientoPuntos;
   origen: OrigenPuntos;
+  origenId?: string;
   referencia?: string;
   descripcion?: string;
 }
@@ -54,6 +56,109 @@ interface VistaPuntosUsuario {
 }
 
 class PointsService {
+  async otorgarBonoBienvenida(uid: string): Promise<UsuarioApp> {
+    const diasExpiracion = await this.obtenerDiasExpiracionPuntos();
+    await this.procesarExpiracionUsuario(uid, diasExpiracion);
+
+    const userRef = firestoreApp.collection(USUARIOS_COLLECTION).doc(uid);
+
+    return firestoreApp.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+
+      if (!userSnap.exists) {
+        throw new Error("Usuario no encontrado");
+      }
+
+      const userData = userSnap.data() as UsuarioApp;
+      if (!userData.createdAt) {
+        throw new Error("El usuario no tiene fecha de registro");
+      }
+
+      if (userData.bonoBienvenidaOtorgadoAt) {
+        return {
+          ...userData,
+          id: userSnap.id,
+        } as UsuarioApp;
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      const saldoAnterior = Number(userData.puntosActuales ?? 0);
+      const saldoNuevo = saldoAnterior + PUNTOS_BIENVENIDA_REGISTRO;
+      const cicloActual = obtenerCicloActual(
+        userData.createdAt.toDate(),
+        now.toDate(),
+        diasExpiracion,
+      );
+      const historialActual = this.normalizarHistorialUsuario(
+        userData.historialPuntos,
+        cicloActual.numero,
+        cicloActual.fechaFinProgramada,
+      );
+      const resumenRef = userRef
+        .collection(HISTORIAL_PUNTOS_SUBCOLECCION)
+        .doc(cicloActual.etiqueta);
+      const resumenSnap = await tx.get(resumenRef);
+      const resumenActual = resumenSnap.exists
+        ? (resumenSnap.data() as ResumenPuntosAnual)
+        : construirResumenPuntosAnual(cicloActual, saldoAnterior);
+
+      const resumenActualizado = aplicarMovimientoAResumen(resumenActual, {
+        tipo: TipoMovimientoPuntos.BONIFICACION,
+        puntos: PUNTOS_BIENVENIDA_REGISTRO,
+        saldoAnterior,
+        saldoNuevo,
+        fechaMovimiento: now,
+      });
+
+      const movimientoRef = userRef
+        .collection(MOVIMIENTOS_PUNTOS_SUBCOLECCION)
+        .doc();
+      const movimiento: MovimientoPuntos = {
+        id: movimientoRef.id,
+        usuarioId: uid,
+        tipo: TipoMovimientoPuntos.BONIFICACION,
+        puntos: PUNTOS_BIENVENIDA_REGISTRO,
+        saldoAnterior,
+        saldoNuevo,
+        origen: "promo",
+        referencia: "registro",
+        descripcion: "Bonificación de bienvenida por registro",
+        cicloAnual: cicloActual.numero,
+        etiquetaCiclo: cicloActual.etiqueta,
+        createdAt: now,
+      };
+
+      const historialActualizado = this.actualizarHistorialUsuario(
+        historialActual,
+        resumenActualizado,
+        cicloActual.numero,
+        cicloActual.fechaFinProgramada,
+      );
+
+      tx.set(movimientoRef, movimiento);
+      tx.set(resumenRef, resumenActualizado, { merge: true });
+      tx.set(
+        userRef,
+        {
+          puntosActuales: saldoNuevo,
+          updatedAt: now,
+          historialPuntos: historialActualizado,
+          bonoBienvenidaOtorgadoAt: now,
+        },
+        { merge: true },
+      );
+
+      return {
+        ...userData,
+        id: userSnap.id,
+        puntosActuales: saldoNuevo,
+        updatedAt: now,
+        historialPuntos: historialActualizado,
+        bonoBienvenidaOtorgadoAt: now,
+      } as UsuarioApp;
+    });
+  }
+
   async addPoints(
     uid: string,
     points: number,
@@ -62,6 +167,7 @@ class PointsService {
     return this.registrarMovimiento(uid, points, {
       tipo: options.tipo ?? TipoMovimientoPuntos.ACUMULACION,
       origen: options.origen ?? "promo",
+      origenId: options.origenId,
       referencia: options.referencia,
       descripcion: options.descripcion,
     });
@@ -249,6 +355,7 @@ class PointsService {
         saldoAnterior,
         saldoNuevo,
         origen: options.origen,
+        origenId: options.origenId,
         referencia: options.referencia,
         descripcion: options.descripcion,
         cicloAnual: cicloActual.numero,

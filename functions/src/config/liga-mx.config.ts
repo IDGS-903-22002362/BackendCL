@@ -2,7 +2,8 @@ import { DivisionKey, PerfilDivision } from "../services/liga-mx/liga-mx.types";
 
 const URL_BASE_POR_DEFECTO = "https://clubes.apilmx.com";
 const ZONA_HORARIA_POR_DEFECTO = "America/Mexico_City";
-const PROGRAMACION_SEMANAL_POR_DEFECTO = "0 0 * * 1";
+// Domingo y miercoles por la noche, ejecutado a las 00:00 del lunes y jueves.
+const PROGRAMACION_SEMANAL_POR_DEFECTO = "0 0 * * 1,4";
 export const ID_TORNEO_APERTURA = 1;
 export const ID_TORNEO_CLAUSURA = 2;
 

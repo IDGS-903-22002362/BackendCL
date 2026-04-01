@@ -43,6 +43,7 @@ describe("users.points.controller assignPoints", () => {
 
     expect(mockedPointsService.addPoints).toHaveBeenCalledWith("user_123", 50, {
       origen: "admin",
+      origenId: "admin-api",
       descripcion: "Asignacion manual de puntos",
     });
     expect((res as any).status).toHaveBeenCalledWith(200);
@@ -53,6 +54,45 @@ describe("users.points.controller assignPoints", () => {
         id: "user_123",
         puntosAsignados: 50,
         puntosActuales: 150,
+        descripcion: "Asignacion manual de puntos",
+        origenId: "admin-api",
+      },
+    });
+  });
+
+  it("usa descripcion y origenId enviados en el request", async () => {
+    mockedPointsService.addPoints.mockResolvedValue({
+      id: "user_123",
+      puntosActuales: 220,
+    } as never);
+
+    const req = {
+      params: { id: "user_123" },
+      body: {
+        points: 70,
+        descripcion: "Bonificacion por campana externa",
+        origenId: "crm-club-leon",
+      },
+    } as unknown as Parameters<typeof assignPoints>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof assignPoints>[1];
+
+    await assignPoints(req, res);
+
+    expect(mockedPointsService.addPoints).toHaveBeenCalledWith("user_123", 70, {
+      origen: "admin",
+      origenId: "crm-club-leon",
+      descripcion: "Bonificacion por campana externa",
+    });
+    expect((res as any).status).toHaveBeenCalledWith(200);
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: true,
+      message: "Puntos asignados exitosamente",
+      data: {
+        id: "user_123",
+        puntosAsignados: 70,
+        puntosActuales: 220,
+        descripcion: "Bonificacion por campana externa",
+        origenId: "crm-club-leon",
       },
     });
   });
