@@ -1,5 +1,9 @@
 # Aplazo Payments Backend
 
+## Documentos relacionados
+
+- Frontend consumption guide: [aplazo-frontend-consumption.md](./aplazo-frontend-consumption.md)
+
 ## Resumen
 
 Esta integración agrega Aplazo como proveedor alternativo sin tocar las rutas legacy de Stripe:
