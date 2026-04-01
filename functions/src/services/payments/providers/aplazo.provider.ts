@@ -7,6 +7,7 @@ import {
   getAplazoConfig,
 } from "../../../config/aplazo.config";
 import { ProveedorPago, RefundState } from "../../../models/pago.model";
+import logger from "../../../utils/logger";
 import {
   CreateInStoreProviderInput,
   CreateOnlineProviderInput,
@@ -39,6 +40,7 @@ const TODO_PRODUCTS_ONLINE = getAplazoContractTodoMessage("shape de products[] o
 const TODO_PRODUCTS_INSTORE = getAplazoContractTodoMessage(
   "shape de products[] in-store",
 );
+const aplazoLogger = logger.child({ component: "aplazo-provider" });
 
 const normalizeComparable = (value: string): string => {
   return value
@@ -581,6 +583,15 @@ export class AplazoProvider implements PaymentProvider {
         Authorization: /^bearer\s+/i.test(token) ? token : `Bearer ${token}`,
       };
     } catch (error) {
+      const normalizedError = normalizeProviderError(error);
+      aplazoLogger.error("aplazo_online_auth_failed", {
+        channel: "online",
+        endpoint: authPath,
+        baseUrl: apiBaseUrl,
+        statusCode: normalizedError.statusCode,
+        code: normalizedError.code,
+        details: normalizedError.details,
+      });
       throw normalizeProviderError(error);
     }
   }
@@ -856,6 +867,22 @@ export class AplazoProvider implements PaymentProvider {
         rawResponseSanitized: sanitizeAplazoPayload(rawData),
       };
     } catch (error) {
+      const normalizedError = normalizeProviderError(error);
+      aplazoLogger.error("aplazo_online_create_failed", {
+        channel: "online",
+        paymentAttemptId: input.paymentAttemptId,
+        endpoint: createPath,
+        baseUrl: apiBaseUrl,
+        cartId,
+        amountMinor: input.amountMinor,
+        providerReference: input.providerReference,
+        requestPayload: sanitizeAplazoPayload(
+          buildOnlineAplazoPayload(input, contract, cartId),
+        ),
+        statusCode: normalizedError.statusCode,
+        code: normalizedError.code,
+        details: normalizedError.details,
+      });
       throw normalizeProviderError(error);
     }
   }
