@@ -149,8 +149,43 @@ const getMetadataString = (
     : undefined;
 };
 
+const normalizeBaseUrl = (value: string): string => {
+  return value.trim().replace(/\/+$/, "");
+};
+
+const getBackendBaseUrl = (): string => {
+  const explicit =
+    process.env.BACKEND_PUBLIC_URL?.trim() ||
+    process.env.PAYMENTS_BACKEND_BASE_URL?.trim();
+  if (explicit) {
+    return normalizeBaseUrl(explicit);
+  }
+
+  const projectId =
+    process.env.GCLOUD_PROJECT ||
+    process.env.GCP_PROJECT ||
+    process.env.GCP_PROJECT_ID ||
+    process.env.FIREBASE_PROJECT_ID;
+  const region =
+    process.env.FUNCTION_REGION ||
+    process.env.GCLOUD_REGION ||
+    process.env.GCP_REGION ||
+    "us-central1";
+  const serviceName = process.env.K_SERVICE || process.env.FUNCTION_NAME || "api";
+
+  if (projectId && serviceName) {
+    return `https://${region}-${projectId}.cloudfunctions.net/${serviceName}`;
+  }
+
+  throw new PaymentApiError(
+    500,
+    "PAYMENT_INTERNAL_ERROR",
+    "No fue posible resolver la URL pública del backend para webhooks Aplazo",
+  );
+};
+
 const getBackendWebhookUrl = (): string => {
-  return `${process.env.APP_URL || "http://localhost:3000"}/api/webhooks/aplazo`;
+  return `${getBackendBaseUrl()}/api/webhooks/aplazo`;
 };
 
 const toPaymentStatus = (attempt: PaymentAttempt): PaymentStatus => {

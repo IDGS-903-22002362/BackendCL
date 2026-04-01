@@ -51,6 +51,8 @@ export const api = onRequest(
       "STRIPE_PUBLISHABLE_KEY",
       "STRIPE_CURRENCY",
       "APP_URL",
+      "BACKEND_PUBLIC_URL",
+      "PAYMENTS_BACKEND_BASE_URL",
       "APLAZO_ENABLED",
       "APLAZO_ENV",
       "APLAZO_INTEGRATION_VERSION",
