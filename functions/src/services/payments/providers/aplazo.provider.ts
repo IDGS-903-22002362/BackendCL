@@ -313,12 +313,15 @@ const resolveRefundState = (providerStatus?: string): RefundState => {
 };
 
 const resolveShopId = (
+  channel: AplazoChannel,
   contract: AplazoContractConfig,
   metadata?: Record<string, unknown>,
 ): string | number => {
   const candidate =
     getMetadataString(metadata, "shopId") ||
-    getMetadataString(metadata, "sucursalId") ||
+    (channel === "in_store"
+      ? getMetadataString(metadata, "sucursalId")
+      : undefined) ||
     contract.merchantId;
 
   if (!candidate) {
@@ -421,7 +424,7 @@ const buildOnlineAplazoPayload = (
 
   const payload: JsonRecord = {
     totalPrice: minorToMajor(input.amountMinor),
-    shopId: resolveShopId(contract, input.metadata),
+    shopId: resolveShopId("online", contract, input.metadata),
     cartId,
     successUrl: input.successUrl,
     errorUrl: input.failureUrl || input.cancelUrl,
@@ -473,7 +476,7 @@ const buildInStoreAplazoPayload = (
 ): JsonRecord => {
   const pricingSnapshot = input.pricingSnapshot;
   const payload: JsonRecord = {
-    shopId: resolveShopId(contract, input.metadata),
+    shopId: resolveShopId("in_store", contract, input.metadata),
     cartId,
     webhookUrl: input.webhookUrl,
     callbackUrl: input.callbackUrl,

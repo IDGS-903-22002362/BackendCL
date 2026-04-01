@@ -187,6 +187,70 @@ describe("Aplazo provider", () => {
     });
   });
 
+  it("keeps configured online merchantId as shopId even if metadata includes sucursalId", async () => {
+    process.env.APLAZO_ONLINE_MERCHANT_ID = "3683";
+
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request.mockResolvedValue({
+      data: {
+        loanId: "loan_987",
+        cartId: "orden_123",
+        url: "https://checkout.aplazo/loan_987",
+        status: "No confirmado",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await aplazoProvider.createOnline({
+      paymentAttemptId: "attempt_1",
+      idempotencyKey: "idem_12345678",
+      amountMinor: 129900,
+      currency: "mxn",
+      providerReference: "orden_123",
+      customerName: "Juan Perez",
+      customerEmail: "juan@example.com",
+      customerPhone: "4771234567",
+      successUrl: "https://app/success",
+      cancelUrl: "https://app/cancel",
+      failureUrl: "https://app/failure",
+      webhookUrl: "https://api/webhooks/aplazo",
+      cartUrl: "https://app/cart",
+      metadata: {
+        cartId: "orden_123",
+        sucursalId: "sucursal-1",
+      },
+      pricingSnapshot: {
+        subtotalMinor: 129900,
+        taxMinor: 0,
+        shippingMinor: 0,
+        totalMinor: 129900,
+        currency: "mxn",
+        items: [
+          {
+            productoId: "prod_1",
+            cantidad: 1,
+            precioUnitarioMinor: 129900,
+            subtotalMinor: 129900,
+          },
+        ],
+      },
+    });
+
+    expect(createClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shopId: 3683,
+        }),
+      }),
+    );
+  });
+
   it("creates in-store payments with api_token and merchant_id headers", async () => {
     const createClient = buildClientMock();
     createClient.request.mockResolvedValue({
