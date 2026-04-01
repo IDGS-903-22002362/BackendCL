@@ -76,6 +76,17 @@ const toNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
+const toAplazoNumericWhenPossible = (
+  value: string | undefined,
+): string | number | undefined => {
+  const normalized = toTrimmedString(value);
+  if (!normalized) {
+    return undefined;
+  }
+
+  return /^\d+$/.test(normalized) ? Number(normalized) : normalized;
+};
+
 const collectPayloadVariants = (payload: unknown): JsonRecord[] => {
   if (!isRecord(payload)) {
     return [];
@@ -304,7 +315,7 @@ const resolveRefundState = (providerStatus?: string): RefundState => {
 const resolveShopId = (
   contract: AplazoContractConfig,
   metadata?: Record<string, unknown>,
-): string => {
+): string | number => {
   const candidate =
     getMetadataString(metadata, "shopId") ||
     getMetadataString(metadata, "sucursalId") ||
@@ -318,7 +329,7 @@ const resolveShopId = (
     );
   }
 
-  return candidate;
+  return toAplazoNumericWhenPossible(candidate) ?? candidate;
 };
 
 const resolveCartId = (
@@ -542,7 +553,8 @@ export class AplazoProvider implements PaymentProvider {
       const client = buildClient(apiBaseUrl, contract.timeoutMs);
       const response = await client.post(authPath, {
         apiToken: contract.apiToken,
-        merchantId: contract.merchantId,
+        merchantId:
+          toAplazoNumericWhenPossible(contract.merchantId) ?? contract.merchantId,
       });
       const token =
         pickString(response.data, [

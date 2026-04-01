@@ -129,6 +129,64 @@ describe("Aplazo provider", () => {
     expect(result.status).toBe(PaymentStatus.PENDING_CUSTOMER);
   });
 
+  it("sends numeric merchantId to online auth when configured as digits", async () => {
+    process.env.APLAZO_ONLINE_MERCHANT_ID = "2639";
+
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request.mockResolvedValue({
+      data: {
+        loanId: "loan_987",
+        cartId: "orden_123",
+        url: "https://checkout.aplazo/loan_987",
+        status: "No confirmado",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await aplazoProvider.createOnline({
+      paymentAttemptId: "attempt_1",
+      idempotencyKey: "idem_12345678",
+      amountMinor: 129900,
+      currency: "mxn",
+      providerReference: "orden_123",
+      customerName: "Juan Perez",
+      customerEmail: "juan@example.com",
+      customerPhone: "4771234567",
+      successUrl: "https://app/success",
+      cancelUrl: "https://app/cancel",
+      failureUrl: "https://app/failure",
+      webhookUrl: "https://api/webhooks/aplazo",
+      cartUrl: "https://app/cart",
+      metadata: { cartId: "orden_123" },
+      pricingSnapshot: {
+        subtotalMinor: 129900,
+        taxMinor: 0,
+        shippingMinor: 0,
+        totalMinor: 129900,
+        currency: "mxn",
+        items: [
+          {
+            productoId: "prod_1",
+            cantidad: 1,
+            precioUnitarioMinor: 129900,
+            subtotalMinor: 129900,
+          },
+        ],
+      },
+    });
+
+    expect(authClient.post).toHaveBeenCalledWith("/auth", {
+      apiToken: "token_online",
+      merchantId: 2639,
+    });
+  });
+
   it("creates in-store payments with api_token and merchant_id headers", async () => {
     const createClient = buildClientMock();
     createClient.request.mockResolvedValue({
