@@ -69,4 +69,24 @@ describe("notificationAiService", () => {
     expect(copy.priority).toBe("high");
     expect(copy.title).toBe("Regresa por tu jersey");
   });
+
+  it("builds fallback copy for product rating reminders", async () => {
+    mockedGeminiAdapter.generateStructured.mockRejectedValueOnce(
+      new Error("gemini unavailable"),
+    );
+
+    const copy = await notificationAiService.generateCopy({
+      ...baseEvent,
+      eventType: "product_rating_reminder",
+      category: "recommendation",
+      sourceData: {
+        productName: "Gorra Edición Especial",
+      },
+    });
+
+    expect(copy.source).toBe("fallback");
+    expect(copy.title).toBe("Califica tu compra");
+    expect(copy.body).toContain("Gorra Edición Especial");
+    expect(copy.deeplink).toBe("clubleon://shop/product/prod_1");
+  });
 });

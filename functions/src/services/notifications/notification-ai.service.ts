@@ -136,6 +136,13 @@ class NotificationAiService {
           body: `${productLabel} tiene nuevo precio. Revísalo antes de que cambie otra vez.`,
           reasoningTag: "price_drop",
         };
+      case "product_rating_reminder":
+        return {
+          ...base,
+          title: "Califica tu compra",
+          body: `¿Qué te pareció ${productLabel}? Tu calificación del 1 al 5 nos ayuda a mejorar.`,
+          reasoningTag: "product_rating_reminder",
+        };
       case "inactive_user":
         return {
           ...base,

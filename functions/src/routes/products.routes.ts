@@ -18,6 +18,7 @@ import {
   deleteImageSchema,
   updateProductStockSchema,
   replaceSizeInventorySchema,
+  rateProductSchema,
 } from "../middleware/validators/product.validator";
 import {
   idParamSchema,
@@ -27,7 +28,11 @@ import {
   productoDetalleParamsSchema,
 } from "../middleware/validators/common.validator";
 import { parseMultipartImages } from "../middleware/multipart.middleware";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import {
+  authMiddleware,
+  optionalAuthMiddleware,
+  requireAdmin,
+} from "../utils/middlewares";
 import { productoIdParamSchema } from "../middleware/validators/carrito.validator";
 import { createDetalleProductoSchema } from "../middleware/validators/detalleProducto.validator";
 import * as detalleQueryController from "../controllers/detalleProducto/detalleProducto.query.controller";
@@ -163,7 +168,13 @@ router.get(
  * /api/productos/{id}:
  *   get:
  *     summary: Obtener producto por ID
- *     description: Retorna un producto específico buscado por su ID
+ *     description: |
+ *       Retorna un producto específico buscado por su ID.
+ *
+ *       Si se envía un token JWT válido, la respuesta puede incluir:
+ *       - `ratingEligibility`: si el usuario puede calificar el producto
+ *       - `myRating`: la calificación actual del usuario para ese producto
+ *       - `isFavorito`: si el producto ya está marcado como favorito por el usuario
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -185,13 +196,107 @@ router.get(
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   $ref: '#/components/schemas/Product'
+ *                   $ref: '#/components/schemas/ProductDetail'
  *       404:
  *         $ref: '#/components/responses/404NotFound'
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/:id", validateParams(idParamSchema), queryController.getById);
+router.get(
+  "/:id",
+  optionalAuthMiddleware,
+  validateParams(idParamSchema),
+  queryController.getById,
+);
+
+/**
+ * @swagger
+ * /api/productos/{id}/calificacion:
+ *   post:
+ *     summary: Crear o actualizar la calificación numérica del usuario autenticado
+ *     description: |
+ *       Registra una calificación numérica del 1 al 5 para un producto.
+ *
+ *       **Reglas:**
+ *       - Requiere autenticación.
+ *       - Solo pueden calificar usuarios que tengan una orden del producto en estado `ENTREGADA`.
+ *       - Cada usuario mantiene una sola calificación activa por producto.
+ *       - Si el usuario ya calificó antes, la operación actualiza la calificación existente.
+ *     tags: [Products]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del producto
+ *         schema:
+ *           type: string
+ *           example: "prod_12345"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RateProduct'
+ *           example:
+ *             score: 5
+ *     responses:
+ *       201:
+ *         description: Calificación creada exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Calificación registrada exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/ProductRating'
+ *       200:
+ *         description: Calificación actualizada exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Calificación actualizada exitosamente"
+ *                 data:
+ *                   $ref: '#/components/schemas/ProductRating'
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         description: El usuario no es elegible para calificar el producto
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             example:
+ *               success: false
+ *               message: "Solo puedes calificar productos que ya fueron entregados"
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/:id/calificacion",
+  authMiddleware,
+  validateParams(idParamSchema),
+  validateBody(rateProductSchema),
+  commandController.rateProduct,
+);
 
 /**
  * @swagger

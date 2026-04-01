@@ -74,6 +74,13 @@ class NotificationEventService {
           input.sourceData?.precioAnterior,
           input.sourceData?.precioNuevo,
         );
+      case "product_rating_reminder":
+        return buildNotificationFingerprint(
+          input.eventType,
+          input.userId,
+          input.productId,
+          input.orderId || input.sourceData?.eligibleOrderId,
+        );
       case "inactive_user":
         return buildNotificationFingerprint(
           input.eventType,

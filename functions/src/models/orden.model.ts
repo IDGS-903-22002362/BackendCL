@@ -40,6 +40,7 @@ export enum EstadoOrden {
  */
 export enum MetodoPago {
   TARJETA = "TARJETA", // Tarjeta de crédito/débito
+  APLAZO = "APLAZO", // Crédito Aplazo
   TRANSFERENCIA = "TRANSFERENCIA", // Transferencia bancaria
   EFECTIVO = "EFECTIVO", // Pago en efectivo contra entrega
   PAYPAL = "PAYPAL", // PayPal
@@ -101,6 +102,7 @@ export interface Orden {
   transportista?: string; // Nombre del transportista
   costoEnvio?: number; // Costo de envío (si aplica)
   notas?: string; // Notas adicionales del cliente
+  deliveredAt?: Timestamp; // Fecha efectiva en la que la orden quedó entregada
 
   // Campos de auditoría
   createdAt: Timestamp; // Fecha de creación de la orden

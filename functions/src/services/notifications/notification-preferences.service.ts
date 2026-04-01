@@ -53,6 +53,7 @@ class NotificationPreferencesService {
       cartRemindersEnabled: true,
       restockEnabled: true,
       priceDropEnabled: true,
+      ratingRemindersEnabled: true,
       marketingEnabled: true,
       matchdayEnabled: true,
       reactivationEnabled: true,
@@ -158,6 +159,8 @@ class NotificationPreferencesService {
         return preference.restockEnabled;
       case "price_drop":
         return preference.priceDropEnabled;
+      case "product_rating_reminder":
+        return preference.ratingRemindersEnabled;
       case "inactive_user":
         return preference.reactivationEnabled;
       case "promo_campaign":

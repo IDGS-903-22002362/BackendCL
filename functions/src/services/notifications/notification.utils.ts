@@ -33,6 +33,8 @@ export const resolveNotificationCategory = (
       return "restock";
     case "price_drop":
       return "price_drop";
+    case "product_rating_reminder":
+      return "recommendation";
     case "promo_campaign":
       return "promo";
     case "matchday_campaign":
@@ -83,6 +85,7 @@ export const resolveNotificationEntity = (
       return { entityType: "order", entityId: input.orderId };
     case "product_restocked":
     case "price_drop":
+    case "product_rating_reminder":
       if (!input.productId) {
         throw new Error("productId es requerido para eventos de producto");
       }

@@ -17,13 +17,16 @@ import { assertAiConfig, getAiRuntimeSummary } from "./config/ai.config";
 import { sendLowStockDailyDigest } from "./stock-alert.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
+import { reconcileAplazoPayments } from "./aplazo-payments.cron";
 import {
   enqueueAbandonedCartNotifications,
   enqueueCampaignNotifications,
   enqueueInactiveUserNotifications,
+  enqueueProductRatingReminderNotifications,
   enqueueProbableRepurchaseNotifications,
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
+import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 
 let apiAiConfigValidated = false;
 
@@ -48,6 +51,45 @@ export const api = onRequest(
       "STRIPE_PUBLISHABLE_KEY",
       "STRIPE_CURRENCY",
       "APP_URL",
+      "APLAZO_ENABLED",
+      "APLAZO_ENV",
+      "APLAZO_INTEGRATION_VERSION",
+      "APLAZO_ONLINE_ENABLED",
+      "APLAZO_INSTORE_ENABLED",
+      "APLAZO_REFUNDS_ENABLED",
+      "APLAZO_RECONCILE_ENABLED",
+      "APLAZO_ONLINE_BASE_URL",
+      "APLAZO_ONLINE_MERCHANT_BASE_URL",
+      "APLAZO_ONLINE_REFUNDS_BASE_URL",
+      "APLAZO_ONLINE_MERCHANT_ID",
+      "APLAZO_ONLINE_API_TOKEN",
+      "APLAZO_ONLINE_WEBHOOK_SECRET",
+      "APLAZO_ONLINE_WEBHOOK_AUTH_SCHEME",
+      "APLAZO_ONLINE_SUCCESS_URL",
+      "APLAZO_ONLINE_CANCEL_URL",
+      "APLAZO_ONLINE_FAILURE_URL",
+      "APLAZO_ONLINE_CART_URL",
+      "APLAZO_ONLINE_TIMEOUT_MS",
+      "APLAZO_ONLINE_AUTH_PATH",
+      "APLAZO_ONLINE_CREATE_PATH",
+      "APLAZO_ONLINE_STATUS_PATH",
+      "APLAZO_ONLINE_REFUND_PATH",
+      "APLAZO_ONLINE_REFUND_STATUS_PATH",
+      "APLAZO_INSTORE_BASE_URL",
+      "APLAZO_INSTORE_MERCHANT_BASE_URL",
+      "APLAZO_INSTORE_MERCHANT_ID",
+      "APLAZO_INSTORE_API_TOKEN",
+      "APLAZO_INSTORE_WEBHOOK_SECRET",
+      "APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME",
+      "APLAZO_INSTORE_CALLBACK_URL",
+      "APLAZO_INSTORE_TIMEOUT_MS",
+      "APLAZO_INSTORE_CREATE_PATH",
+      "APLAZO_INSTORE_STATUS_PATH",
+      "APLAZO_INSTORE_CANCEL_PATH",
+      "APLAZO_INSTORE_REFUND_PATH",
+      "APLAZO_INSTORE_REFUND_STATUS_PATH",
+      "APLAZO_INSTORE_REGISTER_BRANCH_PATH",
+      "APLAZO_INSTORE_DEFAULT_COMM_CHANNEL",
       "JWT_SECRET",
       "WEB_API_KEY",
       "GEMINI_API_KEY",
@@ -73,6 +115,8 @@ export const api = onRequest(
       "NOTIFICATIONS_CART_ABANDONED_MINUTES",
       "NOTIFICATIONS_CART_COOLDOWN_HOURS",
       "NOTIFICATIONS_PRICE_DROP_COOLDOWN_DAYS",
+      "NOTIFICATIONS_RATING_REMINDER_DELAY_HOURS",
+      "NOTIFICATIONS_RATING_REMINDER_LOOKBACK_DAYS",
       "NOTIFICATIONS_PRODUCT_INTEREST_LOOKBACK_DAYS",
       "NOTIFICATIONS_ORDER_LOOKBACK_DAYS",
       "NOTIFICATIONS_INACTIVE_USER_DAYS",
@@ -82,6 +126,7 @@ export const api = onRequest(
       "NOTIFICATIONS_INACTIVE_USERS_BATCH_SIZE",
       "NOTIFICATIONS_CAMPAIGN_BATCH_SIZE",
       "NOTIFICATIONS_REPURCHASE_BATCH_SIZE",
+      "NOTIFICATIONS_RATING_REMINDER_BATCH_SIZE",
       "AI_NOTIFICATION_PROMPT_VERSION",
       "AI_STORAGE_BUCKET",
       "GCS_TRYON_BUCKET",
@@ -102,9 +147,12 @@ export const lowStockDailyDigest = sendLowStockDailyDigest;
 export const syncInstagramPostsFunction = syncInstagramPosts;
 export const processTryOnJob = processTryOnJobTrigger;
 export const processNotificationEvent = processNotificationEventTrigger;
+export const processPaymentEvent = processPaymentEventTrigger;
+export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;
 export const abandonedCartNotifications = enqueueAbandonedCartNotifications;
 export const inactiveUserNotifications = enqueueInactiveUserNotifications;
 export const campaignNotifications = enqueueCampaignNotifications;
 export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
-
+export const productRatingReminderNotifications =
+  enqueueProductRatingReminderNotifications;

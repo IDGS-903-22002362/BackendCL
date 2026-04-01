@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { authAppOficial, firestoreApp } from "../../config/app.firebase";
 import { admin } from "../../config/firebase.admin";
 import { mapFirebaseError } from "../../utils/firebase-error.util";
+import pointsService from "../../services/puntos.service";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { UsuarioApp, RolUsuario } from "../../models/usuario.model";
@@ -69,6 +70,42 @@ const getIdentityToolkitErrorCode = (error: unknown): string | undefined => {
 
   const message = error.response?.data?.error?.message;
   return typeof message === "string" ? message : undefined;
+};
+
+const isAlreadyExistsError = (error: unknown): boolean => {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: string }).code || "")
+      : "";
+
+  return code === "6" || code === "already-exists" || code === "ALREADY_EXISTS";
+};
+
+const buildUsuarioFromDoc = (
+  docSnap: FirebaseFirestore.DocumentSnapshot,
+): UsuarioApp => {
+  const data = docSnap.data()!;
+
+  return {
+    id: docSnap.id,
+    uid: data.uid,
+    provider: data.provider,
+    nombre: data.nombre,
+    email: data.email,
+    telefono: data.telefono ?? null,
+    fechaNacimiento: data.fechaNacimiento ?? null,
+    puntosActuales: data.puntosActuales ?? 0,
+    nivel: data.nivel ?? "Bronce",
+    perfilCompleto: data.perfilCompleto ?? false,
+    edad: data.edad ?? 0,
+    genero: data.genero ?? "",
+    rol: data.rol ?? RolUsuario.CLIENTE,
+    activo: data.activo ?? true,
+    historialPuntos: data.historialPuntos,
+    bonoBienvenidaOtorgadoAt: data.bonoBienvenidaOtorgadoAt,
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+  } as UsuarioApp;
 };
 
 export const registerOrLogin = async (req: Request, res: Response) => {
@@ -277,29 +314,29 @@ export const registerOrLogin = async (req: Request, res: Response) => {
         updatedAt: now,
       };
 
-      await docRef.set(nuevoUsuario);
-      usuario = { id: uid, ...nuevoUsuario } as UsuarioApp;
+      try {
+        await docRef.create(nuevoUsuario);
+        usuario = await pointsService.otorgarBonoBienvenida(uid);
+      } catch (createError) {
+        if (!isAlreadyExistsError(createError)) {
+          throw createError;
+        }
+
+        const existingSnap = await docRef.get();
+
+        if (!existingSnap.exists) {
+          throw createError;
+        }
+
+        usuario = buildUsuarioFromDoc(existingSnap);
+      }
     } else {
       // 👤 USUARIO EXISTENTE
-      const data = docSnap.data()!;
-      usuario = {
-        id: docSnap.id,
-        uid: data.uid,
-        provider: data.provider,
-        nombre: data.nombre,
-        email: data.email,
-        telefono: data.telefono ?? null,
-        fechaNacimiento: data.fechaNacimiento ?? null,
-        puntosActuales: data.puntosActuales ?? 0,
-        nivel: data.nivel ?? "Bronce",
-        perfilCompleto: data.perfilCompleto ?? false,
-        edad: data.edad ?? 0,
-        genero: data.genero ?? "",
-        rol: data.rol ?? RolUsuario.CLIENTE,
-        activo: data.activo ?? true,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      };
+      usuario = buildUsuarioFromDoc(docSnap);
+
+      if (!usuario.bonoBienvenidaOtorgadoAt) {
+        usuario = await pointsService.otorgarBonoBienvenida(uid);
+      }
 
       await docRef.update({ updatedAt: admin.firestore.Timestamp.now() });
     }

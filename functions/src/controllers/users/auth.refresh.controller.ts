@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import jwt from 'jsonwebtoken';
 import { firestoreApp } from "../../config/app.firebase";
 import { RolUsuario } from "../../models/usuario.model";
+import pointsService from "../../services/puntos.service";
 
 export const refreshToken = async (req: Request, res: Response) => {
     try {
@@ -36,7 +37,15 @@ export const refreshToken = async (req: Request, res: Response) => {
         }
 
         const userDoc = snapshot.docs[0];
-        const userData = userDoc.data();
+        let userData = userDoc.data();
+
+        if (!userData.bonoBienvenidaOtorgadoAt) {
+            const usuarioActualizado = await pointsService.otorgarBonoBienvenida(decoded.uid);
+            userData = {
+                ...userData,
+                ...usuarioActualizado,
+            };
+        }
 
         if (!userData.activo) {
             return res.status(403).json({ success: false, message: "Usuario desactivado" });
