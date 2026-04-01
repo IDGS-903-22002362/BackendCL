@@ -319,6 +319,7 @@ describe("Aplazo payments service", () => {
     });
 
     process.env.APP_URL = "http://localhost:3000";
+    process.env.BACKEND_PUBLIC_URL = "http://localhost:3000";
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
     process.env.APLAZO_INSTORE_ENABLED = "true";
@@ -338,7 +339,8 @@ describe("Aplazo payments service", () => {
           metodoPago: MetodoPago.APLAZO,
           subtotal: 1000,
           impuestos: 0,
-          total: 1000,
+          total: 1099,
+          costoEnvio: 99,
           items: [
             {
               productoId: "prod_1",
@@ -414,6 +416,11 @@ describe("Aplazo payments service", () => {
     expect(aplazoProviderMocks.createOnline).toHaveBeenCalledWith(
       expect.objectContaining({
         providerReference: "orden_aplazo_1",
+        pricingSnapshot: expect.objectContaining({
+          subtotalMinor: 100000,
+          shippingMinor: 9900,
+          totalMinor: 109900,
+        }),
       }),
     );
     expect(aplazoProviderMocks.createOnline).toHaveBeenCalledTimes(1);
