@@ -191,4 +191,38 @@ describe("Order service size-aware stock validation", () => {
       }),
     ).rejects.toThrow("no maneja inventario por talla");
   });
+
+  it("incluye el costo de envio en el total calculado de la orden", async () => {
+    const orden = await ordenService.createOrden({
+      usuarioId: "user_1",
+      items: [
+        {
+          productoId: "balon_1",
+          cantidad: 1,
+          precioUnitario: 1,
+          subtotal: 1,
+        },
+      ],
+      subtotal: 1,
+      impuestos: 0,
+      total: 1,
+      direccionEnvio: {
+        nombre: "Juan Perez",
+        telefono: "4771234567",
+        calle: "Av. Principal",
+        numero: "1",
+        colonia: "Centro",
+        ciudad: "Leon",
+        estado: "Guanajuato",
+        codigoPostal: "37000",
+      },
+      metodoPago: MetodoPago.APLAZO,
+      costoEnvio: 99,
+    });
+
+    expect(orden.subtotal).toBe(700);
+    expect(orden.costoEnvio).toBe(99);
+    expect(orden.total).toBe(799);
+    expect(dbState.ordenes[orden.id!]?.total).toBe(799);
+  });
 });

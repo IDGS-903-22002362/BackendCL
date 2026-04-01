@@ -923,7 +923,7 @@ export class PaymentsService {
     return {
       subtotalMinor: roundToMinor(order.subtotal),
       taxMinor: roundToMinor(order.impuestos),
-      shippingMinor: 0,
+      shippingMinor: roundToMinor(order.costoEnvio),
       totalMinor: roundToMinor(order.total),
       currency: "mxn",
       items: (order.items || []).map((item) => ({

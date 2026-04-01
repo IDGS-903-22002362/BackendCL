@@ -206,13 +206,16 @@ export class OrdenService {
 
       // PASO 2: Calcular totales
       const impuestosCalculados = subtotalCalculado * TASA_IVA; // 0% por ahora
-      const totalCalculado = subtotalCalculado + impuestosCalculados;
+      const costoEnvioCalculado = data.costoEnvio ?? 0;
+      const totalCalculado =
+        subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
 
       console.log(`💰 Totales calculados:`);
       console.log(`   Subtotal: $${subtotalCalculado.toFixed(2)}`);
       console.log(
         `   Impuestos (${TASA_IVA * 100}%): $${impuestosCalculados.toFixed(2)}`,
       );
+      console.log(`   Envío: $${costoEnvioCalculado.toFixed(2)}`);
       console.log(`   Total: $${totalCalculado.toFixed(2)}`);
 
       // PASO 3: Construir orden con datos validados y calculados
@@ -226,7 +229,7 @@ export class OrdenService {
         estado: EstadoOrden.PENDIENTE, // Siempre PENDIENTE al crear
         direccionEnvio: data.direccionEnvio,
         metodoPago: data.metodoPago,
-        costoEnvio: data.costoEnvio || 0,
+        costoEnvio: costoEnvioCalculado,
         notas: data.notas,
         createdAt: now,
         updatedAt: now,
