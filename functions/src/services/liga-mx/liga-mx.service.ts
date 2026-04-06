@@ -11,6 +11,8 @@ import {
   construirClasificacionActual,
   construirContextoActual,
   construirPlantillaActual,
+  esMarcadorOficial,
+  esPartidoConcluido,
   normalizarDetallePartido,
   normalizarFilaClasificacion,
   normalizarCuerpoTecnico,
@@ -146,7 +148,27 @@ class LigaMxService {
 
   async getCalendar(divisionKey: DivisionKey): Promise<CalendarioLigaMxDoc> {
     const contexto = await this.getContext();
-    const existente = await this.obtenerCalendarioActual(divisionKey);
+    let existente = await this.obtenerCalendarioActual(divisionKey);
+
+    if (existente) {
+      const partidoPendienteDeCierre = this.obtenerPartidoPendienteDeCierre(
+        existente.partidos,
+      );
+
+      if (
+        await this.debeConsultarResultadosDivision(
+          divisionKey,
+          partidoPendienteDeCierre,
+        )
+      ) {
+        existente = await this.sincronizarCalendarioActual(
+          divisionKey,
+          contexto,
+          true,
+          configuracionLigaMx.ttlMs.seguimientoResultado,
+        );
+      }
+    }
 
     if (
       existente &&
@@ -215,6 +237,26 @@ class LigaMxService {
 
   async getMatch(id: string): Promise<PartidoLigaMxDoc | null> {
     let partido = await this.obtenerPartidoActual(id);
+
+    if (partido && !(await this.esMarcadorPendienteDeCierre(partido))) {
+      return partido;
+    }
+
+    if (partido && (await this.esMarcadorPendienteDeCierre(partido))) {
+      const contexto = await this.getContext();
+
+      if (
+        await this.debeConsultarResultadosDivision(partido.claveDivision, partido)
+      ) {
+        await this.sincronizarCalendarioActual(
+          partido.claveDivision,
+          contexto,
+          true,
+          configuracionLigaMx.ttlMs.seguimientoResultado,
+        );
+        partido = await this.obtenerPartidoActual(id);
+      }
+    }
 
     if (!partido) {
       await Promise.all([this.getCalendar("varonil"), this.getCalendar("femenil")]);
@@ -700,12 +742,36 @@ class LigaMxService {
     );
   }
 
+  private async esMarcadorPendienteDeCierre(
+    partido: PartidoLigaMxDoc,
+    ahoraMs = Date.now(),
+  ): Promise<boolean> {
+    if (!partido.fechaHoraPartido || esMarcadorOficial(partido.estado)) {
+      return false;
+    }
+
+    const fechaPartidoMs = new Date(partido.fechaHoraPartido).getTime();
+
+    if (Number.isNaN(fechaPartidoMs)) {
+      return false;
+    }
+
+    if (esPartidoConcluido(partido.estado)) {
+      return true;
+    }
+
+    return (
+      ahoraMs >=
+      fechaPartidoMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs
+    );
+  }
+
   private obtenerPartidoPendienteDeCierre(
     partidos: PartidoLigaMxDoc[],
     ahoraMs = Date.now(),
   ): PartidoLigaMxDoc | null {
     const candidatos = partidos.filter((partido) => {
-      if (!partido.fechaHoraPartido || this.esPartidoFinalizado(partido)) {
+      if (!partido.fechaHoraPartido || esMarcadorOficial(partido.estado)) {
         return false;
       }
 
@@ -741,7 +807,7 @@ class LigaMxService {
     );
 
     return partidosActuales.filter((partidoActual) => {
-      if (!this.esPartidoFinalizado(partidoActual)) {
+      if (!esMarcadorOficial(partidoActual.estado)) {
         return false;
       }
 
@@ -751,24 +817,8 @@ class LigaMxService {
         return true;
       }
 
-      return !this.esPartidoFinalizado(partidoAnterior);
+      return !esMarcadorOficial(partidoAnterior.estado);
     });
-  }
-
-  private esPartidoFinalizado(partido: PartidoLigaMxDoc): boolean {
-    const etiqueta = (partido.estado.etiquetaMinutoAMinuto || "").toLowerCase();
-
-    if (
-      partido.estado.idMinutoAMinuto === 7 ||
-      etiqueta.includes("oficial") ||
-      etiqueta.includes("final") ||
-      etiqueta.includes("conclu") ||
-      etiqueta.includes("penales")
-    ) {
-      return true;
-    }
-
-    return false;
   }
 
   private async marcarIntento(clave: string): Promise<void> {
@@ -822,6 +872,10 @@ class LigaMxService {
 
     if (!Number.isNaN(fechaPartidoMs) && fechaPartidoMs > Date.now()) {
       return configuracionLigaMx.ttlMs.detalleProgramado;
+    }
+
+    if (!esMarcadorOficial(partido.estado)) {
+      return configuracionLigaMx.ttlMs.seguimientoResultado;
     }
 
     return configuracionLigaMx.ttlMs.detalleFinalizado;
