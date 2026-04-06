@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   construirContextoActual,
+  esMarcadorOficial,
+  esPartidoConcluido,
   normalizarDetallePartido,
   normalizarEventoNarracion,
   normalizarJugadorPlantilla,
@@ -231,5 +233,38 @@ describe("liga-mx mapper", () => {
     expect(detalle.alineaciones.visita.suplentes).toHaveLength(1);
     expect(detalle.alineaciones.visita.cuerpoTecnico).toHaveLength(1);
     expect(detalle.alineaciones.visita.titulares[0]?.nombreCompleto).toContain("Visitante");
+  });
+
+  it("hides a temporary 0-0 for concluded matches until the result is official", () => {
+    const match = normalizarPartidoCalendario(
+      {
+        idPartido: 151300,
+        idDivision: 1,
+        division: "LIGA MX",
+        idTemporada: 76,
+        temporada: "2025-2026",
+        idTorneo: 2,
+        torneo: "Clausura",
+        idClubLocal: 9,
+        clubLocal: "León",
+        idClubVisita: 12571,
+        clubVisita: "Atlas",
+        idEstatusMinutoAMinuto: 6,
+        estatusMinutoAMinuto: "Final del partido",
+        golLocal: 0,
+        golVisita: 0,
+        penalLocal: 0,
+        penalVisita: 0,
+      },
+      "varonil",
+      "2026-04-06T12:00:00.000Z",
+    );
+
+    expect(esPartidoConcluido(match.estado)).toBe(true);
+    expect(esMarcadorOficial(match.estado)).toBe(false);
+    expect(match.local.goles).toBeNull();
+    expect(match.visita.goles).toBeNull();
+    expect(match.local.penales).toBeNull();
+    expect(match.visita.penales).toBeNull();
   });
 });

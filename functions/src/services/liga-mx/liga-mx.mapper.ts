@@ -50,6 +50,60 @@ export const generarHashNormalizado = (value: unknown): string => {
     .digest("hex");
 };
 
+const normalizarEtiquetaEstado = (value: string | null | undefined): string => {
+  return (value || "").trim().toLowerCase();
+};
+
+export const esPartidoConcluido = (estado: {
+  idMinutoAMinuto: number | null;
+  etiquetaMinutoAMinuto: string | null;
+}): boolean => {
+  const etiqueta = normalizarEtiquetaEstado(estado.etiquetaMinutoAMinuto);
+
+  return (
+    estado.idMinutoAMinuto === 7 ||
+    etiqueta.includes("oficial") ||
+    etiqueta.includes("final") ||
+    etiqueta.includes("conclu") ||
+    etiqueta.includes("penales")
+  );
+};
+
+export const esMarcadorOficial = (estado: {
+  idMinutoAMinuto: number | null;
+  etiquetaMinutoAMinuto: string | null;
+}): boolean => {
+  const etiqueta = normalizarEtiquetaEstado(estado.etiquetaMinutoAMinuto);
+
+  return (
+    estado.idMinutoAMinuto === 7 ||
+    etiqueta.includes("oficial") ||
+    etiqueta.includes("penales")
+  );
+};
+
+const debeOcultarMarcadorTemporal = (input: {
+  estado: {
+    idMinutoAMinuto: number | null;
+    etiquetaMinutoAMinuto: string | null;
+  };
+  localGoles: number | null;
+  visitaGoles: number | null;
+  localPenales: number | null;
+  visitaPenales: number | null;
+}): boolean => {
+  if (esMarcadorOficial(input.estado) || !esPartidoConcluido(input.estado)) {
+    return false;
+  }
+
+  return (
+    input.localGoles === 0 &&
+    input.visitaGoles === 0 &&
+    (input.localPenales === null || input.localPenales === 0) &&
+    (input.visitaPenales === null || input.visitaPenales === 0)
+  );
+};
+
 const aNumeroNullable = (value: unknown): number | null => {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -139,6 +193,23 @@ export const normalizarPartidoCalendario = (
   divisionKey: DivisionKey,
   sincronizadoEn: string,
 ): PartidoLigaMxDoc => {
+  const estado = {
+    id: aNumeroNullable(raw.idEstatusPartido),
+    idMinutoAMinuto: aNumeroNullable(raw.idEstatusMinutoAMinuto),
+    etiquetaMinutoAMinuto: aTextoNullable(raw.estatusMinutoAMinuto),
+    idPublicado: aNumeroNullable(raw.idEstatusPublicado),
+  };
+  const localGoles = aNumeroNullable(raw.golLocal);
+  const visitaGoles = aNumeroNullable(raw.golVisita);
+  const localPenales = aNumeroNullable(raw.penalLocal);
+  const visitaPenales = aNumeroNullable(raw.penalVisita);
+  const ocultarMarcadorTemporal = debeOcultarMarcadorTemporal({
+    estado,
+    localGoles,
+    visitaGoles,
+    localPenales,
+    visitaPenales,
+  });
   const payloadSinHash: Omit<PartidoLigaMxDoc, "hashFuente"> = {
     id: String(raw.idPartido),
     idPartido: Number(raw.idPartido),
@@ -167,12 +238,7 @@ export const normalizarPartidoCalendario = (
       aIsoString(raw.matchDate) || aIsoString(`${raw.fecha} ${raw.horaLocal}`),
     fecha: aTextoNullable(raw.fecha),
     hora: aTextoNullable(raw.hora),
-    estado: {
-      id: aNumeroNullable(raw.idEstatusPartido),
-      idMinutoAMinuto: aNumeroNullable(raw.idEstatusMinutoAMinuto),
-      etiquetaMinutoAMinuto: aTextoNullable(raw.estatusMinutoAMinuto),
-      idPublicado: aNumeroNullable(raw.idEstatusPublicado),
-    },
+    estado,
     estadio: {
       id: aNumeroNullable(raw.idEstadio),
       nombre: aTextoNullable(raw.estadio),
@@ -189,16 +255,16 @@ export const normalizarPartidoCalendario = (
       nombre: aTextoNullable(raw.clubLocal) || "",
       logo: aTextoNullable(raw.clubLocalLogo),
       slug: aTextoNullable(raw.clubLocalUrl),
-      goles: aNumeroNullable(raw.golLocal),
-      penales: aNumeroNullable(raw.penalLocal),
+      goles: ocultarMarcadorTemporal ? null : localGoles,
+      penales: ocultarMarcadorTemporal ? null : localPenales,
     },
     visita: {
       id: Number(raw.idClubVisita),
       nombre: aTextoNullable(raw.clubVisita) || "",
       logo: aTextoNullable(raw.clubVisitaLogo),
       slug: aTextoNullable(raw.clubVisitaUrl),
-      goles: aNumeroNullable(raw.golVisita),
-      penales: aNumeroNullable(raw.penalVisita),
+      goles: ocultarMarcadorTemporal ? null : visitaGoles,
+      penales: ocultarMarcadorTemporal ? null : visitaPenales,
     },
     arbitraje: {
       central: aTextoNullable(raw.arbitroCentral),
