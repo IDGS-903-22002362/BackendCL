@@ -163,17 +163,32 @@ describe("Aplazo provider", () => {
           cartId: "orden_123",
           successUrl: "https://app/success",
           errorUrl: "https://app/failure",
+          webHookUrl: "https://api/webhooks/aplazo",
+          shipping: {
+            price: 0,
+            title: "Envio",
+          },
+          taxes: {
+            price: 0,
+            title: "IVA",
+          },
+          discount: {
+            price: 0,
+            title: "Descuento",
+          },
           products: [
             {
-              name: "prod_1",
-              quantity: 1,
-              unitPrice: 1299,
-              sku: undefined,
+              id: "prod_1",
+              count: 1,
+              description: "prod_1",
+              title: "prod_1",
+              price: 1299,
               imageUrl: undefined,
             },
           ],
-          customer: {
-            name: "Juan Perez",
+          buyer: {
+            firstName: "Juan",
+            lastName: "Perez",
             email: "juan@example.com",
             phone: "4771234567",
           },
@@ -187,7 +202,7 @@ describe("Aplazo provider", () => {
         paymentAttemptId: "attempt_1",
         providerReference: "orden_123",
         payload: expect.objectContaining({
-          customer: expect.objectContaining({
+          buyer: expect.objectContaining({
             phone: "***4567",
           }),
         }),
@@ -529,7 +544,7 @@ describe("Aplazo provider", () => {
       expect.objectContaining({
         channel: "online",
         requestPayload: expect.objectContaining({
-          customer: expect.objectContaining({
+          buyer: expect.objectContaining({
             email: "ju***@example.com",
             phone: "***4567",
           }),
@@ -767,7 +782,7 @@ describe("Aplazo provider", () => {
       {
         requestPayload: {
           apiToken: "local-token-123456",
-          customer: {
+          buyer: {
             email: "test@example.com",
             phone: "4771234567",
           },
@@ -790,7 +805,7 @@ describe("Aplazo provider", () => {
         },
         requestPayload: {
           apiToken: "loca***3456",
-          customer: {
+          buyer: {
             email: "te***@example.com",
             phone: "***4567",
           },
