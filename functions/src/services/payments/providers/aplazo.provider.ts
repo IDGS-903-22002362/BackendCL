@@ -358,8 +358,13 @@ const resolveShopId = (
   contract: AplazoContractConfig,
   metadata?: Record<string, unknown>,
 ): string | number => {
+  const configuredShopId =
+    (channel === "online"
+      ? process.env.APLAZO_ONLINE_SHOP_ID
+      : process.env.APLAZO_INSTORE_SHOP_ID) || undefined;
   const candidate =
     getMetadataString(metadata, "shopId") ||
+    toTrimmedString(configuredShopId) ||
     (channel === "in_store"
       ? getMetadataString(metadata, "sucursalId")
       : undefined) ||
@@ -451,41 +456,70 @@ const buildProducts = (
     }
 
     return {
-      name,
-      quantity,
-      unitPrice,
-      sku: item.sku,
+      id: item.productoId,
+      count: quantity,
+      description: name,
+      price: unitPrice,
+      title: name,
       imageUrl: item.imageUrl,
     };
   });
 };
 
-const buildCustomerPayload = (input: {
+const splitFullName = (
+  value?: string,
+): { firstName?: string; lastName?: string } => {
+  const normalized = normalizeWhitespace(value);
+  if (!normalized) {
+    return {};
+  }
+
+  const [firstName, ...rest] = normalized.split(" ");
+  return {
+    firstName,
+    lastName: rest.length > 0 ? rest.join(" ") : firstName,
+  };
+};
+
+const buildBuyerPayload = (input: {
   name?: string;
   email?: string;
   phone?: string;
+  metadata?: Record<string, unknown>;
 }): JsonRecord | undefined => {
-  const customer: JsonRecord = {};
-  const normalizedName = normalizeWhitespace(input.name);
-  if (normalizedName) {
-    customer.name = normalizedName;
+  const buyer: JsonRecord = {};
+  const { firstName, lastName } = splitFullName(input.name);
+  if (firstName) {
+    buyer.firstName = firstName;
+  }
+  if (lastName) {
+    buyer.lastName = lastName;
   }
   const normalizedEmail = normalizeEmail(input.email);
   if (normalizedEmail) {
     if (!isValidEmail(normalizedEmail)) {
       throw createPaymentValidationError("Email inválido para Aplazo");
     }
-    customer.email = normalizedEmail;
+    buyer.email = normalizedEmail;
   }
   if (input.phone) {
     const normalizedPhone = normalizeMxPhoneForAplazo(input.phone);
     if (!normalizedPhone) {
       throw createPaymentValidationError("Teléfono inválido para Aplazo");
     }
-    customer.phone = normalizedPhone;
+    buyer.phone = normalizedPhone;
   }
 
-  return Object.keys(customer).length > 0 ? customer : undefined;
+  const addressLine = getMetadataString(input.metadata, "addressLine");
+  const postalCode = getMetadataString(input.metadata, "postalCode");
+  if (addressLine) {
+    buyer.addressLine = addressLine;
+  }
+  if (postalCode) {
+    buyer.postalCode = postalCode;
+  }
+
+  return Object.keys(buyer).length > 0 ? buyer : undefined;
 };
 
 const validateOnlinePayloadInput = (
@@ -557,8 +591,8 @@ const buildOnlineAplazoPayload = (
   const discountMinor = Math.max(0, composedMinor - input.amountMinor);
   const products = buildProducts(pricingSnapshot, TODO_PRODUCTS_ONLINE);
   const productsMinor = products.reduce((sum, product) => {
-    const quantity = toNumber(product.quantity) || 0;
-    const unitPrice = toNumber(product.unitPrice) || 0;
+    const quantity = toNumber(product.count) || 0;
+    const unitPrice = toNumber(product.price) || 0;
     return sum + Math.round(unitPrice * 100) * quantity;
   }, 0);
   const recomposedMinor = productsMinor + taxMinor + shippingMinor - discountMinor;
@@ -585,20 +619,30 @@ const buildOnlineAplazoPayload = (
     cartId,
     successUrl: input.successUrl,
     errorUrl: input.failureUrl || input.cancelUrl,
-    webhookUrl: input.webhookUrl,
-    shipping: minorToMajor(shippingMinor),
-    taxes: minorToMajor(taxMinor),
-    discounts: minorToMajor(discountMinor),
+    webHookUrl: input.webhookUrl,
+    shipping: {
+      price: minorToMajor(shippingMinor),
+      title: getMetadataString(input.metadata, "shippingTitle") || "Envio",
+    },
+    taxes: {
+      price: minorToMajor(taxMinor),
+      title: getMetadataString(input.metadata, "taxTitle") || "IVA",
+    },
+    discount: {
+      price: minorToMajor(discountMinor),
+      title: getMetadataString(input.metadata, "discountTitle") || "Descuento",
+    },
     products,
   };
 
-  const customer = buildCustomerPayload({
+  const buyer = buildBuyerPayload({
     name: input.customerName,
     email: input.customerEmail,
     phone: input.customerPhone,
+    metadata: input.metadata,
   });
-  if (customer) {
-    payload.customer = customer;
+  if (buyer) {
+    payload.buyer = buyer;
   }
 
   if (input.cartUrl) {
@@ -645,10 +689,11 @@ const buildInStoreAplazoPayload = (
     products: buildProducts(pricingSnapshot, TODO_PRODUCTS_INSTORE),
   };
 
-  const customer = buildCustomerPayload({
+  const customer = buildBuyerPayload({
     name: input.customerName,
     email: input.customerEmail,
     phone: input.customerPhone,
+    metadata: input.metadata,
   });
   if (customer) {
     payload.customer = customer;
