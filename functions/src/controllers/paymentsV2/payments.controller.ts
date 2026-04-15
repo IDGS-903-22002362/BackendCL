@@ -106,6 +106,8 @@ export const createAplazoOnline = async (req: Request, res: Response) => {
       flowType: "online",
       status: result.paymentAttempt.status,
       redirectUrl: result.paymentAttempt.redirectUrl,
+      checkoutUrl: result.paymentAttempt.redirectUrl,
+      expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
     });
   } catch (error) {
     return respondPaymentError(res, error);

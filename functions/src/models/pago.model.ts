@@ -97,6 +97,9 @@ export interface PaymentPricingSnapshotItem {
   precioUnitarioMinor: number;
   subtotalMinor: number;
   tallaId?: string;
+  name?: string;
+  sku?: string;
+  imageUrl?: string;
 }
 
 export interface PaymentPricingSnapshot {

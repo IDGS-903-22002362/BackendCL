@@ -50,6 +50,13 @@ describe("Aplazo payment state matrix", () => {
     expect(aplazoProvider.mapProviderStatus("No confirmado")).toBe(
       PaymentStatus.PENDING_CUSTOMER,
     );
+    expect(aplazoProvider.mapProviderStatus("PE")).toBe(
+      PaymentStatus.PENDING_CUSTOMER,
+    );
+    expect(aplazoProvider.mapProviderStatus("CO")).toBe(PaymentStatus.PAID);
+    expect(aplazoProvider.mapProviderStatus("CA")).toBe(
+      PaymentStatus.CANCELED,
+    );
     expect(aplazoProvider.mapProviderStatus("authorized")).toBe(
       PaymentStatus.AUTHORIZED,
     );
