@@ -92,18 +92,50 @@ class LigaMxService {
         calendarioExistente?.partidos ?? [],
       );
       const debeMonitorearCierre =
-        cambioContexto ||
-        requiereCargaInicial ||
+        !cambioContexto &&
+        !requiereCargaInicial &&
         (await this.debeConsultarResultadosDivision(
           divisionKey,
           partidoPendienteDeCierre,
         ));
+      const debeRefrescarCalendario =
+        cambioContexto ||
+        requiereCargaInicial ||
+        debeMonitorearCierre ||
+        (await this.debeSincronizar(
+          `calendario-actual-${divisionKey}`,
+          configuracionLigaMx.ttlMs.calendario,
+        ));
+      const debeRefrescarClasificacion =
+        cambioContexto ||
+        requiereCargaInicial ||
+        (await this.debeSincronizar(
+          `clasificacion-actual-${divisionKey}`,
+          configuracionLigaMx.ttlMs.clasificacion,
+        ));
+      const debeRefrescarPlantilla =
+        cambioContexto ||
+        requiereCargaInicial ||
+        (await this.debeSincronizar(
+          `plantilla-actual-${divisionKey}`,
+          configuracionLigaMx.ttlMs.plantilla,
+        ));
 
-      if (!debeMonitorearCierre) {
+      if (
+        !debeRefrescarCalendario &&
+        !debeRefrescarClasificacion &&
+        !debeRefrescarPlantilla
+      ) {
         continue;
       }
 
-      const calendario = await this.sincronizarCalendarioActual(divisionKey, contexto, true);
+      const calendario = debeRefrescarCalendario
+        ? await this.sincronizarCalendarioActual(divisionKey, contexto, true)
+        : calendarioExistente;
+
+      if (!calendario) {
+        continue;
+      }
 
       if (cambioContexto || requiereCargaInicial) {
         await this.sincronizarClasificacionActual(divisionKey, contexto, true);
@@ -117,11 +149,28 @@ class LigaMxService {
         calendario.partidos,
       );
 
+      const debeRefrescarClasificacionPorResultados =
+        partidosRecienFinalizados.length > 0;
+      const debeRefrescarPlantillaPorResultados =
+        partidosRecienFinalizados.length > 0;
+
+      if (
+        debeRefrescarClasificacion ||
+        debeRefrescarClasificacionPorResultados
+      ) {
+        await this.sincronizarClasificacionActual(divisionKey, contexto, true);
+      }
+
+      if (
+        debeRefrescarPlantilla ||
+        debeRefrescarPlantillaPorResultados
+      ) {
+        await this.sincronizarPlantillaActual(divisionKey, contexto, true);
+      }
+
       if (!partidosRecienFinalizados.length) {
         continue;
       }
-
-      await this.sincronizarClasificacionActual(divisionKey, contexto, true);
 
       for (const partido of partidosRecienFinalizados) {
         await this.sincronizarDetallePartido(partido, true);
