@@ -21,8 +21,15 @@ const buildClientMock = () => ({
 });
 
 describe("Aplazo provider", () => {
+  let consoleLogSpy: jest.SpyInstance;
+  let consoleErrorSpy: jest.SpyInstance;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    consoleErrorSpy = jest
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
 
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
@@ -60,6 +67,11 @@ describe("Aplazo provider", () => {
     process.env.APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME = "Bearer";
     process.env.APLAZO_INSTORE_TIMEOUT_MS = "15000";
     process.env.APLAZO_INSTORE_DEFAULT_COMM_CHANNEL = "q";
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
   });
 
   it("authenticates online and maps create response using loanId and cartId", async () => {
@@ -121,8 +133,39 @@ describe("Aplazo provider", () => {
         method: "post",
         url: "/loan",
         headers: { Authorization: "Bearer online-token" },
+        data: expect.objectContaining({
+          totalPrice: 1299,
+          currency: "MXN",
+          cartId: "orden_123",
+          successUrl: "https://app/success",
+          errorUrl: "https://app/failure",
+          products: [
+            {
+              name: "prod_1",
+              quantity: 1,
+              unitPrice: 1299,
+              sku: undefined,
+              imageUrl: undefined,
+            },
+          ],
+          customer: {
+            name: "Juan Perez",
+            email: "juan@example.com",
+            phone: "+524771234567",
+          },
+        }),
       }),
     );
+    expect(consoleLogSpy).toHaveBeenCalledWith(
+      "APLZ REQUEST PAYLOAD:",
+      expect.any(String),
+    );
+    expect(consoleLogSpy).toHaveBeenCalledWith("APLZ RESPONSE:", {
+      loanId: "loan_987",
+      cartId: "orden_123",
+      url: "https://checkout.aplazo/loan_987",
+      status: "No confirmado",
+    });
     expect(result.providerLoanId).toBe("loan_987");
     expect(result.providerReference).toBe("orden_123");
     expect(result.redirectUrl).toBe("https://checkout.aplazo/loan_987");
@@ -352,6 +395,175 @@ describe("Aplazo provider", () => {
     expect(result.status).toBe(PaymentStatus.PAID);
     expect(result.providerLoanId).toBe("loan_123");
     expect(result.providerReference).toBe("orden_123");
+  });
+
+  it("maps short provider status codes", () => {
+    expect(aplazoProvider.mapProviderStatus("PE")).toBe(
+      PaymentStatus.PENDING_CUSTOMER,
+    );
+    expect(aplazoProvider.mapProviderStatus("CO")).toBe(PaymentStatus.PAID);
+    expect(aplazoProvider.mapProviderStatus("CA")).toBe(
+      PaymentStatus.CANCELED,
+    );
+  });
+
+  it("maps provider 400 errors with real response details", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request.mockRejectedValue(
+      Object.assign(new Error("Bad request"), {
+        response: {
+          status: 400,
+          data: { error: "invalid payload", reason: "cartId duplicated" },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_1",
+        idempotencyKey: "idem_12345678",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        cancelUrl: "https://app/cancel",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "orden_123" },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "MXN",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      details: {
+        providerHttpStatus: 400,
+        providerResponse: {
+          error: "invalid payload",
+          reason: "cartId duplicated",
+        },
+      },
+    });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith("APLZ ERROR STATUS:", 400);
+    expect(consoleErrorSpy).toHaveBeenCalledWith("APLZ ERROR BODY:", {
+      error: "invalid payload",
+      reason: "cartId duplicated",
+    });
+  });
+
+  it("maps timeout and network errors", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request
+      .mockRejectedValueOnce(
+        Object.assign(new Error("timeout"), {
+          code: "ECONNABORTED",
+        }),
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error("socket hang up"), {
+          code: "ECONNRESET",
+        }),
+      );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient)
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_timeout",
+        idempotencyKey: "idem_timeout_123",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_timeout",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "orden_timeout" },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "MXN",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_TIMEOUT",
+    });
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_network",
+        idempotencyKey: "idem_network_123",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_network",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "orden_network" },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "MXN",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_NETWORK_ERROR",
+    });
   });
 
   it("parses webhook using Authorization and merchantId to resolve the channel", async () => {

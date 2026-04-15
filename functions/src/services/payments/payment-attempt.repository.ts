@@ -148,6 +148,25 @@ export class PaymentAttemptRepository {
     return toPaymentAttempt(snapshot.docs[0].id, snapshot.docs[0].data() as Pago);
   }
 
+  async findLatestByOrderAndFlow(
+    provider: ProveedorPago,
+    orderId: string,
+    flowType: PaymentAttempt["flowType"],
+  ): Promise<PaymentAttempt | null> {
+    const snapshot = await this.collection
+      .where("ordenId", "==", orderId)
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .get();
+    const candidate = snapshot.docs
+      .map((doc) => toPaymentAttempt(doc.id, doc.data() as Pago))
+      .find(
+        (attempt) => attempt.provider === provider && attempt.flowType === flowType,
+      );
+
+    return candidate || null;
+  }
+
   async findByProviderIdentifiers(input: {
     provider: ProveedorPago;
     providerPaymentId?: string;

@@ -149,6 +149,11 @@ const getMetadataString = (
     : undefined;
 };
 
+const normalizeCurrency = (currency?: string): string | undefined => {
+  const normalized = currency?.trim();
+  return normalized ? normalized.toUpperCase() : undefined;
+};
+
 const normalizeBaseUrl = (value: string): string => {
   return value.trim().replace(/\/+$/, "");
 };
@@ -211,8 +216,21 @@ export class PaymentsService {
     const order = await this.requirePayableOrder(request.orderId, user);
     const config = getAplazoConfig();
     const customer = await this.resolveOnlineCustomer(user, request.customer);
-    const pricingSnapshot = this.buildOrderPricingSnapshot(order);
+    const pricingSnapshot = await this.buildOrderPricingSnapshot(order);
     const amountMinor = pricingSnapshot.totalMinor;
+    const requestCurrency = normalizeCurrency(request.currency);
+
+    if (requestCurrency && requestCurrency !== "MXN") {
+      throw new PaymentApiError(
+        400,
+        "PAYMENT_VALIDATION_ERROR",
+        "Aplazo online solo soporta MXN",
+        {
+          requestCurrency,
+          expectedCurrency: "MXN",
+        },
+      );
+    }
 
     if (
       typeof request.total === "number" &&
@@ -242,6 +260,19 @@ export class PaymentsService {
     if (existing) {
       await this.assertActorCanAccessAttempt(existing, user);
       return { created: false, paymentAttempt: existing };
+    }
+
+    const existingForOrder = await this.paymentAttemptRepo.findLatestByOrderAndFlow(
+      ProveedorPago.APLAZO,
+      order.id,
+      PaymentFlowType.ONLINE,
+    );
+    if (
+      existingForOrder &&
+      !this.isTerminalStatus(toPaymentStatus(existingForOrder))
+    ) {
+      await this.assertActorCanAccessAttempt(existingForOrder, user);
+      return { created: false, paymentAttempt: existingForOrder };
     }
 
     const metadataCartId =
@@ -280,6 +311,8 @@ export class PaymentsService {
         ...(request.metadata || {}),
         cartId: metadataCartId,
         cartUrl: request.cartUrl || config.online.cartUrl,
+        orderId: order.id,
+        requestCurrency: requestCurrency || "MXN",
       },
       status: PaymentStatus.CREATED,
       rawCreateRequestSanitized: sanitizeForStorage({
@@ -313,6 +346,7 @@ export class PaymentsService {
           orderId: order.id,
           userId: user.uid,
           cartId: metadataCartId,
+          requestCurrency: requestCurrency || "MXN",
           ...(request.metadata || {}),
         },
         pricingSnapshot,
@@ -333,6 +367,7 @@ export class PaymentsService {
         metadata: {
           ...(attempt.metadata || {}),
           cartId: providerResult.providerReference || metadataCartId,
+          providerRequestLoggedAt: Timestamp.now(),
         },
       });
 
@@ -348,11 +383,12 @@ export class PaymentsService {
         const timeoutAttempt = await this.paymentAttemptRepo.update(attempt.id!, {
           status: PaymentStatus.PENDING_PROVIDER,
           providerStatus: "timeout",
-          metadata: {
-            ...(attempt.metadata || {}),
-            lastCreateTimeoutAt: Timestamp.now(),
-          },
-        });
+        metadata: {
+          ...(attempt.metadata || {}),
+          lastCreateTimeoutAt: Timestamp.now(),
+          providerLastError: "Timeout al comunicarse con Aplazo",
+        },
+      });
         return {
           created: true,
           paymentAttempt: timeoutAttempt,
@@ -366,6 +402,8 @@ export class PaymentsService {
         metadata: {
           ...(attempt.metadata || {}),
           lastCreateError:
+            error instanceof Error ? error.message : "Error desconocido",
+          providerLastError:
             error instanceof Error ? error.message : "Error desconocido",
         },
       });
@@ -852,8 +890,12 @@ export class PaymentsService {
     if (!snapshot.exists) {
       throw new PaymentApiError(
         404,
-        "PAYMENT_ORDER_NOT_FOUND",
+        "PAYMENT_ORDER_INVALID",
         `Orden ${orderId} no encontrada`,
+        {
+          reason: "ORDER_NOT_FOUND",
+          orderId,
+        },
       );
     }
 
@@ -873,16 +915,57 @@ export class PaymentsService {
     if (order.estado !== EstadoOrden.PENDIENTE) {
       throw new PaymentApiError(
         409,
-        "PAYMENT_VALIDATION_ERROR",
+        "PAYMENT_ORDER_INVALID",
         `La orden ${orderId} no está disponible para pago. Estado actual: ${order.estado}`,
+        {
+          reason: "ORDER_STATUS_INVALID",
+          orderId,
+          orderStatus: order.estado,
+          paymentMethod: order.metodoPago,
+        },
       );
     }
 
     if (order.metodoPago !== MetodoPago.APLAZO) {
       throw new PaymentApiError(
         409,
-        "PAYMENT_VALIDATION_ERROR",
+        "PAYMENT_ORDER_INVALID",
         "La orden debe haberse creado con método de pago APLAZO para este flujo",
+        {
+          reason: "ORDER_PAYMENT_METHOD_INVALID",
+          orderId,
+          orderStatus: order.estado,
+          paymentMethod: order.metodoPago,
+        },
+      );
+    }
+
+    if (!Array.isArray(order.items) || order.items.length === 0) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ORDER_INVALID",
+        "La orden no tiene productos para enviar a Aplazo",
+        {
+          reason: "ORDER_ITEMS_EMPTY",
+          orderId,
+          orderStatus: order.estado,
+          paymentMethod: order.metodoPago,
+        },
+      );
+    }
+
+    if (typeof order.total !== "number" || !Number.isFinite(order.total) || order.total <= 0) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ORDER_INVALID",
+        "La orden debe tener un total mayor a cero",
+        {
+          reason: "ORDER_TOTAL_INVALID",
+          orderId,
+          orderStatus: order.estado,
+          paymentMethod: order.metodoPago,
+          orderTotal: order.total,
+        },
       );
     }
 
@@ -919,20 +1002,31 @@ export class PaymentsService {
     };
   }
 
-  private buildOrderPricingSnapshot(order: Orden): PaymentPricingSnapshot {
+  private async buildOrderPricingSnapshot(order: Orden): Promise<PaymentPricingSnapshot> {
+    const items = await Promise.all(
+      (order.items || []).map(async (item) => {
+        const product = await productService.getProductById(item.productoId);
+
+        return {
+          productoId: item.productoId,
+          cantidad: item.cantidad,
+          precioUnitarioMinor: roundToMinor(item.precioUnitario),
+          subtotalMinor: roundToMinor(item.subtotal),
+          tallaId: item.tallaId,
+          name: product?.descripcion || item.productoId,
+          sku: product?.clave,
+          imageUrl: product?.imagenes?.[0],
+        };
+      }),
+    );
+
     return {
       subtotalMinor: roundToMinor(order.subtotal),
       taxMinor: roundToMinor(order.impuestos),
       shippingMinor: roundToMinor(order.costoEnvio),
       totalMinor: roundToMinor(order.total),
-      currency: "mxn",
-      items: (order.items || []).map((item) => ({
-        productoId: item.productoId,
-        cantidad: item.cantidad,
-        precioUnitarioMinor: roundToMinor(item.precioUnitario),
-        subtotalMinor: roundToMinor(item.subtotal),
-        tallaId: item.tallaId,
-      })),
+      currency: "MXN",
+      items,
     };
   }
 

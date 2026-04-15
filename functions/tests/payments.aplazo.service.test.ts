@@ -373,6 +373,12 @@ describe("Aplazo payments service", () => {
       rawRequestSanitized: {},
       rawResponseSanitized: {},
     });
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "Jersey Oficial",
+      clave: "JER-001",
+      imagenes: ["https://cdn.example.com/jersey.jpg"],
+    });
 
     const paymentAttemptRepo = new PaymentAttemptRepository();
     const eventLogRepo = new PaymentEventLogRepository();
@@ -416,10 +422,19 @@ describe("Aplazo payments service", () => {
     expect(aplazoProviderMocks.createOnline).toHaveBeenCalledWith(
       expect.objectContaining({
         providerReference: "orden_aplazo_1",
+        currency: "MXN",
         pricingSnapshot: expect.objectContaining({
           subtotalMinor: 100000,
           shippingMinor: 9900,
           totalMinor: 109900,
+          items: [
+            expect.objectContaining({
+              productoId: "prod_1",
+              name: "Jersey Oficial",
+              sku: "JER-001",
+              imageUrl: "https://cdn.example.com/jersey.jpg",
+            }),
+          ],
         }),
       }),
     );
@@ -510,6 +525,147 @@ describe("Aplazo payments service", () => {
       "https://aplazo.example/pay/instore_ref_1",
     );
     expect(result.sale.paymentAttemptId).toBe(result.paymentAttempt.id);
+  });
+
+  it("reuses the same online attempt for the same order even with a different idempotency key", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_aplazo_dup: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.APLAZO,
+          subtotal: 500,
+          impuestos: 0,
+          total: 500,
+          costoEnvio: 0,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 500,
+              subtotal: 500,
+            },
+          ],
+        },
+      },
+      pagos: {},
+      usuariosApp: {
+        user_1: {
+          uid: "user_1",
+          nombre: "Usuario Uno",
+          email: "user1@example.com",
+        },
+      },
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.createOnline.mockResolvedValue({
+      status: PaymentStatus.PENDING_CUSTOMER,
+      providerStatus: "pending",
+      providerReference: "orden_aplazo_dup",
+      redirectUrl: "https://aplazo.example/checkout/orden_aplazo_dup",
+      rawRequestSanitized: {},
+      rawResponseSanitized: {},
+    });
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "Producto Dedupe",
+      clave: "SKU-DEDUPE",
+      imagenes: [],
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    const first = await service.createAplazoOnline(
+      {
+        uid: "user_1",
+        rol: RolUsuario.CLIENTE,
+      },
+      {
+        orderId: "orden_aplazo_dup",
+      },
+      "idem_order_dup_1111",
+    );
+
+    const second = await service.createAplazoOnline(
+      {
+        uid: "user_1",
+        rol: RolUsuario.CLIENTE,
+      },
+      {
+        orderId: "orden_aplazo_dup",
+      },
+      "idem_order_dup_2222",
+    );
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.paymentAttempt.id).toBe(first.paymentAttempt.id);
+    expect(aplazoProviderMocks.createOnline).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects orders with total <= 0 as PAYMENT_ORDER_INVALID", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_aplazo_invalid: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.APLAZO,
+          subtotal: 0,
+          impuestos: 0,
+          total: 0,
+          costoEnvio: 0,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 0,
+              subtotal: 0,
+            },
+          ],
+        },
+      },
+      pagos: {},
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await expect(
+      service.createAplazoOnline(
+        {
+          uid: "user_1",
+          rol: RolUsuario.CLIENTE,
+        },
+        {
+          orderId: "orden_aplazo_invalid",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_ORDER_INVALID",
+      details: {
+        reason: "ORDER_TOTAL_INVALID",
+      },
+    });
   });
 
   it("deduplicates an aplazo webhook by event id or payload hash", async () => {
