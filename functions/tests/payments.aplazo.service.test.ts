@@ -325,6 +325,9 @@ describe("Aplazo payments service", () => {
     process.env.APLAZO_INSTORE_ENABLED = "true";
     process.env.APLAZO_RECONCILE_ENABLED = "true";
     process.env.APLAZO_REFUNDS_ENABLED = "false";
+    process.env.APLAZO_ONLINE_SUCCESS_URL = "https://app.test/success";
+    process.env.APLAZO_ONLINE_CANCEL_URL = "https://app.test/cancel";
+    process.env.APLAZO_ONLINE_FAILURE_URL = "https://app.test/failure";
 
     Object.values(aplazoProviderMocks).forEach((mock) => mock.mockReset());
     (productService.getProductById as jest.Mock).mockReset();
@@ -357,6 +360,7 @@ describe("Aplazo payments service", () => {
           uid: "user_1",
           nombre: "Usuario Uno",
           email: "user1@example.com",
+          telefono: "4771234567",
         },
       },
       posSessions: {},
@@ -398,6 +402,7 @@ describe("Aplazo payments service", () => {
         uid: "user_1",
         rol: RolUsuario.CLIENTE,
         email: "user1@example.com",
+        telefono: "+52 477 123 4567",
       },
       {
         orderId: "orden_aplazo_1",
@@ -409,6 +414,7 @@ describe("Aplazo payments service", () => {
         uid: "user_1",
         rol: RolUsuario.CLIENTE,
         email: "user1@example.com",
+        telefono: "+52 477 123 4567",
       },
       {
         orderId: "orden_aplazo_1",
@@ -554,6 +560,7 @@ describe("Aplazo payments service", () => {
           uid: "user_1",
           nombre: "Usuario Uno",
           email: "user1@example.com",
+          telefono: "+52 477 123 4567",
         },
       },
       posSessions: {},
@@ -589,6 +596,7 @@ describe("Aplazo payments service", () => {
       {
         uid: "user_1",
         rol: RolUsuario.CLIENTE,
+        telefono: "4771234567",
       },
       {
         orderId: "orden_aplazo_dup",
@@ -600,6 +608,7 @@ describe("Aplazo payments service", () => {
       {
         uid: "user_1",
         rol: RolUsuario.CLIENTE,
+        telefono: "4771234567",
       },
       {
         orderId: "orden_aplazo_dup",
@@ -666,6 +675,240 @@ describe("Aplazo payments service", () => {
         reason: "ORDER_TOTAL_INVALID",
       },
     });
+  });
+
+  it("fails before calling aplazo when customer phone is invalid", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_aplazo_phone: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.APLAZO,
+          subtotal: 100,
+          impuestos: 0,
+          total: 100,
+          costoEnvio: 0,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 100,
+              subtotal: 100,
+            },
+          ],
+        },
+      },
+      pagos: {},
+      usuariosApp: {
+        user_1: {
+          uid: "user_1",
+          nombre: " Usuario   Uno ",
+          email: "USER1@Example.com",
+          telefono: "12345",
+        },
+      },
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "Producto",
+      clave: "SKU-1",
+      imagenes: [],
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await service
+      .createAplazoOnline(
+        {
+          uid: "user_1",
+          rol: RolUsuario.CLIENTE,
+        },
+        {
+          orderId: "orden_aplazo_phone",
+        },
+      )
+      .then(() => {
+        throw new Error("Expected createAplazoOnline to fail");
+      })
+      .catch((error) => {
+        expect(error).toMatchObject({
+          code: "PAYMENT_VALIDATION_ERROR",
+        });
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe("Teléfono inválido para Aplazo");
+      });
+
+    expect(aplazoProviderMocks.createOnline).not.toHaveBeenCalled();
+  });
+
+  it("fails before calling aplazo when pricing snapshot cannot build valid products", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_aplazo_items: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.APLAZO,
+          subtotal: 0,
+          impuestos: 0,
+          total: 100,
+          costoEnvio: 0,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 0,
+              subtotal: 0,
+            },
+          ],
+        },
+      },
+      pagos: {},
+      usuariosApp: {
+        user_1: {
+          uid: "user_1",
+          nombre: "Usuario Uno",
+          email: "user1@example.com",
+          telefono: "4771234567",
+        },
+      },
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "",
+      clave: "SKU-1",
+      imagenes: [],
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await service
+      .createAplazoOnline(
+        {
+          uid: "user_1",
+          rol: RolUsuario.CLIENTE,
+        },
+        {
+          orderId: "orden_aplazo_items",
+          customer: {
+            name: "  Usuario   Uno ",
+            email: " USER1@Example.com ",
+            phone: "+52 477 123 4567",
+          },
+        },
+      )
+      .then(() => {
+        throw new Error("Expected createAplazoOnline to fail");
+      })
+      .catch((error) => {
+        expect(error).toMatchObject({
+          code: "PAYMENT_VALIDATION_ERROR",
+        });
+        expect((error as Error).message).toBe(
+          "No fue posible construir products[] válidos para Aplazo",
+        );
+      });
+
+    expect(aplazoProviderMocks.createOnline).not.toHaveBeenCalled();
+  });
+
+  it("normalizes customer fields before sending the createOnline request", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_aplazo_normalize: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          metodoPago: MetodoPago.APLAZO,
+          subtotal: 100,
+          impuestos: 0,
+          total: 100,
+          costoEnvio: 0,
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 100,
+              subtotal: 100,
+            },
+          ],
+        },
+      },
+      pagos: {},
+      usuariosApp: {
+        user_1: {
+          uid: "user_1",
+          nombre: "  Usuario   Uno ",
+          email: "USER1@Example.com",
+          telefono: "+52 477 123 4567",
+        },
+      },
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.createOnline.mockResolvedValue({
+      status: PaymentStatus.PENDING_CUSTOMER,
+      providerStatus: "pending",
+      providerReference: "orden_aplazo_normalize",
+      redirectUrl: "https://aplazo.example/checkout/orden_aplazo_normalize",
+      rawRequestSanitized: {},
+      rawResponseSanitized: {},
+    });
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "Producto",
+      clave: "SKU-1",
+      imagenes: [],
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await service.createAplazoOnline(
+      {
+        uid: "user_1",
+        rol: RolUsuario.CLIENTE,
+      },
+      {
+        orderId: "orden_aplazo_normalize",
+      },
+    );
+
+    expect(aplazoProviderMocks.createOnline).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerName: "Usuario Uno",
+        customerEmail: "user1@example.com",
+        customerPhone: "4771234567",
+      }),
+    );
   });
 
   it("deduplicates an aplazo webhook by event id or payload hash", async () => {

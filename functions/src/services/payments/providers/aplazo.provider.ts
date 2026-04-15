@@ -24,7 +24,13 @@ import {
   ProviderRefundResult,
   ProviderStatusResult,
 } from "../payment-domain.types";
-import { PaymentApiError } from "../payment-api-error";
+import {
+  createPaymentProviderError,
+  createPaymentProviderNetworkError,
+  createPaymentProviderTimeoutError,
+  createPaymentValidationError,
+  PaymentApiError,
+} from "../payment-api-error";
 import { PaymentStatus } from "../payment-status.enum";
 import {
   AplazoContractConfig,
@@ -32,6 +38,16 @@ import {
   getAplazoContractTodoMessage,
   sanitizeAplazoPayload,
 } from "../aplazo.contract.v1";
+import {
+  isValidEmail,
+  maskToken,
+  normalizeEmail,
+  normalizeMxPhoneForAplazo,
+  normalizeWhitespace,
+  sanitizeAxiosErrorData,
+  sanitizeOutgoingProviderPayload,
+  sanitizeProviderHeaders,
+} from "../payment-sanitizer";
 
 type JsonRecord = Record<string, unknown>;
 type RequestHeaders = Record<string, string>;
@@ -104,39 +120,6 @@ const normalizeCurrencyOrThrow = (currency?: string): "MXN" => {
   }
 
   return "MXN";
-};
-
-const normalizeMxPhone = (phone?: string): string | undefined => {
-  const trimmed = toTrimmedString(phone);
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const digits = trimmed.replace(/\D+/g, "");
-  if (digits.length === 10) {
-    return `+52${digits}`;
-  }
-
-  if (digits.length === 12 && digits.startsWith("52")) {
-    return `+${digits}`;
-  }
-
-  if (digits.length === 13 && digits.startsWith("521")) {
-    return `+52${digits.slice(3)}`;
-  }
-
-  if (trimmed.startsWith("+52") && digits.length === 12) {
-    return `+${digits}`;
-  }
-
-  throw new PaymentApiError(
-    409,
-    "PAYMENT_ORDER_INVALID",
-    "El teléfono del cliente no tiene un formato MX válido para Aplazo",
-    {
-      receivedPhone: phone,
-    },
-  );
 };
 
 const collectPayloadVariants = (payload: unknown): JsonRecord[] => {
@@ -439,13 +422,42 @@ const buildProducts = (
   pricingSnapshot: PaymentAttempt["pricingSnapshot"],
   _todoMessage: string,
 ): JsonRecord[] => {
-  return (pricingSnapshot?.items || []).map((item, index) => ({
-    name: item.name || item.productoId || `item_${index + 1}`,
-    quantity: item.cantidad,
-    unitPrice: minorToMajor(item.precioUnitarioMinor),
-    sku: item.sku,
-    imageUrl: item.imageUrl,
-  }));
+  const items = pricingSnapshot?.items || [];
+  if (items.length === 0) {
+    throw createPaymentValidationError(
+      "No fue posible construir products[] válidos para Aplazo",
+      {
+        reason: "PRODUCTS_EMPTY",
+      },
+    );
+  }
+
+  return items.map((item, index) => {
+    const name = normalizeWhitespace(item.name || item.productoId || `item_${index + 1}`);
+    const quantity = item.cantidad;
+    const unitPrice = minorToMajor(item.precioUnitarioMinor);
+
+    if (!name || quantity <= 0 || unitPrice <= 0) {
+      throw createPaymentValidationError(
+        "No fue posible construir products[] válidos para Aplazo",
+        {
+          reason: "PRODUCT_INVALID",
+          index,
+          productoId: item.productoId,
+          quantity,
+          unitPrice,
+        },
+      );
+    }
+
+    return {
+      name,
+      quantity,
+      unitPrice,
+      sku: item.sku,
+      imageUrl: item.imageUrl,
+    };
+  });
 };
 
 const buildCustomerPayload = (input: {
@@ -454,17 +466,81 @@ const buildCustomerPayload = (input: {
   phone?: string;
 }): JsonRecord | undefined => {
   const customer: JsonRecord = {};
-  if (input.name) {
-    customer.name = input.name;
+  const normalizedName = normalizeWhitespace(input.name);
+  if (normalizedName) {
+    customer.name = normalizedName;
   }
-  if (input.email) {
-    customer.email = input.email;
+  const normalizedEmail = normalizeEmail(input.email);
+  if (normalizedEmail) {
+    if (!isValidEmail(normalizedEmail)) {
+      throw createPaymentValidationError("Email inválido para Aplazo");
+    }
+    customer.email = normalizedEmail;
   }
   if (input.phone) {
-    customer.phone = normalizeMxPhone(input.phone);
+    const normalizedPhone = normalizeMxPhoneForAplazo(input.phone);
+    if (!normalizedPhone) {
+      throw createPaymentValidationError("Teléfono inválido para Aplazo");
+    }
+    customer.phone = normalizedPhone;
   }
 
   return Object.keys(customer).length > 0 ? customer : undefined;
+};
+
+const validateOnlinePayloadInput = (
+  input: CreateOnlineProviderInput,
+  payload: JsonRecord,
+): void => {
+  if (typeof input.amountMinor !== "number" || input.amountMinor <= 0) {
+    throw createPaymentValidationError("Monto inválido para Aplazo", {
+      amountMinor: input.amountMinor,
+    });
+  }
+
+  if (!toTrimmedString(String(payload.shopId ?? ""))) {
+    throw createPaymentValidationError("No fue posible resolver shopId para Aplazo");
+  }
+
+  if (!toTrimmedString(String(payload.cartId ?? ""))) {
+    throw createPaymentValidationError("No fue posible resolver cartId para Aplazo");
+  }
+
+  if (!toTrimmedString(input.successUrl)) {
+    throw createPaymentValidationError(
+      "Aplazo online requiere successUrl y failureUrl/cancelUrl",
+    );
+  }
+
+  if (!toTrimmedString(input.failureUrl || input.cancelUrl)) {
+    throw createPaymentValidationError(
+      "Aplazo online requiere successUrl y failureUrl/cancelUrl",
+    );
+  }
+
+  if (!Array.isArray(payload.products) || payload.products.length === 0) {
+    throw createPaymentValidationError(
+      "No fue posible construir products[] válidos para Aplazo",
+    );
+  }
+};
+
+const buildRequestLogContext = (input: {
+  channel: AplazoChannel;
+  paymentAttemptId?: string;
+  providerReference?: string;
+  url: string;
+  merchantId?: string;
+  payload?: unknown;
+}) => {
+  return {
+    channel: input.channel,
+    url: input.url,
+    paymentAttemptId: input.paymentAttemptId,
+    providerReference: input.providerReference,
+    merchantId: maskToken(input.merchantId) || input.merchantId,
+    payload: sanitizeOutgoingProviderPayload(input.payload),
+  };
 };
 
 const buildOnlineAplazoPayload = (
@@ -529,6 +605,7 @@ const buildOnlineAplazoPayload = (
     payload.cartUrl = input.cartUrl;
   }
 
+  validateOnlinePayloadInput(input, payload);
   return payload;
 };
 
@@ -578,13 +655,24 @@ const buildInStoreAplazoPayload = (
   }
 
   if (input.customerPhone) {
-    payload.phone = input.customerPhone;
+    const normalizedPhone = normalizeMxPhoneForAplazo(input.customerPhone);
+    if (!normalizedPhone) {
+      throw createPaymentValidationError("Teléfono inválido para Aplazo");
+    }
+    payload.phone = normalizedPhone;
   }
 
   return payload;
 };
 
-const normalizeProviderError = (error: unknown): PaymentApiError => {
+export const normalizeProviderError = (
+  error: unknown,
+  context?: {
+    providerUrl?: string;
+    requestPayload?: unknown;
+    providerHeaders?: unknown;
+  },
+): PaymentApiError => {
   if (error instanceof PaymentApiError) {
     return error;
   }
@@ -596,39 +684,52 @@ const normalizeProviderError = (error: unknown): PaymentApiError => {
         ? (error as {
             code?: string;
             message?: string;
-            response?: { status?: number; data?: unknown };
+            response?: {
+              status?: number;
+              data?: unknown;
+              headers?: Record<string, unknown>;
+            };
+            config?: { url?: string };
           })
         : undefined;
 
   if (axiosLikeError) {
+    const providerHttpStatus = axiosLikeError.response?.status;
+    const providerResponse = sanitizeAxiosErrorData(axiosLikeError.response?.data);
+    const providerHeaders = sanitizeProviderHeaders(
+      axiosLikeError.response?.headers || context?.providerHeaders,
+    );
+    const providerUrl = axiosLikeError.config?.url || context?.providerUrl;
+    const requestPayload = sanitizeOutgoingProviderPayload(context?.requestPayload);
+
     if (
       axiosLikeError.code === "ECONNABORTED" ||
       axiosLikeError.code === "ETIMEDOUT"
     ) {
-      return new PaymentApiError(
-        504,
-        "PAYMENT_PROVIDER_TIMEOUT",
+      return createPaymentProviderTimeoutError(
         "Timeout al comunicarse con Aplazo",
         {
-          providerHttpStatus: axiosLikeError.response?.status,
-          providerResponse: sanitizeAplazoPayload(
-            axiosLikeError.response?.data || {},
-          ),
+          providerHttpStatus,
+          providerResponse,
+          providerHeaders,
+          providerUrl,
+          requestPayload,
         },
       );
     }
 
     if (!axiosLikeError.response) {
-      return new PaymentApiError(
-        502,
-        "PAYMENT_PROVIDER_NETWORK_ERROR",
+      return createPaymentProviderNetworkError(
         "Error de red al comunicarse con Aplazo",
         {
-          providerHttpStatus: undefined,
-          providerResponse: sanitizeAplazoPayload({
+          providerHttpStatus,
+          providerResponse: sanitizeAxiosErrorData({
             message: axiosLikeError.message,
             code: axiosLikeError.code,
           }),
+          providerHeaders,
+          providerUrl,
+          requestPayload,
         },
       );
     }
@@ -638,22 +739,19 @@ const normalizeProviderError = (error: unknown): PaymentApiError => {
       axiosLikeError.message ||
       "Error desconocido con Aplazo";
 
-    return new PaymentApiError(
-      502,
-      "PAYMENT_PROVIDER_ERROR",
+    return createPaymentProviderError(
       providerMessage,
       {
-        providerHttpStatus: axiosLikeError.response?.status,
-        providerResponse: sanitizeAplazoPayload(
-          axiosLikeError.response?.data || {},
-        ),
+        providerHttpStatus,
+        providerResponse,
+        providerHeaders,
+        providerUrl,
+        requestPayload,
       },
     );
   }
 
-  return new PaymentApiError(
-    502,
-    "PAYMENT_PROVIDER_ERROR",
+  return createPaymentProviderError(
     error instanceof Error ? error.message : "Error desconocido con Aplazo",
   );
 };
@@ -740,7 +838,13 @@ export class AplazoProvider implements PaymentProvider {
         Authorization: /^bearer\s+/i.test(token) ? token : `Bearer ${token}`,
       };
     } catch (error) {
-      const normalizedError = normalizeProviderError(error);
+      const normalizedError = normalizeProviderError(error, {
+        providerUrl: `${apiBaseUrl}${authPath}`,
+        requestPayload: {
+          apiToken: contract.apiToken,
+          merchantId: contract.merchantId,
+        },
+      });
       aplazoLogger.error("aplazo_online_auth_failed", {
         channel: "online",
         endpoint: authPath,
@@ -749,7 +853,7 @@ export class AplazoProvider implements PaymentProvider {
         code: normalizedError.code,
         details: normalizedError.details,
       });
-      throw normalizeProviderError(error);
+      throw normalizedError;
     }
   }
 
@@ -990,18 +1094,36 @@ export class AplazoProvider implements PaymentProvider {
     requirePath(contract, "auth");
     const createPath = requirePath(contract, "create");
     const cartId = resolveCartId(input);
+    let requestPayload: JsonRecord | undefined;
 
     try {
+      requestPayload = buildOnlineAplazoPayload(input, contract, cartId);
       const headers = await this.authenticateOnline(contract);
-      const requestPayload = buildOnlineAplazoPayload(input, contract, cartId);
-      console.log("APLZ REQUEST PAYLOAD:", JSON.stringify(requestPayload, null, 2));
+      aplazoLogger.info(
+        "Aplazo request prepared",
+        buildRequestLogContext({
+          channel: "online",
+          paymentAttemptId: input.paymentAttemptId,
+          providerReference: input.providerReference || cartId,
+          url: `${apiBaseUrl}${createPath}`,
+          merchantId: contract.merchantId,
+          payload: requestPayload,
+        }),
+      );
       const response = await this.request(apiBaseUrl, contract.timeoutMs, {
         method: "post",
         url: createPath,
         headers,
         data: requestPayload,
       });
-      console.log("APLZ RESPONSE:", response.data);
+      aplazoLogger.info("Aplazo response received", {
+        channel: "online",
+        url: `${apiBaseUrl}${createPath}`,
+        paymentAttemptId: input.paymentAttemptId,
+        providerReference: input.providerReference || cartId,
+        providerHttpStatus: response.status,
+        body: sanitizeAxiosErrorData(response.data),
+      });
       const rawData = response.data;
       const providerStatus = pickString(rawData, ["status", "loanStatus", "state"]);
 
@@ -1027,29 +1149,24 @@ export class AplazoProvider implements PaymentProvider {
         rawResponseSanitized: sanitizeAplazoPayload(rawData),
       };
     } catch (error) {
-      const normalizedError = normalizeProviderError(error);
-      if (isRecord(error) && "response" in error) {
-        const errorResponse = (error as { response?: { status?: number; data?: unknown } })
-          .response;
-        console.error("APLZ ERROR STATUS:", errorResponse?.status);
-        console.error("APLZ ERROR BODY:", errorResponse?.data);
-      }
-      aplazoLogger.error("aplazo_online_create_failed", {
+      const sanitizedRequestPayload = sanitizeOutgoingProviderPayload(requestPayload);
+      const normalizedError = normalizeProviderError(error, {
+        providerUrl: `${apiBaseUrl}${createPath}`,
+        requestPayload: sanitizedRequestPayload,
+      });
+      aplazoLogger.error("Aplazo request failed", {
         channel: "online",
         paymentAttemptId: input.paymentAttemptId,
-        endpoint: createPath,
-        baseUrl: apiBaseUrl,
+        url: `${apiBaseUrl}${createPath}`,
         cartId,
         amountMinor: input.amountMinor,
-        providerReference: input.providerReference,
-        requestPayload: sanitizeAplazoPayload(
-          buildOnlineAplazoPayload(input, contract, cartId),
-        ),
+        providerReference: input.providerReference || cartId,
+        requestPayload: sanitizedRequestPayload,
         statusCode: normalizedError.statusCode,
         code: normalizedError.code,
         details: normalizedError.details,
       });
-      throw normalizeProviderError(error);
+      throw normalizedError;
     }
   }
 

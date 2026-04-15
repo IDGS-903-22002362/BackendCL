@@ -20,7 +20,10 @@ import {
 import { RolUsuario } from "../../models/usuario.model";
 import logger from "../../utils/logger";
 import productService from "../product.service";
-import { PaymentApiError } from "./payment-api-error";
+import {
+  createPaymentValidationError,
+  PaymentApiError,
+} from "./payment-api-error";
 import paymentAttemptRepository, {
   mapLegacyEstadoToPaymentStatus,
 } from "./payment-attempt.repository";
@@ -30,7 +33,13 @@ import paymentReconciliationService from "./payment-reconciliation.service";
 import posSaleRepository from "./pos-sale.repository";
 import posSessionRepository from "./pos-session.repository";
 import aplazoProvider from "./providers/aplazo.provider";
-import { sanitizeForStorage } from "./payment-sanitizer";
+import {
+  isValidEmail,
+  normalizeEmail,
+  normalizeMxPhoneForAplazo,
+  normalizeWhitespace,
+  sanitizeForStorage,
+} from "./payment-sanitizer";
 import { PaymentAttempt } from "./payment-domain.types";
 
 const ORDENES_COLLECTION = "ordenes";
@@ -152,6 +161,23 @@ const getMetadataString = (
 const normalizeCurrency = (currency?: string): string | undefined => {
   const normalized = currency?.trim();
   return normalized ? normalized.toUpperCase() : undefined;
+};
+
+const ensureRequiredUrl = (
+  value: string | undefined,
+  fieldName: string,
+): string => {
+  const normalized = value?.trim();
+  if (!normalized) {
+    throw createPaymentValidationError(
+      "Aplazo online requiere successUrl y failureUrl/cancelUrl",
+      {
+        missingField: fieldName,
+      },
+    );
+  }
+
+  return normalized;
 };
 
 const normalizeBaseUrl = (value: string): string => {
@@ -277,10 +303,26 @@ export class PaymentsService {
 
     const metadataCartId =
       getMetadataString(request.metadata, "cartId") || order.id;
-    const successUrl = request.successUrl || config.online.successUrl;
+    const successUrl = ensureRequiredUrl(
+      request.successUrl || config.online.successUrl,
+      "successUrl",
+    );
     const cancelUrl = request.cancelUrl || config.online.cancelUrl;
     const failureUrl = request.failureUrl || config.online.failureUrl;
+    const normalizedFailureUrl = ensureRequiredUrl(
+      failureUrl || cancelUrl,
+      failureUrl ? "failureUrl" : "cancelUrl",
+    );
     const webhookUrl = getBackendWebhookUrl();
+    this.validateOnlineAplazoPayload({
+      customer,
+      amountMinor,
+      currency: pricingSnapshot.currency,
+      providerReference: metadataCartId,
+      pricingSnapshot,
+      successUrl,
+      failureUrl: normalizedFailureUrl,
+    });
     const expiresAt = Timestamp.fromDate(
       new Date(Date.now() + ONLINE_FALLBACK_EXPIRATION_MINUTES * 60 * 1000),
     );
@@ -302,7 +344,7 @@ export class PaymentsService {
       idempotencyKey,
       successUrl,
       cancelUrl,
-      failureUrl,
+      failureUrl: normalizedFailureUrl,
       webhookUrl,
       providerReference: metadataCartId,
       expiresAt,
@@ -339,7 +381,7 @@ export class PaymentsService {
         customerPhone: customer.phone,
         successUrl,
         cancelUrl,
-        failureUrl,
+        failureUrl: normalizedFailureUrl,
         cartUrl: request.cartUrl || config.online.cartUrl,
         webhookUrl,
         metadata: {
@@ -405,6 +447,10 @@ export class PaymentsService {
             error instanceof Error ? error.message : "Error desconocido",
           providerLastError:
             error instanceof Error ? error.message : "Error desconocido",
+          providerLastErrorDetails:
+            error instanceof PaymentApiError
+              ? sanitizeForStorage(error.details || {})
+              : {},
         },
       });
       throw error;
@@ -987,19 +1033,86 @@ export class PaymentsService {
       : (userSnapshot.docs[0].data() as Record<string, unknown>);
 
     return {
-      name:
-        input?.name?.trim() ||
-        actor.nombre ||
-        (typeof userData.nombre === "string" ? userData.nombre : undefined),
-      email:
-        input?.email?.trim() ||
-        actor.email ||
-        (typeof userData.email === "string" ? userData.email : undefined),
-      phone:
-        input?.phone?.trim() ||
-        actor.telefono ||
-        (typeof userData.telefono === "string" ? userData.telefono : undefined),
+      name: normalizeWhitespace(
+        input?.name ||
+          actor.nombre ||
+          (typeof userData.nombre === "string" ? userData.nombre : undefined),
+      ),
+      email: normalizeEmail(
+        input?.email ||
+          actor.email ||
+          (typeof userData.email === "string" ? userData.email : undefined),
+      ),
+      phone: normalizeMxPhoneForAplazo(
+        input?.phone ||
+          actor.telefono ||
+          (typeof userData.telefono === "string" ? userData.telefono : undefined),
+      ),
     };
+  }
+
+  private validateOnlineAplazoPayload(input: {
+    customer: { name?: string; email?: string; phone?: string };
+    amountMinor: number;
+    currency?: string;
+    providerReference?: string;
+    pricingSnapshot: PaymentPricingSnapshot;
+    successUrl?: string;
+    failureUrl?: string;
+  }): void {
+    if (!normalizeWhitespace(input.customer.name)) {
+      throw createPaymentValidationError("Nombre inválido para Aplazo");
+    }
+
+    if (!input.customer.email || !isValidEmail(input.customer.email)) {
+      throw createPaymentValidationError("Email inválido para Aplazo");
+    }
+
+    if (!input.customer.phone) {
+      throw createPaymentValidationError("Teléfono inválido para Aplazo");
+    }
+
+    if (input.amountMinor <= 0) {
+      throw createPaymentValidationError("Monto inválido para Aplazo");
+    }
+
+    if (!normalizeCurrency(input.currency)) {
+      throw createPaymentValidationError("Currency inválida para Aplazo");
+    }
+
+    if (!normalizeWhitespace(input.providerReference)) {
+      throw createPaymentValidationError("No fue posible resolver cartId para Aplazo");
+    }
+
+    if (!input.successUrl || !input.failureUrl) {
+      throw createPaymentValidationError(
+        "Aplazo online requiere successUrl y failureUrl/cancelUrl",
+      );
+    }
+
+    if (!input.pricingSnapshot.items.length) {
+      throw createPaymentValidationError(
+        "No fue posible construir products[] válidos para Aplazo",
+      );
+    }
+
+    input.pricingSnapshot.items.forEach((item, index) => {
+      const name = normalizeWhitespace(item.name || item.productoId);
+      if (
+        !name ||
+        item.cantidad <= 0 ||
+        item.precioUnitarioMinor <= 0 ||
+        item.subtotalMinor <= 0
+      ) {
+        throw createPaymentValidationError(
+          "No fue posible construir products[] válidos para Aplazo",
+          {
+            index,
+            productoId: item.productoId,
+          },
+        );
+      }
+    });
   }
 
   private async buildOrderPricingSnapshot(order: Orden): Promise<PaymentPricingSnapshot> {
