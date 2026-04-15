@@ -1,4 +1,6 @@
 const axiosCreate = jest.fn();
+const loggerInfo = jest.fn();
+const loggerError = jest.fn();
 
 jest.mock("axios", () => ({
   __esModule: true,
@@ -7,12 +9,46 @@ jest.mock("axios", () => ({
   },
   AxiosError: class AxiosError extends Error {
     code?: string;
-    response?: { status?: number; data?: unknown };
+    config?: { url?: string };
+    response?: {
+      status?: number;
+      data?: unknown;
+      headers?: Record<string, unknown>;
+    };
   },
 }));
 
-import aplazoProvider from "../src/services/payments/providers/aplazo.provider";
+jest.mock("../src/utils/logger", () => {
+  const loggerInstance = {
+    child: () => ({
+      info: loggerInfo,
+      error: loggerError,
+      debug: jest.fn(),
+      warn: jest.fn(),
+    }),
+    info: loggerInfo,
+    error: loggerError,
+    debug: jest.fn(),
+    warn: jest.fn(),
+  };
+
+  return {
+    __esModule: true,
+    default: loggerInstance,
+    logger: loggerInstance,
+  };
+});
+
+import aplazoProvider, {
+  normalizeProviderError,
+} from "../src/services/payments/providers/aplazo.provider";
 import { PaymentStatus } from "../src/services/payments/payment-status.enum";
+import {
+  maskToken,
+  normalizeEmail,
+  normalizeMxPhoneForAplazo,
+  sanitizeOutgoingProviderPayload,
+} from "../src/services/payments/payment-sanitizer";
 
 const buildClientMock = () => ({
   post: jest.fn(),
@@ -21,15 +57,8 @@ const buildClientMock = () => ({
 });
 
 describe("Aplazo provider", () => {
-  let consoleLogSpy: jest.SpyInstance;
-  let consoleErrorSpy: jest.SpyInstance;
-
   beforeEach(() => {
     jest.clearAllMocks();
-    consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    consoleErrorSpy = jest
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
 
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
@@ -67,11 +96,6 @@ describe("Aplazo provider", () => {
     process.env.APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME = "Bearer";
     process.env.APLAZO_INSTORE_TIMEOUT_MS = "15000";
     process.env.APLAZO_INSTORE_DEFAULT_COMM_CHANNEL = "q";
-  });
-
-  afterEach(() => {
-    consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
   });
 
   it("authenticates online and maps create response using loanId and cartId", async () => {
@@ -151,21 +175,34 @@ describe("Aplazo provider", () => {
           customer: {
             name: "Juan Perez",
             email: "juan@example.com",
-            phone: "+524771234567",
+            phone: "4771234567",
           },
         }),
       }),
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      "APLZ REQUEST PAYLOAD:",
-      expect.any(String),
+    expect(loggerInfo).toHaveBeenCalledWith(
+      "Aplazo request prepared",
+      expect.objectContaining({
+        channel: "online",
+        paymentAttemptId: "attempt_1",
+        providerReference: "orden_123",
+        payload: expect.objectContaining({
+          customer: expect.objectContaining({
+            phone: "***4567",
+          }),
+        }),
+      }),
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith("APLZ RESPONSE:", {
-      loanId: "loan_987",
-      cartId: "orden_123",
-      url: "https://checkout.aplazo/loan_987",
-      status: "No confirmado",
-    });
+    expect(loggerInfo).toHaveBeenCalledWith(
+      "Aplazo response received",
+      expect.objectContaining({
+        providerHttpStatus: undefined,
+        body: expect.objectContaining({
+          loanId: "loan_987",
+          cartId: "orden_123",
+        }),
+      }),
+    );
     expect(result.providerLoanId).toBe("loan_987");
     expect(result.providerReference).toBe("orden_123");
     expect(result.redirectUrl).toBe("https://checkout.aplazo/loan_987");
@@ -407,6 +444,14 @@ describe("Aplazo provider", () => {
     );
   });
 
+  it("normalizes mx phone and email for aplazo helpers", () => {
+    expect(normalizeMxPhoneForAplazo("4771234567")).toBe("4771234567");
+    expect(normalizeMxPhoneForAplazo("+52 477 123 4567")).toBe("4771234567");
+    expect(normalizeMxPhoneForAplazo("(477) 123-4567")).toBe("4771234567");
+    expect(normalizeMxPhoneForAplazo("123")).toBeUndefined();
+    expect(normalizeEmail("  USER@Example.COM  ")).toBe("user@example.com");
+  });
+
   it("maps provider 400 errors with real response details", async () => {
     const authClient = buildClientMock();
     const createClient = buildClientMock();
@@ -415,8 +460,15 @@ describe("Aplazo provider", () => {
     });
     createClient.request.mockRejectedValue(
       Object.assign(new Error("Bad request"), {
+        config: {
+          url: "/loan",
+        },
         response: {
           status: 400,
+          headers: {
+            authorization: "Bearer provider-secret",
+            "x-request-id": "req-123",
+          },
           data: { error: "invalid payload", reason: "cartId duplicated" },
         },
       }),
@@ -460,18 +512,36 @@ describe("Aplazo provider", () => {
       code: "PAYMENT_PROVIDER_ERROR",
       details: {
         providerHttpStatus: 400,
+        providerUrl: "/loan",
         providerResponse: {
           error: "invalid payload",
           reason: "cartId duplicated",
         },
+        providerHeaders: {
+          authorization: "Bear***cret",
+          "x-request-id": "req-123",
+        },
       },
     });
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith("APLZ ERROR STATUS:", 400);
-    expect(consoleErrorSpy).toHaveBeenCalledWith("APLZ ERROR BODY:", {
-      error: "invalid payload",
-      reason: "cartId duplicated",
-    });
+    expect(loggerError).toHaveBeenCalledWith(
+      "Aplazo request failed",
+      expect.objectContaining({
+        channel: "online",
+        requestPayload: expect.objectContaining({
+          customer: expect.objectContaining({
+            email: "ju***@example.com",
+            phone: "***4567",
+          }),
+        }),
+        details: expect.objectContaining({
+          providerResponse: {
+            error: "invalid payload",
+            reason: "cartId duplicated",
+          },
+        }),
+      }),
+    );
   });
 
   it("maps timeout and network errors", async () => {
@@ -529,6 +599,9 @@ describe("Aplazo provider", () => {
       }),
     ).rejects.toMatchObject({
       code: "PAYMENT_PROVIDER_TIMEOUT",
+      details: {
+        providerUrl: "https://api.aplazo.net/api/loan",
+      },
     });
 
     await expect(
@@ -563,6 +636,174 @@ describe("Aplazo provider", () => {
       }),
     ).rejects.toMatchObject({
       code: "PAYMENT_PROVIDER_NETWORK_ERROR",
+    });
+  });
+
+  it("rejects invalid customer email, phone, and empty products before calling aplazo", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_invalid_phone",
+        idempotencyKey: "idem_invalid_phone",
+        amountMinor: 1000,
+        currency: "MXN",
+        providerReference: "cart_1",
+        customerName: " Juan   Perez ",
+        customerEmail: "juan@example.com",
+        customerPhone: "123",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "cart_1" },
+        pricingSnapshot: {
+          subtotalMinor: 1000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 1000,
+          currency: "MXN",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 1000,
+              subtotalMinor: 1000,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_VALIDATION_ERROR",
+      message: "Teléfono inválido para Aplazo",
+    });
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_invalid_email",
+        idempotencyKey: "idem_invalid_email",
+        amountMinor: 1000,
+        currency: "MXN",
+        providerReference: "cart_2",
+        customerName: " Juan   Perez ",
+        customerEmail: "bad-email",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "cart_2" },
+        pricingSnapshot: {
+          subtotalMinor: 1000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 1000,
+          currency: "MXN",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 1000,
+              subtotalMinor: 1000,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_VALIDATION_ERROR",
+      message: "Email inválido para Aplazo",
+    });
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_invalid_items",
+        idempotencyKey: "idem_invalid_items",
+        amountMinor: 1000,
+        currency: "MXN",
+        providerReference: "cart_3",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "cart_3" },
+        pricingSnapshot: {
+          subtotalMinor: 0,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 1000,
+          currency: "MXN",
+          items: [],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_VALIDATION_ERROR",
+      message: "No fue posible construir products[] válidos para Aplazo",
+    });
+
+    expect(authClient.post).not.toHaveBeenCalled();
+    expect(createClient.request).not.toHaveBeenCalled();
+  });
+
+  it("normalizes provider errors and sanitizes tokens", () => {
+    const error = normalizeProviderError(
+      Object.assign(new Error("Bad request"), {
+        code: "ERR_BAD_REQUEST",
+        config: { url: "/loan" },
+        response: {
+          status: 400,
+          headers: {
+            authorization: "Bearer provider-secret-token",
+          },
+          data: {
+            apiToken: "provider-secret-token",
+            error: "invalid payload",
+          },
+        },
+      }),
+      {
+        requestPayload: {
+          apiToken: "local-token-123456",
+          customer: {
+            email: "test@example.com",
+            phone: "4771234567",
+          },
+        },
+      },
+    );
+
+    expect(error).toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      statusCode: 502,
+      details: {
+        providerHttpStatus: 400,
+        providerUrl: "/loan",
+        providerHeaders: {
+          authorization: "Bear***oken",
+        },
+        providerResponse: {
+          apiToken: "prov***oken",
+          error: "invalid payload",
+        },
+        requestPayload: {
+          apiToken: "loca***3456",
+          customer: {
+            email: "te***@example.com",
+            phone: "***4567",
+          },
+        },
+      },
+    });
+    expect(maskToken("provider-secret-token")).toBe("prov***oken");
+    expect(
+      sanitizeOutgoingProviderPayload({
+        Authorization: "Bearer provider-secret-token",
+      }),
+    ).toEqual({
+      Authorization: "Bear***oken",
     });
   });
 
