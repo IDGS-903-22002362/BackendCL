@@ -81,6 +81,19 @@ const toTrimmedString = (value: unknown): string | undefined => {
   return normalized.length > 0 ? normalized : undefined;
 };
 
+const toIdentifierString = (value: unknown): string | undefined => {
+  const asString = toTrimmedString(value);
+  if (asString) {
+    return asString;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return undefined;
+};
+
 const toNumber = (value: unknown): number | undefined => {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -103,6 +116,23 @@ const toAplazoNumericWhenPossible = (
   }
 
   return /^\d+$/.test(normalized) ? Number(normalized) : normalized;
+};
+
+const resolveOnlineAuthMerchantId = (
+  merchantId: string | undefined,
+): number => {
+  const normalized = toTrimmedString(merchantId);
+  const numericMerchantId = toAplazoNumericWhenPossible(normalized);
+
+  if (typeof numericMerchantId === "number") {
+    return numericMerchantId;
+  }
+
+  throw new PaymentApiError(
+    503,
+    "PAYMENT_PROVIDER_ERROR",
+    "APLAZO_ONLINE_MERCHANT_ID debe ser numérico para auth",
+  );
 };
 
 const normalizeCurrencyOrThrow = (currency?: string): "MXN" => {
@@ -165,6 +195,75 @@ const pickNumber = (payload: unknown, keys: string[]): number | undefined => {
   }
 
   return undefined;
+};
+
+const pickIdentifier = (payload: unknown, keys: string[]): string | undefined => {
+  const variants = collectPayloadVariants(payload);
+  for (const variant of variants) {
+    for (const key of keys) {
+      const value = toIdentifierString(variant[key]);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const getRecordArray = (payload: unknown): JsonRecord[] => {
+  if (Array.isArray(payload)) {
+    return payload.filter(isRecord);
+  }
+
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const nestedArrays = ["data", "items", "results", "refunds"];
+  for (const key of nestedArrays) {
+    const candidate = payload[key];
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isRecord);
+    }
+  }
+
+  return [];
+};
+
+const parseAplazoDateValue = (value: unknown): Date | undefined => {
+  return parseAplazoDate(toTrimmedString(value));
+};
+
+const selectRefundStatusEntry = (
+  payload: unknown,
+  refundId?: string,
+): JsonRecord | undefined => {
+  const entries = getRecordArray(payload);
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  if (refundId) {
+    const matched = entries.find((entry) => {
+      return pickIdentifier(entry, ["id", "refundId", "refund_id"]) === refundId;
+    });
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return [...entries].sort((left, right) => {
+    const leftDate = parseAplazoDateValue(left.refundDate)?.getTime() || 0;
+    const rightDate = parseAplazoDateValue(right.refundDate)?.getTime() || 0;
+    if (rightDate !== leftDate) {
+      return rightDate - leftDate;
+    }
+
+    const leftId = toNumber(left.id) || toNumber(left.refundId) || 0;
+    const rightId = toNumber(right.id) || toNumber(right.refundId) || 0;
+    return rightId - leftId;
+  })[0];
 };
 
 const getMetadataString = (
@@ -552,6 +651,28 @@ const validateOnlinePayloadInput = (
     );
   }
 
+  if (!toTrimmedString(input.cartUrl)) {
+    throw createPaymentValidationError("Aplazo online requiere cartUrl");
+  }
+
+  if (!toTrimmedString(input.webhookUrl)) {
+    throw createPaymentValidationError("Aplazo online requiere webHookUrl");
+  }
+
+  const buyer = isRecord(payload.buyer) ? payload.buyer : undefined;
+  if (!buyer) {
+    throw createPaymentValidationError("Aplazo online requiere buyer");
+  }
+
+  const requiredBuyerFields = ["firstName", "lastName", "email", "phone"];
+  requiredBuyerFields.forEach((field) => {
+    if (!toTrimmedString(String(buyer[field] ?? ""))) {
+      throw createPaymentValidationError(
+        `Aplazo online requiere buyer.${field}`,
+      );
+    }
+  });
+
   if (!Array.isArray(payload.products) || payload.products.length === 0) {
     throw createPaymentValidationError(
       "No fue posible construir products[] válidos para Aplazo",
@@ -740,12 +861,22 @@ export const normalizeProviderError = (
 
   if (axiosLikeError) {
     const providerHttpStatus = axiosLikeError.response?.status;
-    const providerResponse = sanitizeAxiosErrorData(axiosLikeError.response?.data);
+    const rawProviderResponse = axiosLikeError.response?.data;
+    const providerResponse = sanitizeAxiosErrorData(rawProviderResponse);
     const providerHeaders = sanitizeProviderHeaders(
       axiosLikeError.response?.headers || context?.providerHeaders,
     );
     const providerUrl = axiosLikeError.config?.url || context?.providerUrl;
     const requestPayload = sanitizeOutgoingProviderPayload(context?.requestPayload);
+    const providerCode = pickString(rawProviderResponse, [
+      "code",
+      "error",
+      "errorCode",
+      "error_code",
+    ]);
+    const providerParams = sanitizeAxiosErrorData(
+      isRecord(rawProviderResponse) ? rawProviderResponse.params : undefined,
+    );
 
     if (
       axiosLikeError.code === "ECONNABORTED" ||
@@ -758,6 +889,8 @@ export const normalizeProviderError = (
           providerResponse,
           providerHeaders,
           providerUrl,
+          providerCode,
+          providerParams,
           requestPayload,
         },
       );
@@ -774,6 +907,8 @@ export const normalizeProviderError = (
           }),
           providerHeaders,
           providerUrl,
+          providerCode,
+          providerParams,
           requestPayload,
         },
       );
@@ -791,6 +926,8 @@ export const normalizeProviderError = (
         providerResponse,
         providerHeaders,
         providerUrl,
+        providerCode,
+        providerParams,
         requestPayload,
       },
     );
@@ -858,8 +995,7 @@ export class AplazoProvider implements PaymentProvider {
       const client = buildClient(apiBaseUrl, contract.timeoutMs);
       const response = await client.post(authPath, {
         apiToken: contract.apiToken,
-        merchantId:
-          toAplazoNumericWhenPossible(contract.merchantId) ?? contract.merchantId,
+        merchantId: resolveOnlineAuthMerchantId(contract.merchantId),
       });
       const token =
         pickString(response.data, [
@@ -869,7 +1005,11 @@ export class AplazoProvider implements PaymentProvider {
           "accessToken",
           "access_token",
           "bearerToken",
-        ]) || toTrimmedString(response.headers?.authorization);
+        ]) ||
+        toTrimmedString(response.headers?.authorization) ||
+        toTrimmedString(
+          isRecord(response.headers) ? response.headers.Authorization : undefined,
+        );
 
       if (!token) {
         throw new PaymentApiError(
@@ -948,9 +1088,9 @@ export class AplazoProvider implements PaymentProvider {
       status: resolveAplazoStatus(providerStatus),
       providerStatus,
       providerLoanId:
-        pickString(rawData, ["loanId", "loan_id"]) || fallback.providerLoanId,
+        pickIdentifier(rawData, ["loanId", "loan_id"]) || fallback.providerLoanId,
       providerReference:
-        pickString(rawData, ["cartId", "cart_id"]) || fallback.providerReference,
+        pickIdentifier(rawData, ["cartId", "cart_id"]) || fallback.providerReference,
       amountMinor: majorToMinor(amountMajor),
       currency: pickString(rawData, ["currency"]),
       paidAt:
@@ -1177,8 +1317,8 @@ export class AplazoProvider implements PaymentProvider {
           ? resolveAplazoStatus(providerStatus)
           : PaymentStatus.PENDING_CUSTOMER,
         providerStatus: providerStatus || "pending_customer",
-        providerLoanId: pickString(rawData, ["loanId", "loan_id"]),
-        providerReference: pickString(rawData, ["cartId", "cart_id"]) || cartId,
+        providerLoanId: pickIdentifier(rawData, ["loanId", "loan_id"]),
+        providerReference: pickIdentifier(rawData, ["cartId", "cart_id"]) || cartId,
         redirectUrl: pickString(rawData, [
           "url",
           "checkoutUrl",
@@ -1259,8 +1399,8 @@ export class AplazoProvider implements PaymentProvider {
       return {
         status: resolveAplazoStatus(providerStatus),
         providerStatus,
-        providerLoanId: pickString(rawData, ["loanId", "loan_id"]),
-        providerReference: pickString(rawData, ["cartId", "cart_id"]) || cartId,
+        providerLoanId: pickIdentifier(rawData, ["loanId", "loan_id"]),
+        providerReference: pickIdentifier(rawData, ["cartId", "cart_id"]) || cartId,
         paymentLink: pickString(rawData, [
           "url",
           "link",
@@ -1295,9 +1435,9 @@ export class AplazoProvider implements PaymentProvider {
         const params: Record<string, string> = {};
 
         if (paymentAttempt.providerLoanId) {
-          params.loanId = paymentAttempt.providerLoanId;
+          params.loan_id = paymentAttempt.providerLoanId;
         } else if (paymentAttempt.providerReference) {
-          params.cartId = paymentAttempt.providerReference;
+          params.cart_id = paymentAttempt.providerReference;
         } else {
           throw new PaymentApiError(
             409,
@@ -1367,8 +1507,8 @@ export class AplazoProvider implements PaymentProvider {
     }
 
     const providerStatus = pickString(parsedPayload, ["status"]) || "pending_provider";
-    const providerLoanId = pickString(parsedPayload, ["loanId", "loan_id"]);
-    const providerReference = pickString(parsedPayload, ["cartId", "cart_id"]);
+    const providerLoanId = pickIdentifier(parsedPayload, ["loanId", "loan_id"]);
+    const providerReference = pickIdentifier(parsedPayload, ["cartId", "cart_id"]);
     const merchantId = pickString(parsedPayload, ["merchantId", "merchant_id"]);
     const eventId = pickString(parsedPayload, ["eventId", "event_id", "id"]);
     const resolvedChannel = this.resolveWebhookChannel(merchantId, input.headers);
@@ -1428,16 +1568,26 @@ export class AplazoProvider implements PaymentProvider {
         channel === "online"
           ? requireBaseUrl(contract, "refunds")
           : requireBaseUrl(contract, "api");
-      const response = await this.request(baseURL, contract.timeoutMs, {
-        method: "post",
-        url: cancelPath,
-        headers,
-        data: {
-          loanId: input.paymentAttempt.providerLoanId,
-          cartId,
-          reason: input.reason,
-        },
-      });
+      const response =
+        channel === "online"
+          ? await this.request(baseURL, contract.timeoutMs, {
+              method: "get",
+              url: cancelPath,
+              headers,
+              params: {
+                cartId,
+              },
+            })
+          : await this.request(baseURL, contract.timeoutMs, {
+              method: "post",
+              url: cancelPath,
+              headers,
+              data: {
+                loanId: input.paymentAttempt.providerLoanId,
+                cartId,
+                reason: input.reason,
+              },
+            });
 
       const result = this.buildProviderStatusResult(response.data, {
         providerLoanId: input.paymentAttempt.providerLoanId,
@@ -1500,12 +1650,19 @@ export class AplazoProvider implements PaymentProvider {
         method: "post",
         url: refundPath,
         headers,
-        data: {
-          cartId,
-          loanId: input.paymentAttempt.providerLoanId,
-          totalAmount: minorToMajor(refundAmountMinor),
-          reason: input.reason,
-        },
+        data:
+          channel === "online"
+            ? {
+                cartId,
+                totalAmount: minorToMajor(refundAmountMinor),
+                reason: input.reason,
+              }
+            : {
+                cartId,
+                loanId: input.paymentAttempt.providerLoanId,
+                totalAmount: minorToMajor(refundAmountMinor),
+                reason: input.reason,
+              },
       });
 
       const providerStatus =
@@ -1520,7 +1677,7 @@ export class AplazoProvider implements PaymentProvider {
             ? undefined
             : resolvedStatus,
         providerStatus,
-        refundId: pickString(response.data, ["refundId", "refund_id"]),
+        refundId: pickIdentifier(response.data, ["refundId", "refund_id"]),
         refundAmountMinor,
         rawResponseSanitized: sanitizeAplazoPayload(response.data),
       };
@@ -1542,16 +1699,11 @@ export class AplazoProvider implements PaymentProvider {
       if (channel === "online") {
         const merchantBaseUrl = requireBaseUrl(contract, "merchant");
         const headers = await this.authenticateOnline(contract);
-        const params: Record<string, string> = {};
-        if (input.paymentAttempt.providerLoanId) {
-          params.loanId = input.paymentAttempt.providerLoanId;
-        } else if (cartId) {
-          params.cartId = cartId;
-        } else {
+        if (!cartId) {
           throw new PaymentApiError(
             409,
             "PAYMENT_VALIDATION_ERROR",
-            "El refund online Aplazo requiere loanId o cartId para consultar status",
+            "El refund online Aplazo requiere cartId para consultar status",
           );
         }
 
@@ -1559,13 +1711,17 @@ export class AplazoProvider implements PaymentProvider {
           method: "get",
           url: refundStatusPath,
           headers,
-          params,
+          params: {
+            cartId,
+          },
         });
+        const selectedEntry =
+          selectRefundStatusEntry(response.data, input.refundId) || response.data;
         const providerStatus =
-          pickString(response.data, ["status", "refundStatus", "state"]) ||
+          pickString(selectedEntry, ["status", "refundStatus", "state"]) ||
           "processing";
         const refundAmountMinor = majorToMinor(
-          pickNumber(response.data, ["totalAmount", "refundAmount", "amount"]),
+          pickNumber(selectedEntry, ["totalAmount", "refundAmount", "amount"]),
         );
 
         return {
@@ -1573,7 +1729,7 @@ export class AplazoProvider implements PaymentProvider {
           status: resolveAplazoStatus(providerStatus),
           providerStatus,
           refundId:
-            pickString(response.data, ["refundId", "refund_id"]) ||
+            pickIdentifier(selectedEntry, ["id", "refundId", "refund_id"]) ||
             input.refundId,
           refundAmountMinor,
           rawResponseSanitized: sanitizeAplazoPayload(response.data),

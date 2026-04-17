@@ -1,88 +1,25 @@
-# Aplazo Frontend Consumption Guide
+# Aplazo Frontend Consumption
 
-## Objetivo
+Guia corta para consumir Aplazo desde frontend usando este backend.
 
-Este documento explica cómo consumir desde frontend los endpoints nuevos de Aplazo ya expuestos por el backend.
+## Regla base
 
-Está orientado a dos clientes:
+- El frontend no debe llamar a Aplazo directo.
+- El frontend solo consume el backend.
+- Los endpoints protegidos usan `Authorization: Bearer <JWT de tu app>`.
+- Las return URLs de Aplazo son publicas y no usan JWT.
+- Webhooks y endpoints admin no son para frontend.
 
-- ecommerce web/app
-- POS / tienda física
+## Endpoints frontend
 
-No documenta Stripe ni endpoints administrativos internos.
+### 1. Crear intento Aplazo online
 
-## Conceptos base
-
-- El frontend nunca habla directo con Aplazo.
-- El frontend solo habla con este backend.
-- El backend crea el intento, habla con Aplazo y responde con `redirectUrl`, `paymentLink` o datos QR.
-- El frontend nunca confirma el pago usando `success`, `failure` o `cancel`.
-- La fuente de verdad real es el backend por webhook o reconcile.
-- La referencia principal para el frontend es `paymentAttemptId`.
-- `Idempotency-Key` es opcional pero recomendado para reintentos seguros.
-
-## Endpoints disponibles
-
-### Online
-
-- `POST /api/payments/aplazo/online/create`
-- `GET /api/payments/:paymentAttemptId/status`
-- `GET /payments/aplazo/success`
-- `GET /payments/aplazo/failure`
-- `GET /payments/aplazo/cancel`
-
-### In-store
-
-- `POST /api/payments/aplazo/in-store/create`
-- `GET /api/payments/:paymentAttemptId/status`
-
-## Autenticación
-
-### Ecommerce online
-
-- Requiere sesión autenticada del dueño de la orden.
-- Enviar `Authorization: Bearer <token>`.
-
-### POS / in-store
-
-- Requiere sesión autenticada de personal autorizado.
-- Solo `ADMIN` o `EMPLEADO` con sesión POS válida.
-- Enviar `Authorization: Bearer <token>`.
-
-## Respuesta estándar de error
-
-Todos los endpoints nuevos usan este contrato:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "PAYMENT_VALIDATION_ERROR",
-    "message": "Mensaje legible",
-    "details": {}
-  }
-}
-```
-
-## Flujo online paso a paso
-
-### 1. Crear intento online
-
-Llama `POST /api/payments/aplazo/online/create`.
-
-Usa este endpoint cuando:
-
-- ya existe una orden ecommerce
-- la orden fue creada con método de pago `APLAZO`
-- el usuario ya está autenticado
-
-### Request
+`POST /api/payments/aplazo/online/create`
 
 Headers:
 
 - `Authorization: Bearer <token>`
-- `Content-Type: application/json`
-- `Idempotency-Key: <clave-opcional-pero-recomendada>`
+- `Idempotency-Key: <opcional>`
 
 Body:
 
@@ -94,51 +31,19 @@ Body:
     "email": "juan@example.com",
     "phone": "4771234567"
   },
-  "items": [
-    {
-      "productoId": "prod_1",
-      "cantidad": 1,
-      "tallaId": "m"
-    }
-  ],
-  "subtotal": 1299,
-  "tax": 0,
-  "shipping": 0,
-  "total": 1299,
-  "currency": "mxn",
-  "successUrl": "https://frontend.example.com/payments/aplazo/success",
-  "cancelUrl": "https://frontend.example.com/payments/aplazo/cancel",
-  "failureUrl": "https://frontend.example.com/payments/aplazo/failure",
-  "cartUrl": "https://frontend.example.com/cart",
+  "successUrl": "https://frontend.com/pagos/aplazo/success",
+  "cancelUrl": "https://frontend.com/pagos/aplazo/cancel",
+  "failureUrl": "https://frontend.com/pagos/aplazo/failure",
+  "cartUrl": "https://frontend.com/carrito",
   "metadata": {
     "cartId": "orden_123",
-    "concesionId": "con_1",
-    "sucursalId": "suc_1",
-    "vendedorUid": "uid_1"
+    "addressLine": "Fake Street 123",
+    "postalCode": "99999"
   }
 }
 ```
 
-### Qué recalcula el backend
-
-Aunque el frontend puede enviar totales e items, el backend recalcula el monto real desde la orden.
-
-Eso significa:
-
-- no confíes en que el frontend define el monto final
-- el backend puede rechazar el request si `total` no coincide con lo recalculado
-
-### Response
-
-Cuando se crea un intento nuevo:
-
-- HTTP `201`
-
-Cuando es un reintento idempotente:
-
-- HTTP `200`
-
-Body:
+Respuesta `201` o `200`:
 
 ```json
 {
@@ -146,128 +51,67 @@ Body:
   "paymentAttemptId": "pay_attempt_123",
   "provider": "aplazo",
   "flowType": "online",
-  "status": "pending_customer",
-  "redirectUrl": "https://checkout.aplazo/..."
+  "status": "PENDING_CUSTOMER",
+  "redirectUrl": "https://checkout.aplazo.net/...",
+  "checkoutUrl": "https://checkout.aplazo.net/...",
+  "expiresAt": "2026-04-17T18:30:00.000Z"
 }
 ```
 
-### Qué hacer con `redirectUrl`
+Uso frontend:
 
-- Si `redirectUrl` existe, redirige al usuario inmediatamente.
-- Guarda localmente:
-  - `paymentAttemptId`
-  - `flowType`
-  - `orderId`
-- Si la red falla al crear el intento, reintenta usando la misma `Idempotency-Key`.
+1. Crear intento.
+2. Guardar `paymentAttemptId`.
+3. Redirigir a `redirectUrl`.
+4. Al volver del checkout, consultar `GET /api/payments/:paymentAttemptId/status`.
 
-### 2. Regreso desde Aplazo
+Errores mas comunes:
 
-Cuando el navegador vuelva a:
+- `401 PAYMENT_AUTH_REQUIRED`: token faltante, invalido o expirado.
+- `404 PAYMENT_ORDER_INVALID`: orden no encontrada.
+- `403 PAYMENT_FORBIDDEN`: la orden no pertenece al usuario.
+- `409 PAYMENT_ORDER_INVALID`: orden no pagable o no fue creada con metodo `APLAZO`.
+- `409 PAYMENT_AMOUNT_MISMATCH`: el total enviado por frontend no coincide con backend.
+- `400 PAYMENT_VALIDATION_ERROR`: customer/urls/cartId invalidos.
+- `502 PAYMENT_PROVIDER_ERROR`: Aplazo rechazo la solicitud.
+- `504 PAYMENT_PROVIDER_TIMEOUT`: timeout con Aplazo; el frontend debe seguir consultando status.
 
-- `/payments/aplazo/success`
-- `/payments/aplazo/failure`
-- `/payments/aplazo/cancel`
+### 2. Crear intento Aplazo in-store
 
-no marques pago exitoso todavía.
-
-Esas rutas son solo UX. El frontend debe seguir consultando:
-
-- `GET /api/payments/:paymentAttemptId/status`
-
-### 3. Polling de estado
-
-Usa `paymentAttemptId` para consultar el estado real:
-
-- si `isTerminal=false`, sigue haciendo polling
-- usa `nextPollAfterMs` como intervalo recomendado por el backend
-- detén el polling cuando `isTerminal=true`
-
-## Flujo in-store paso a paso
-
-### Cuándo usarlo
-
-Usa `POST /api/payments/aplazo/in-store/create` cuando el personal de caja necesita:
-
-- generar link de pago
-- mostrar QR
-- esperar confirmación asíncrona del pago
-
-### `ventaPosId` vs `items[]`
-
-Puedes usar dos formas:
-
-- mandar `ventaPosId` si ya existe una venta POS preparada
-- mandar `items[]` si quieres que el backend cree la venta POS borrador
-
-Si no mandas `ventaPosId`, `items[]` es obligatorio.
-
-### Requisitos POS
-
-El frontend POS debe conocer y mandar:
-
-- `posSessionId`
-- `deviceId`
-- `cajaId`
-- `sucursalId`
-- `vendedorUid`
-
-El backend valida que todo coincida con la sesión POS abierta.
-
-### Request
+`POST /api/payments/aplazo/in-store/create`
 
 Headers:
 
 - `Authorization: Bearer <token>`
-- `Content-Type: application/json`
-- `Idempotency-Key: <clave-opcional-pero-recomendada>`
+- `Idempotency-Key: <opcional>`
 
-Body ejemplo con `items[]`:
+Body:
 
 ```json
 {
-  "posSessionId": "pos_session_1",
-  "deviceId": "device-1",
-  "cajaId": "caja-1",
-  "sucursalId": "sucursal-1",
-  "vendedorUid": "empleado_1",
+  "posSessionId": "sesion_123",
+  "deviceId": "device_1",
+  "cajaId": "caja_1",
+  "sucursalId": "sucursal_1",
+  "vendedorUid": "uid_vendedor",
   "customer": {
     "name": "Cliente POS",
+    "email": "cliente@example.com",
     "phone": "4771234567"
   },
   "items": [
     {
       "productoId": "prod_1",
-      "cantidad": 2,
-      "tallaId": "m"
+      "cantidad": 1
     }
   ],
-  "amount": 2598,
-  "currency": "mxn",
   "metadata": {
-    "cartId": "venta_pos_456",
     "commChannel": "q"
   }
 }
 ```
 
-### `commChannel`
-
-El frontend puede mandar `metadata.commChannel` con:
-
-- `q`: QR
-- `w`: WhatsApp
-- `s`: SMS
-
-Si no se manda, el backend usa su default configurado.
-
-### Response
-
-HTTP:
-
-- `201` si se creó un intento nuevo
-- `200` si fue un reintento idempotente
-
-Body:
+Respuesta `201` o `200`:
 
 ```json
 {
@@ -275,377 +119,230 @@ Body:
   "paymentAttemptId": "pay_attempt_pos_123",
   "provider": "aplazo",
   "flowType": "in_store",
-  "status": "pending_customer",
-  "paymentLink": "https://aplazo/checkout/...",
+  "status": "PENDING_CUSTOMER",
+  "paymentLink": "https://aplazo/pos/venta_pos_1",
   "qrString": "qr_payload",
-  "qrImageUrl": "https://aplazo/qr/....png",
-  "expiresAt": "2026-04-01T18:30:00.000Z"
+  "qrImageUrl": "https://aplazo/qr/venta_pos_1.png",
+  "expiresAt": "2026-04-17T18:30:00.000Z"
 }
 ```
 
-### Qué hacer con la respuesta
+Uso frontend POS:
 
-Si el backend devuelve:
+1. Crear intento.
+2. Renderizar `paymentLink` o `qrImageUrl`.
+3. Consultar `GET /api/payments/:paymentAttemptId/status` hasta que cambie a terminal.
 
-- `paymentLink`: muéstralo para abrir/copiar/enviar
-- `qrString`: úsalo para renderizar QR si tu frontend ya tiene librería QR
-- `qrImageUrl`: úsalo como imagen directa si no quieres generar el QR en cliente
+Errores mas comunes:
 
-### Qué hacer si expira
+- `401 PAYMENT_AUTH_REQUIRED`
+- `403 PAYMENT_FORBIDDEN`: solo `ADMIN` o `EMPLEADO`.
+- `400` de validacion Zod
+- `409 PAYMENT_AMOUNT_MISMATCH`
+- `502 PAYMENT_PROVIDER_ERROR`
+- `504 PAYMENT_PROVIDER_TIMEOUT`
 
-Si `status=expired` o `isTerminal=true` con fallo:
+### 3. Consultar estado de intento
 
-- deja de hacer polling
-- informa al cajero que debe generar un nuevo intento
-- no sigas reutilizando el intento expirado
-
-## Endpoint de status
-
-### Request
-
-`GET /api/payments/:paymentAttemptId/status`
+`GET /api/payments/{paymentAttemptId}/status`
 
 Headers:
 
 - `Authorization: Bearer <token>`
 
-### Response
+Respuesta `200`:
 
 ```json
 {
   "ok": true,
   "paymentAttemptId": "pay_attempt_123",
   "provider": "aplazo",
-  "status": "pending_customer",
+  "status": "PENDING_CUSTOMER",
   "providerStatus": "No confirmado",
   "amount": 1299,
-  "currency": "mxn",
+  "currency": "MXN",
   "paidAt": null,
-  "expiresAt": "2026-04-01T18:30:00.000Z",
+  "expiresAt": "2026-04-17T18:30:00.000Z",
   "isTerminal": false,
   "nextPollAfterMs": 3000
 }
 ```
 
-### Cómo usarlo en frontend
+Regla frontend:
 
-- `paymentAttemptId` es la llave principal de polling
-- `status` es el estado normalizado que debe usar la UI
-- `providerStatus` es el estado crudo del proveedor, útil para debugging o soporte
-- `isTerminal` decide si se termina el flujo visual
-- `nextPollAfterMs` te da la frecuencia sugerida
+- Si `isTerminal` es `false`, volver a consultar despues de `nextPollAfterMs`.
+- Si `isTerminal` es `true`, detener polling.
 
-## Mapa de estados para UI
+Estados practicos que debes contemplar:
 
-### `pending_provider`
+- `PENDING_PROVIDER`
+- `PENDING_CUSTOMER`
+- `PAID`
+- `CANCELED`
+- `FAILED`
+- `EXPIRED`
+- `REFUNDED`
+- `PARTIALLY_REFUNDED`
 
-- El backend o proveedor sigue procesando.
-- UI recomendada: “Estamos preparando tu pago”.
+Errores mas comunes:
 
-### `pending_customer`
+- `401 PAYMENT_AUTH_REQUIRED`
+- `403 PAYMENT_FORBIDDEN`
+- `404 PAYMENT_ATTEMPT_NOT_FOUND`
+- `502 PAYMENT_PROVIDER_ERROR`
+- `504 PAYMENT_PROVIDER_TIMEOUT`
 
-- El cliente todavía no completa la acción o Aplazo no ha confirmado.
-- UI recomendada: “Estamos esperando confirmación de tu pago”.
+### 4. Return URL success
 
-### `authorized`
+`GET /payments/aplazo/success`
 
-- El pago tiene una validación intermedia, pero todavía no es éxito final.
-- UI recomendada: tratarlo como “validando”.
+Query:
 
-### `paid`
+- `paymentAttemptId`, o
+- `providerPaymentId`, o
+- `providerReference`
 
-- Éxito final.
-- UI recomendada: mostrar confirmación final.
+Si mandas `Accept: application/json`, responde JSON.
 
-### `failed`
-
-- Terminal no exitoso.
-- UI recomendada: mostrar error y ofrecer reintento.
-
-### `canceled`
-
-- Terminal no exitoso.
-- UI recomendada: informar cancelación y permitir volver a intentar.
-
-### `expired`
-
-- Terminal no exitoso.
-- UI recomendada: generar nuevo intento.
-
-### `refunded`
-
-- Estado posterior al pago.
-- Normalmente no forma parte del checkout inicial.
-
-### `partially_refunded`
-
-- Estado posterior al pago.
-- Normalmente no forma parte del checkout inicial.
-
-## Return URLs y UX
-
-Estas rutas existen para el regreso del navegador:
-
-- `GET /payments/aplazo/success`
-- `GET /payments/aplazo/failure`
-- `GET /payments/aplazo/cancel`
-
-### Qué devuelven
-
-Si el cliente pide HTML:
-
-- responden con una página simple de backend
-
-Si el cliente pide JSON con `Accept: application/json`:
-
-- responden JSON
-
-Ejemplo:
+Respuesta `200`:
 
 ```json
 {
   "ok": true,
   "paymentAttemptId": "pay_attempt_123",
   "provider": "aplazo",
-  "status": "pending_customer",
+  "status": "PENDING_CUSTOMER",
   "message": "Estamos validando tu pago con Aplazo. El webhook sigue siendo la fuente de verdad.",
   "isTerminal": false,
   "nextPollAfterMs": 3000
 }
 ```
 
-### Recomendación de uso
+Uso frontend:
 
-- Para una SPA, la vía principal debe seguir siendo `GET /api/payments/:paymentAttemptId/status`.
-- Usa las return URLs como transición UX, no como confirmación final.
-- Si el usuario vuelve antes de que llegue el webhook, sigue mostrando “estamos validando”.
+- util cuando Aplazo redirige al navegador
+- puedes mostrar la vista con este payload y despues seguir con polling a `/api/payments/:paymentAttemptId/status`
 
-## Errores frecuentes para frontend
+Error comun:
 
-### `401 PAYMENT_AUTH_REQUIRED`
+- `400` de validacion si no mandas ninguno de los query params requeridos
 
-- El usuario no está autenticado.
-- Acción UI: forzar login o renovar sesión.
+### 5. Return URL failure
 
-### `403 PAYMENT_FORBIDDEN`
+`GET /payments/aplazo/failure`
 
-- El usuario no puede operar esa orden o esa sesión POS.
-- Acción UI: bloquear acción y mostrar mensaje claro.
+Mismo contrato que `success`.
 
-### `404 PAYMENT_ATTEMPT_NOT_FOUND`
+Respuesta `200`:
 
-- `paymentAttemptId` no existe.
-- Acción UI: detener polling y ofrecer volver al checkout.
-
-### `404 PAYMENT_ORDER_NOT_FOUND`
-
-- `orderId` inválido o no accesible.
-- Acción UI: no crear intento, volver a checkout.
-
-### `404 PAYMENT_POS_SESSION_NOT_FOUND`
-
-- La sesión POS ya no existe o no está abierta.
-- Acción UI: pedir reapertura de sesión de caja.
-
-### `409 PAYMENT_VALIDATION_ERROR`
-
-- Body inválido, `commChannel` inválido, datos inconsistentes o flujo no permitido.
-
-### `409 PAYMENT_AMOUNT_MISMATCH`
-
-- El backend recalculó un monto distinto.
-- Acción UI: refrescar resumen desde backend y reintentar.
-
-### `409 PAYMENT_INVALID_TRANSITION`
-
-- El intento ya está en un estado que no permite la operación.
-
-### `409 PAYMENT_REFUND_UNSUPPORTED`
-
-- No forma parte del checkout normal del frontend.
-- Se documenta solo para soporte interno.
-
-### `502 PAYMENT_PROVIDER_ERROR`
-
-- Aplazo respondió con error.
-- Acción UI: mostrar error temporal y permitir reintento controlado.
-
-### `504 PAYMENT_PROVIDER_TIMEOUT`
-
-- Timeout contra Aplazo.
-- Acción UI: no asumas fallo inmediato; consulta status o reintenta con la misma `Idempotency-Key`.
-
-## Recomendaciones de UI
-
-- Deshabilita doble click mientras corre `create`.
-- Guarda localmente `paymentAttemptId`, `flowType` y referencia de orden/venta.
-- Reutiliza la misma `Idempotency-Key` si el usuario reintenta por red o timeout.
-- No muestres “pago exitoso” hasta que `status=paid`.
-- Si el usuario cierra la ventana y vuelve después, reanuda usando `paymentAttemptId`.
-
-## Ejemplos con `fetch`
-
-### 1. Crear pago Aplazo online
-
-```ts
-const response = await fetch("/api/payments/aplazo/online/create", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`,
-    "Idempotency-Key": idempotencyKey,
-  },
-  body: JSON.stringify({
-    orderId: "orden_123",
-    customer: {
-      name: "Juan Perez",
-      email: "juan@example.com",
-      phone: "4771234567",
-    },
-    successUrl: `${window.location.origin}/payments/aplazo/success`,
-    cancelUrl: `${window.location.origin}/payments/aplazo/cancel`,
-    failureUrl: `${window.location.origin}/payments/aplazo/failure`,
-    cartUrl: `${window.location.origin}/cart`,
-    metadata: {
-      cartId: "orden_123",
-    },
-  }),
-});
-
-const data = await response.json();
-
-if (!response.ok || !data.ok) {
-  throw new Error(data?.error?.message || "No se pudo crear el intento");
-}
-
-localStorage.setItem("aplazoPaymentAttemptId", data.paymentAttemptId);
-
-if (data.redirectUrl) {
-  window.location.href = data.redirectUrl;
+```json
+{
+  "ok": true,
+  "paymentAttemptId": "pay_attempt_123",
+  "provider": "aplazo",
+  "status": "PENDING_CUSTOMER",
+  "message": "Estamos validando tu pago con Aplazo. El webhook sigue siendo la fuente de verdad.",
+  "isTerminal": false,
+  "nextPollAfterMs": 3000
 }
 ```
 
-### 2. Crear pago Aplazo in-store
+Error comun:
 
-```ts
-const response = await fetch("/api/payments/aplazo/in-store/create", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${token}`,
-    "Idempotency-Key": idempotencyKey,
-  },
-  body: JSON.stringify({
-    posSessionId: "pos_session_1",
-    deviceId: "device-1",
-    cajaId: "caja-1",
-    sucursalId: "sucursal-1",
-    vendedorUid: "empleado_1",
-    customer: {
-      name: "Cliente POS",
-      phone: "4771234567",
-    },
-    items: [
-      {
-        productoId: "prod_1",
-        cantidad: 1,
-      },
-    ],
-    amount: 850,
-    currency: "mxn",
-    metadata: {
-      commChannel: "q",
-      cartId: "venta_pos_456",
-    },
-  }),
-});
+- `400` de validacion por query invalido o faltante
 
-const data = await response.json();
+### 6. Return URL cancel
 
-if (!response.ok || !data.ok) {
-  throw new Error(data?.error?.message || "No se pudo crear el intento POS");
+`GET /payments/aplazo/cancel`
+
+Mismo contrato que `success`.
+
+Respuesta `200`:
+
+```json
+{
+  "ok": true,
+  "paymentAttemptId": "pay_attempt_123",
+  "provider": "aplazo",
+  "status": "CANCELED",
+  "message": "El intento ya no está vigente o fue rechazado.",
+  "isTerminal": true,
+  "nextPollAfterMs": 0
 }
-
-const paymentAttemptId = data.paymentAttemptId;
-const paymentLink = data.paymentLink;
-const qrString = data.qrString;
-const qrImageUrl = data.qrImageUrl;
 ```
 
-### 3. Polling de estado
+Error comun:
 
-```ts
-async function pollPaymentStatus(paymentAttemptId: string, token: string) {
-  let shouldContinue = true;
+- `400` de validacion por query invalido o faltante
 
-  while (shouldContinue) {
-    const response = await fetch(`/api/payments/${paymentAttemptId}/status`, {
-      headers: {
-        "Authorization": `Bearer ${token}`,
-      },
-    });
+## Formatos de error
 
-    const data = await response.json();
+### Error de pagos
 
-    if (!response.ok || !data.ok) {
-      throw new Error(data?.error?.message || "No se pudo consultar el pago");
-    }
+Usado por los endpoints protegidos de pagos:
 
-    if (data.status === "paid") {
-      return data;
-    }
-
-    if (data.isTerminal) {
-      return data;
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, data.nextPollAfterMs || 3000),
-    );
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "PAYMENT_PROVIDER_ERROR",
+    "message": "Mensaje legible",
+    "details": {}
   }
 }
 ```
 
-### 4. Leer JSON desde return URL
+Codigos utiles para frontend:
 
-```ts
-const response = await fetch(
-  `/payments/aplazo/success?paymentAttemptId=${paymentAttemptId}`,
-  {
-    headers: {
-      "Accept": "application/json",
-    },
-  },
-);
+- `PAYMENT_AUTH_REQUIRED`
+- `PAYMENT_FORBIDDEN`
+- `PAYMENT_ATTEMPT_NOT_FOUND`
+- `PAYMENT_ORDER_INVALID`
+- `PAYMENT_VALIDATION_ERROR`
+- `PAYMENT_AMOUNT_MISMATCH`
+- `PAYMENT_PROVIDER_ERROR`
+- `PAYMENT_PROVIDER_TIMEOUT`
 
-const data = await response.json();
+### Error de validacion Zod
 
-if (data.isTerminal && data.status === "paid") {
-  // éxito final confirmado
-} else {
-  // seguir mostrando “estamos validando”
+Usado por `body`, `params` o `query` invalidos:
+
+```json
+{
+  "success": false,
+  "message": "Validación fallida",
+  "errors": [
+    {
+      "campo": "orderId",
+      "mensaje": "String must contain at least 1 character(s)",
+      "codigo": "too_small"
+    }
+  ]
 }
 ```
 
-## Tabla de pantallas vs endpoints
+Nota:
 
-| Pantalla | Endpoint principal | Uso |
-| --- | --- | --- |
-| Checkout ecommerce | `POST /api/payments/aplazo/online/create` | Crear intento y obtener `redirectUrl` |
-| Waiting screen ecommerce | `GET /api/payments/:paymentAttemptId/status` | Polling hasta estado terminal |
-| Return page ecommerce | `GET /payments/aplazo/success|failure|cancel` | UX de regreso, nunca confirmación final |
-| Pantalla POS QR | `POST /api/payments/aplazo/in-store/create` + `GET /api/payments/:paymentAttemptId/status` | Crear intento, renderizar QR y hacer polling |
-| Pantalla POS link sent | `POST /api/payments/aplazo/in-store/create` + `GET /api/payments/:paymentAttemptId/status` | Mostrar link y esperar confirmación |
-| Pantalla de confirmación final | `GET /api/payments/:paymentAttemptId/status` | Mostrar éxito solo cuando `status=paid` |
+- estos errores no usan la llave `ok`
+- para frontend conviene tratarlos como errores de formulario o request invalido
 
-## Checklist de integración frontend
+## Flujo recomendado web
 
-- El usuario autenticado existe antes de llamar endpoints online.
-- El personal POS tiene sesión de caja válida antes de crear intentos in-store.
-- Se usa `Idempotency-Key` en reintentos de create.
-- Se persiste `paymentAttemptId` localmente.
-- El frontend siempre consulta `status` antes de declarar éxito.
-- El polling se detiene con `isTerminal=true`.
-- El frontend distingue entre `redirectUrl`, `paymentLink`, `qrString` y `qrImageUrl`.
-- Las return URLs no se usan como confirmación de negocio.
-- La UI maneja `pending_provider`, `pending_customer`, `paid`, `failed`, `canceled` y `expired`.
+1. Crear intento con `POST /api/payments/aplazo/online/create`.
+2. Redirigir a `checkoutUrl`.
+3. Al volver a `success`, `failure` o `cancel`, leer `paymentAttemptId`.
+4. Consultar `GET /api/payments/{paymentAttemptId}/status` hasta `isTerminal = true`.
+5. Confirmar pago solo cuando `status = PAID`.
+
+## Flujo recomendado POS
+
+1. Crear intento con `POST /api/payments/aplazo/in-store/create`.
+2. Mostrar QR o link.
+3. Hacer polling de `GET /api/payments/{paymentAttemptId}/status`.
+4. Cerrar flujo solo cuando `isTerminal = true`.
+
+## Regla critica
+
+- `cancel`, `failure` o un error del proveedor no significan pago confirmado.
+- El estado final valido para frontend debe salir de `GET /api/payments/{paymentAttemptId}/status`.
+- El backend sigue tratando webhook + reconciliacion como fuente de verdad.
