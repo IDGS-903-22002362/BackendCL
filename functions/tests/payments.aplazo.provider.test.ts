@@ -58,7 +58,7 @@ const buildClientMock = () => ({
 
 describe("Aplazo provider", () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
 
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
@@ -72,10 +72,11 @@ describe("Aplazo provider", () => {
     process.env.APLAZO_ONLINE_AUTH_PATH = "/auth";
     process.env.APLAZO_ONLINE_CREATE_PATH = "/loan";
     process.env.APLAZO_ONLINE_STATUS_PATH = "/v1/loan/status";
+    process.env.APLAZO_ONLINE_CANCEL_PATH = "/v1/merchant/loan/cancel";
     process.env.APLAZO_ONLINE_REFUND_PATH = "/loan/refund-from-cart";
     process.env.APLAZO_ONLINE_REFUND_STATUS_PATH =
       "/v1/merchant/refund/status";
-    process.env.APLAZO_ONLINE_MERCHANT_ID = "merchant_online";
+    process.env.APLAZO_ONLINE_MERCHANT_ID = "2639";
     process.env.APLAZO_ONLINE_API_TOKEN = "token_online";
     process.env.APLAZO_ONLINE_WEBHOOK_SECRET = "secret_online";
     process.env.APLAZO_ONLINE_WEBHOOK_AUTH_SCHEME = "Bearer";
@@ -130,7 +131,12 @@ describe("Aplazo provider", () => {
       failureUrl: "https://app/failure",
       webhookUrl: "https://api/webhooks/aplazo",
       cartUrl: "https://app/cart",
-      metadata: { sucursalId: "shop_1", cartId: "orden_123" },
+      metadata: {
+        sucursalId: "shop_1",
+        cartId: "orden_123",
+        addressLine: "Fake Street 123",
+        postalCode: "99999",
+      },
       pricingSnapshot: {
         subtotalMinor: 129900,
         taxMinor: 0,
@@ -150,7 +156,7 @@ describe("Aplazo provider", () => {
 
     expect(authClient.post).toHaveBeenCalledWith("/auth", {
       apiToken: "token_online",
-      merchantId: "merchant_online",
+      merchantId: 2639,
     });
     expect(createClient.request).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -163,6 +169,7 @@ describe("Aplazo provider", () => {
           cartId: "orden_123",
           successUrl: "https://app/success",
           errorUrl: "https://app/failure",
+          cartUrl: "https://app/cart",
           webHookUrl: "https://api/webhooks/aplazo",
           shipping: {
             price: 0,
@@ -191,6 +198,8 @@ describe("Aplazo provider", () => {
             lastName: "Perez",
             email: "juan@example.com",
             phone: "4771234567",
+            addressLine: "Fake Street 123",
+            postalCode: "99999",
           },
         }),
       }),
@@ -224,8 +233,68 @@ describe("Aplazo provider", () => {
     expect(result.status).toBe(PaymentStatus.PENDING_CUSTOMER);
   });
 
-  it("sends numeric merchantId to online auth when configured as digits", async () => {
-    process.env.APLAZO_ONLINE_MERCHANT_ID = "2639";
+  it("preserves loanToken in sanitized create response", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request.mockResolvedValue({
+      data: {
+        loanId: 156123,
+        loanToken: "1777a4f6-da5e-4787-9956-40467dd0c37e",
+        url: "https://checkout.aplazo.net/main/1777a4f6-da5e-4787-9956-40467dd0c37e",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    const result = await aplazoProvider.createOnline({
+      paymentAttemptId: "attempt_loan_token",
+      idempotencyKey: "idem_loan_token",
+      amountMinor: 260000,
+      currency: "mxn",
+      providerReference: "cart-id-321",
+      customerName: "John Doe",
+      customerEmail: "john@doe.com",
+      customerPhone: "5511113590",
+      successUrl: "https://merchant-page.mx/Success_Aplazo/cartid1234.php",
+      failureUrl: "https://merchant-page.mx/Error_Aplazo.php",
+      webhookUrl: "https://merchant-page.mx/order/hook",
+      cartUrl: "https://merchant-page.mx/Cart_Aplazo.php",
+      metadata: {
+        cartId: "cart-id-321",
+        addressLine: "Fake Street 123",
+        postalCode: "99999",
+      },
+      pricingSnapshot: {
+        subtotalMinor: 260000,
+        taxMinor: 0,
+        shippingMinor: 0,
+        totalMinor: 260000,
+        currency: "mxn",
+        items: [
+          {
+            productoId: "product-01",
+            cantidad: 1,
+            precioUnitarioMinor: 260000,
+            subtotalMinor: 260000,
+          },
+        ],
+      },
+    });
+
+    expect(result.providerLoanId).toBe("156123");
+    expect(result.rawResponseSanitized).toMatchObject({
+      loanId: 156123,
+      loanToken: "1777***c37e",
+      url: "https://checkout.aplazo.net/main/1777a4f6-da5e-4787-9956-40467dd0c37e",
+    });
+  });
+
+  it("sends numeric merchantId to online auth when configured as digits string", async () => {
+    process.env.APLAZO_ONLINE_MERCHANT_ID = " 2639 ";
 
     const authClient = buildClientMock();
     const createClient = buildClientMock();
@@ -280,6 +349,69 @@ describe("Aplazo provider", () => {
       apiToken: "token_online",
       merchantId: 2639,
     });
+  });
+
+  it("accepts auth token from Authorization response header", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: {},
+      headers: {
+        Authorization: "Bearer header-token",
+      },
+    });
+    createClient.request.mockResolvedValue({
+      data: {
+        loanId: "loan_987",
+        cartId: "orden_123",
+        url: "https://checkout.aplazo/loan_987",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await aplazoProvider.createOnline({
+      paymentAttemptId: "attempt_header_auth",
+      idempotencyKey: "idem_header_auth",
+      amountMinor: 129900,
+      currency: "mxn",
+      providerReference: "orden_123",
+      customerName: "Juan Perez",
+      customerEmail: "juan@example.com",
+      customerPhone: "4771234567",
+      successUrl: "https://app/success",
+      cancelUrl: "https://app/cancel",
+      failureUrl: "https://app/failure",
+      webhookUrl: "https://api/webhooks/aplazo",
+      cartUrl: "https://app/cart",
+      metadata: {
+        cartId: "orden_123",
+        addressLine: "Fake Street 123",
+        postalCode: "99999",
+      },
+      pricingSnapshot: {
+        subtotalMinor: 129900,
+        taxMinor: 0,
+        shippingMinor: 0,
+        totalMinor: 129900,
+        currency: "mxn",
+        items: [
+          {
+            productoId: "prod_1",
+            cantidad: 1,
+            precioUnitarioMinor: 129900,
+            subtotalMinor: 129900,
+          },
+        ],
+      },
+    });
+
+    expect(createClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: { Authorization: "Bearer header-token" },
+      }),
+    );
   });
 
   it("keeps configured online merchantId as shopId even if metadata includes sucursalId", async () => {
@@ -404,7 +536,7 @@ describe("Aplazo provider", () => {
     expect(result.qrString).toBe("qr_payload");
   });
 
-  it("queries online status by loanId and not by cartId when loanId exists", async () => {
+  it("queries online status by loan_id and not by cart_id when loanId exists", async () => {
     const authClient = buildClientMock();
     const merchantClient = buildClientMock();
     authClient.post.mockResolvedValue({
@@ -412,7 +544,7 @@ describe("Aplazo provider", () => {
     });
     merchantClient.get.mockResolvedValue({
       data: {
-        loanId: "loan_123",
+        loanId: 151187,
         cartId: "orden_123",
         status: "Activo",
         currency: "mxn",
@@ -442,11 +574,52 @@ describe("Aplazo provider", () => {
     });
 
     expect(merchantClient.get).toHaveBeenCalledWith("/v1/loan/status", {
-      params: { loanId: "loan_123" },
+      params: { loan_id: "loan_123" },
     });
     expect(result.status).toBe(PaymentStatus.PAID);
-    expect(result.providerLoanId).toBe("loan_123");
+    expect(result.providerLoanId).toBe("151187");
     expect(result.providerReference).toBe("orden_123");
+  });
+
+  it("queries online status by cart_id when loanId is not available", async () => {
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    merchantClient.get.mockResolvedValue({
+      data: {
+        loanId: 151188,
+        status: "No confirmado",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    const result = await aplazoProvider.getStatus({
+      id: "attempt_2",
+      ordenId: "orden_456",
+      userId: "user_1",
+      provider: "APLAZO" as any,
+      metodoPago: "APLAZO" as any,
+      monto: 899,
+      amountMinor: 89900,
+      currency: "mxn",
+      estado: "PENDIENTE" as any,
+      flowType: "online" as any,
+      idempotencyKey: "idem_456",
+      createdAt: {} as any,
+      updatedAt: {} as any,
+      providerReference: "orden_456",
+    });
+
+    expect(merchantClient.get).toHaveBeenCalledWith("/v1/loan/status", {
+      params: { cart_id: "orden_456" },
+    });
+    expect(result.status).toBe(PaymentStatus.PENDING_CUSTOMER);
+    expect(result.providerLoanId).toBe("151188");
+    expect(result.providerReference).toBe("orden_456");
   });
 
   it("maps short provider status codes", () => {
@@ -506,6 +679,7 @@ describe("Aplazo provider", () => {
         cancelUrl: "https://app/cancel",
         failureUrl: "https://app/failure",
         webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
         metadata: { cartId: "orden_123" },
         pricingSnapshot: {
           subtotalMinor: 129900,
@@ -527,6 +701,8 @@ describe("Aplazo provider", () => {
       code: "PAYMENT_PROVIDER_ERROR",
       details: {
         providerHttpStatus: 400,
+        providerCode: "invalid payload",
+        providerParams: {},
         providerUrl: "/loan",
         providerResponse: {
           error: "invalid payload",
@@ -557,6 +733,830 @@ describe("Aplazo provider", () => {
         }),
       }),
     );
+  });
+
+  it("maps outstanding loan duplicate error code from provider error field", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    createClient.request.mockRejectedValue(
+      Object.assign(new Error("Bad request"), {
+        config: {
+          url: "/loan",
+        },
+        response: {
+          status: 400,
+          data: {
+            status: 0,
+            error: "OUTSTANDING_LOAN_ALREADY_EXISTS",
+            message:
+              "Outstanding loan with cartId: cart-id-321 already exists",
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_dup_loan",
+        idempotencyKey: "idem_dup_loan",
+        amountMinor: 260000,
+        currency: "mxn",
+        providerReference: "cart-id-321",
+        customerName: "John Doe",
+        customerEmail: "john@doe.com",
+        customerPhone: "5511113590",
+        successUrl: "https://merchant-page.mx/Success_Aplazo/cartid1234.php",
+        failureUrl: "https://merchant-page.mx/Error_Aplazo.php",
+        webhookUrl: "https://merchant-page.mx/order/hook",
+        cartUrl: "https://merchant-page.mx/Cart_Aplazo.php",
+        metadata: {
+          cartId: "cart-id-321",
+        },
+        pricingSnapshot: {
+          subtotalMinor: 260000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 260000,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "product-01",
+              cantidad: 1,
+              precioUnitarioMinor: 260000,
+              subtotalMinor: 260000,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "Outstanding loan with cartId: cart-id-321 already exists",
+      details: {
+        providerHttpStatus: 400,
+        providerCode: "OUTSTANDING_LOAN_ALREADY_EXISTS",
+        providerUrl: "/loan",
+      },
+    });
+  });
+
+  it("maps auth 404 errors with provider context", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockRejectedValue(
+      Object.assign(new Error("Not Found"), {
+        config: {
+          url: "/auth",
+        },
+        response: {
+          status: 404,
+          data: {
+            timestamp: "2025-01-03T15:58:32.023+00:00",
+            status: 404,
+            error: "Not Found",
+            path: "/api/auth",
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_auth_404",
+        idempotencyKey: "idem_auth_404",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
+        metadata: {
+          cartId: "orden_123",
+          addressLine: "Fake Street 123",
+          postalCode: "99999",
+        },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "Not Found",
+      details: {
+        providerHttpStatus: 404,
+        providerCode: "Not Found",
+        providerUrl: "/auth",
+        providerResponse: {
+          timestamp: "2025-01-03T15:58:32.023+00:00",
+          status: 404,
+          error: "Not Found",
+          path: "/api/auth",
+        },
+      },
+    });
+  });
+
+  it("maps auth 400 errors with provider context", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockRejectedValue(
+      Object.assign(new Error("Bad request"), {
+        config: {
+          url: "/auth",
+        },
+        response: {
+          status: 400,
+          data: {
+            timestamp: "2025-01-03T15:58:32.023+00:00",
+            status: 400,
+            error: "Bad request",
+            path: "/api/auth",
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_auth_400",
+        idempotencyKey: "idem_auth_400",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
+        metadata: {
+          cartId: "orden_123",
+          addressLine: "Fake Street 123",
+          postalCode: "99999",
+        },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "Bad request",
+      details: {
+        providerHttpStatus: 400,
+        providerCode: "Bad request",
+        providerUrl: "/auth",
+      },
+    });
+  });
+
+  it("cancels online loan by cartId using refunds-bifrost GET endpoint", async () => {
+    const authClient = buildClientMock();
+    const refundsClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    refundsClient.get.mockResolvedValue({
+      data: {},
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(refundsClient);
+
+    const result = await aplazoProvider.cancelOrVoid({
+      paymentAttempt: {
+        id: "attempt_cancel_online",
+        ordenId: "orden_123",
+        userId: "user_1",
+        provider: "APLAZO" as any,
+        metodoPago: "APLAZO" as any,
+        monto: 1299,
+        amountMinor: 129900,
+        currency: "mxn",
+        estado: "PENDIENTE" as any,
+        flowType: "online" as any,
+        idempotencyKey: "idem_attempt_cancel_online",
+        createdAt: {} as any,
+        updatedAt: {} as any,
+        providerReference: "cart-id-321",
+        providerLoanId: "151187",
+      },
+      reason: "manual admin cancel",
+    });
+
+    expect(refundsClient.get).toHaveBeenCalledWith(
+      "/v1/merchant/loan/cancel",
+      {
+        params: {
+          cartId: "cart-id-321",
+        },
+      },
+    );
+    expect(result.status).toBe(PaymentStatus.CANCELED);
+    expect(result.providerStatus).toBe("cancelado");
+    expect(result.providerReference).toBe("cart-id-321");
+  });
+
+  it("preserves LOAN_BAD_STATUS when online cancel is rejected by provider", async () => {
+    const authClient = buildClientMock();
+    const refundsClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    refundsClient.get.mockRejectedValue(
+      Object.assign(new Error("LOAN BAD STATUS"), {
+        config: {
+          url: "/v1/merchant/loan/cancel",
+        },
+        response: {
+          status: 400,
+          data: {
+            code: "LOAN_BAD_STATUS",
+            data: {
+              status: "CANCELLED",
+            },
+            error: "LOAN BAD STATUS",
+            timestamp: 1734637318072,
+            message: "LOAN BAD STATUS",
+            path: "/api/v1/merchant/loan/cancel",
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(refundsClient);
+
+    await expect(
+      aplazoProvider.cancelOrVoid({
+        paymentAttempt: {
+          id: "attempt_cancel_bad_status",
+          ordenId: "orden_123",
+          userId: "user_1",
+          provider: "APLAZO" as any,
+          metodoPago: "APLAZO" as any,
+          monto: 1299,
+          amountMinor: 129900,
+          currency: "mxn",
+          estado: "PENDIENTE" as any,
+          flowType: "online" as any,
+          idempotencyKey: "idem_attempt_cancel_bad_status",
+          createdAt: {} as any,
+          updatedAt: {} as any,
+          providerReference: "cart-id-321",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "LOAN BAD STATUS",
+      details: {
+        providerHttpStatus: 400,
+        providerCode: "LOAN_BAD_STATUS",
+        providerUrl: "/v1/merchant/loan/cancel",
+        providerResponse: {
+          code: "LOAN_BAD_STATUS",
+          data: {
+            status: "CANCELLED",
+          },
+          error: "LOAN BAD STATUS",
+          timestamp: 1734637318072,
+          message: "LOAN BAD STATUS",
+          path: "/api/v1/merchant/loan/cancel",
+        },
+      },
+    });
+  });
+
+  it("requests online refund by cartId with totalAmount and reason", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    merchantClient.request.mockResolvedValue({
+      data: {
+        refundId: 665,
+        merchantId: 12,
+        cartId: "merchant-cart-123",
+        refundStatus: "REQUESTED",
+        refundDate: "2022-09-05T21:11:34.091719",
+      },
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    const result = await aplazoProvider.refund({
+      paymentAttempt: {
+        id: "attempt_refund_online",
+        ordenId: "orden_123",
+        userId: "user_1",
+        provider: "APLAZO" as any,
+        metodoPago: "APLAZO" as any,
+        monto: 1299,
+        amountMinor: 129900,
+        currency: "mxn",
+        estado: "PAGADO" as any,
+        flowType: "online" as any,
+        idempotencyKey: "idem_attempt_refund_online",
+        createdAt: {} as any,
+        updatedAt: {} as any,
+        providerReference: "merchant-cart-123",
+        providerLoanId: "151187",
+      },
+      refundAmountMinor: 100,
+      reason: "Wrong size",
+    });
+
+    expect(merchantClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "post",
+        url: "/loan/refund-from-cart",
+        headers: { Authorization: "Bearer online-token" },
+        data: {
+          cartId: "merchant-cart-123",
+          totalAmount: 1,
+          reason: "Wrong size",
+        },
+      }),
+    );
+    expect(result.refundId).toBe("665");
+    expect(result.providerStatus).toBe("REQUESTED");
+    expect(result.refundState).toBe("processing");
+    expect(result.refundAmountMinor).toBe(100);
+    expect(result.rawResponseSanitized).toMatchObject({
+      refundId: 665,
+      merchantId: 12,
+      cartId: "merchant-cart-123",
+      refundStatus: "REQUESTED",
+      refundDate: "2022-09-05T21:11:34.091719",
+    });
+  });
+
+  it("preserves provider context when online refund returns 500", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    merchantClient.request.mockRejectedValue(
+      Object.assign(new Error("Internal Server Error"), {
+        config: {
+          url: "/loan/refund-from-cart",
+        },
+        response: {
+          status: 500,
+          data: {
+            timestamp: "2025-01-06T18:20:20.811+00:00",
+            status: 500,
+            error: "Internal Server Error",
+            message: "",
+            path: "/api/loan/refund-from-cart",
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    await expect(
+      aplazoProvider.refund({
+        paymentAttempt: {
+          id: "attempt_refund_500",
+          ordenId: "orden_123",
+          userId: "user_1",
+          provider: "APLAZO" as any,
+          metodoPago: "APLAZO" as any,
+          monto: 1299,
+          amountMinor: 129900,
+          currency: "mxn",
+          estado: "PAGADO" as any,
+          flowType: "online" as any,
+          idempotencyKey: "idem_attempt_refund_500",
+          createdAt: {} as any,
+          updatedAt: {} as any,
+          providerReference: "non-existant-cart",
+        },
+        refundAmountMinor: 15000,
+        reason: "Refund_reason",
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "Internal Server Error",
+      details: {
+        providerHttpStatus: 500,
+        providerCode: "Internal Server Error",
+        providerUrl: "/loan/refund-from-cart",
+        providerResponse: {
+          timestamp: "2025-01-06T18:20:20.811+00:00",
+          status: 500,
+          error: "Internal Server Error",
+          message: "",
+          path: "/api/loan/refund-from-cart",
+        },
+      },
+    });
+  });
+
+  it("gets online refund status by cartId and selects the latest refund entry", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    merchantClient.get.mockResolvedValue({
+      data: [
+        {
+          id: 25079,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:45:03.59153",
+          amount: 120,
+        },
+        {
+          id: 25083,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:49:33.910913",
+          amount: 10,
+        },
+        {
+          id: 25084,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:49:55.499337",
+          amount: 20,
+        },
+      ],
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    const result = await aplazoProvider.getRefundStatus({
+      paymentAttempt: {
+        id: "attempt_refund_status_latest",
+        ordenId: "orden_123",
+        userId: "user_1",
+        provider: "APLAZO" as any,
+        metodoPago: "APLAZO" as any,
+        monto: 1299,
+        amountMinor: 129900,
+        currency: "mxn",
+        estado: "PAGADO" as any,
+        flowType: "online" as any,
+        idempotencyKey: "idem_attempt_refund_status_latest",
+        createdAt: {} as any,
+        updatedAt: {} as any,
+        providerReference: "abc321",
+      },
+    });
+
+    expect(merchantClient.get).toHaveBeenCalledWith(
+      "/v1/merchant/refund/status",
+      {
+        params: {
+          cartId: "abc321",
+        },
+      },
+    );
+    expect(result.refundId).toBe("25084");
+    expect(result.providerStatus).toBe("PROCESSING");
+    expect(result.refundState).toBe("processing");
+    expect(result.status).toBe(PaymentStatus.PENDING_PROVIDER);
+    expect(result.refundAmountMinor).toBe(2000);
+    expect(result.rawResponseSanitized).toMatchObject({
+      items: [
+        {
+          id: 25079,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:45:03.59153",
+          amount: 120,
+        },
+        {
+          id: 25083,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:49:33.910913",
+          amount: 10,
+        },
+        {
+          id: 25084,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:49:55.499337",
+          amount: 20,
+        },
+      ],
+    });
+  });
+
+  it("gets online refund status by cartId and selects the requested refundId", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    merchantClient.get.mockResolvedValue({
+      data: [
+        {
+          id: 25079,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:45:03.59153",
+          amount: 120,
+        },
+        {
+          id: 25083,
+          status: "REFUNDED",
+          refundDate: "2024-12-19T17:49:33.910913",
+          amount: 10,
+        },
+      ],
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    const result = await aplazoProvider.getRefundStatus({
+      paymentAttempt: {
+        id: "attempt_refund_status_specific",
+        ordenId: "orden_123",
+        userId: "user_1",
+        provider: "APLAZO" as any,
+        metodoPago: "APLAZO" as any,
+        monto: 1299,
+        amountMinor: 129900,
+        currency: "mxn",
+        estado: "PAGADO" as any,
+        flowType: "online" as any,
+        idempotencyKey: "idem_attempt_refund_status_specific",
+        createdAt: {} as any,
+        updatedAt: {} as any,
+        providerReference: "abc321",
+      },
+      refundId: "25083",
+    });
+
+    expect(result.refundId).toBe("25083");
+    expect(result.providerStatus).toBe("REFUNDED");
+    expect(result.refundState).toBe("succeeded");
+    expect(result.status).toBe(PaymentStatus.REFUNDED);
+    expect(result.refundAmountMinor).toBe(1000);
+  });
+
+  it("fails when auth does not return a bearer token", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: {},
+      headers: {},
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_auth_missing_token",
+        idempotencyKey: "idem_auth_missing_token",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
+        metadata: {
+          cartId: "orden_123",
+          addressLine: "Fake Street 123",
+          postalCode: "99999",
+        },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "Aplazo online auth no devolvió token Bearer",
+    });
+
+    expect(createClient.request).not.toHaveBeenCalled();
+  });
+
+  it("fails when auth merchantId config is not numeric", async () => {
+    process.env.APLAZO_ONLINE_MERCHANT_ID = "merchant_online";
+
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_auth_invalid_mid",
+        idempotencyKey: "idem_auth_invalid_mid",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
+        metadata: {
+          cartId: "orden_123",
+          addressLine: "Fake Street 123",
+          postalCode: "99999",
+        },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_PROVIDER_ERROR",
+      message: "APLAZO_ONLINE_MERCHANT_ID debe ser numérico para auth",
+    });
+
+    expect(authClient.post).not.toHaveBeenCalled();
+    expect(createClient.request).not.toHaveBeenCalled();
+  });
+
+  it("fails before calling aplazo when cartUrl is missing", async () => {
+    const authClient = buildClientMock();
+    const createClient = buildClientMock();
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(createClient);
+
+    await expect(
+      aplazoProvider.createOnline({
+        paymentAttemptId: "attempt_missing_cart_url",
+        idempotencyKey: "idem_missing_cart_url",
+        amountMinor: 129900,
+        currency: "mxn",
+        providerReference: "orden_123",
+        customerName: "Juan Perez",
+        customerEmail: "juan@example.com",
+        customerPhone: "4771234567",
+        successUrl: "https://app/success",
+        failureUrl: "https://app/failure",
+        webhookUrl: "https://api/webhooks/aplazo",
+        metadata: { cartId: "orden_123" },
+        pricingSnapshot: {
+          subtotalMinor: 129900,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 129900,
+          currency: "mxn",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitarioMinor: 129900,
+              subtotalMinor: 129900,
+            },
+          ],
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_VALIDATION_ERROR",
+      message: "Aplazo online requiere cartUrl",
+    });
+
+    expect(authClient.post).not.toHaveBeenCalled();
+    expect(createClient.request).not.toHaveBeenCalled();
+  });
+
+  it("preserves provider code and params from loan status errors", async () => {
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { authorization: "Bearer online-token" },
+    });
+    merchantClient.get.mockRejectedValue(
+      Object.assign(new Error("Not found"), {
+        config: {
+          url: "/v1/loan/status",
+        },
+        response: {
+          status: 404,
+          data: {
+            message: "loan by CartId = some-cart was not found.",
+            code: "LOAN_NOT_FOUND",
+            params: ["CartId", "some-cart"],
+            payload: null,
+          },
+        },
+      }),
+    );
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    try {
+      await aplazoProvider.getStatus({
+        id: "attempt_status_error",
+        ordenId: "orden_missing",
+        userId: "user_1",
+        provider: "APLAZO" as any,
+        metodoPago: "APLAZO" as any,
+        monto: 100,
+        amountMinor: 10000,
+        currency: "mxn",
+        estado: "PENDIENTE" as any,
+        flowType: "online" as any,
+        idempotencyKey: "idem_missing",
+        createdAt: {} as any,
+        updatedAt: {} as any,
+        providerReference: "some-cart",
+      });
+      throw new Error("Expected getStatus to fail");
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: "PAYMENT_PROVIDER_ERROR",
+        details: {
+          providerHttpStatus: 404,
+          providerCode: "LOAN_NOT_FOUND",
+          providerParams: {
+            items: ["CartId", "some-cart"],
+          },
+          providerUrl: "/v1/loan/status",
+        },
+      });
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        "loan by CartId = some-cart was not found.",
+      );
+    }
   });
 
   it("maps timeout and network errors", async () => {
@@ -595,6 +1595,7 @@ describe("Aplazo provider", () => {
         successUrl: "https://app/success",
         failureUrl: "https://app/failure",
         webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
         metadata: { cartId: "orden_timeout" },
         pricingSnapshot: {
           subtotalMinor: 129900,
@@ -632,6 +1633,7 @@ describe("Aplazo provider", () => {
         successUrl: "https://app/success",
         failureUrl: "https://app/failure",
         webhookUrl: "https://api/webhooks/aplazo",
+        cartUrl: "https://app/cart",
         metadata: { cartId: "orden_network" },
         pricingSnapshot: {
           subtotalMinor: 129900,
@@ -829,7 +1831,7 @@ describe("Aplazo provider", () => {
           status: "Activo",
           loanId: "loan_987",
           cartId: "orden_123",
-          merchantId: "merchant_online",
+          merchantId: "2639",
         }),
       ),
       headers: {
@@ -851,7 +1853,7 @@ describe("Aplazo provider", () => {
             status: "Activo",
             loanId: "loan_987",
             cartId: "orden_123",
-            merchantId: "merchant_online",
+            merchantId: "2639",
           }),
         ),
         headers: {
