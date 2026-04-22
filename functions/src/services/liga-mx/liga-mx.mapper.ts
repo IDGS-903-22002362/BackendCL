@@ -137,6 +137,45 @@ const aIsoString = (value: unknown): string | null => {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
+const normalizarTextoComparacion = (value: string | null | undefined): string => {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+};
+
+const esFasePrimerTiempo = (fase: string | null | undefined): boolean => {
+  const faseNormalizada = normalizarTextoComparacion(fase);
+
+  return (
+    faseNormalizada.includes("primer tiempo") ||
+    faseNormalizada.includes("1er tiempo") ||
+    faseNormalizada.includes("final del primer tiempo") ||
+    faseNormalizada.includes("medio tiempo") ||
+    faseNormalizada.includes("descanso")
+  );
+};
+
+const formatearMinutoNarracion = (
+  minuto: number | null,
+  fase: string | null | undefined,
+): string | null => {
+  if (minuto === null) {
+    return null;
+  }
+
+  if (esFasePrimerTiempo(fase) && minuto > 45) {
+    return `45+${minuto - 45}`;
+  }
+
+  if (minuto > 90) {
+    return `90+${minuto - 90}`;
+  }
+
+  return String(minuto);
+};
+
 const construirResumenTorneo = (idTorneo: number): ResumenTorneo => ({
   id: idTorneo,
   nombre: obtenerNombreTorneo(idTorneo),
@@ -544,12 +583,16 @@ const normalizarLadoAlineacion = (
 export const normalizarEventoNarracion = (
   raw: Record<string, unknown>,
 ): EventoNarracion => {
+  const minuto = aNumeroNullable(raw.min);
+  const fase = aTextoNullable(raw.fase);
+
   const payloadSinHash: Omit<EventoNarracion, "hashFuente"> = {
     id: String(raw.idEvento),
-    minuto: aNumeroNullable(raw.min),
+    minuto,
+    minutoEtiqueta: formatearMinutoNarracion(minuto, fase),
     tipo: aTextoNullable(raw.tipo),
     detalle: aTextoNullable(raw.detalle),
-    fase: aTextoNullable(raw.fase),
+    fase,
     idClub: aNumeroNullable(raw.idClub),
     idJugador: aTextoNullable(raw.idJugador),
     x: aNumeroNullable(raw.x),

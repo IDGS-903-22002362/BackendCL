@@ -236,6 +236,7 @@ export interface LadoAlineacion {
 export interface EventoNarracion {
   id: string;
   minuto: number | null;
+  minutoEtiqueta: string | null;
   tipo: string | null;
   detalle: string | null;
   fase: string | null;
