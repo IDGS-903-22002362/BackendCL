@@ -153,7 +153,44 @@ describe("liga-mx mapper", () => {
     expect(player.estadisticas.minutosJugados).toBe(270);
     expect(player.posicion).toBe("Portero");
     expect(event.comentario).toBe("Final del Partido");
+    expect(event.minutoEtiqueta).toBe("90+9");
     expect(event.videoDisponible).toBe(false);
+  });
+
+  it("formats first-half stoppage and second-half minutes for narration", () => {
+    const primerTiempo = normalizarEventoNarracion({
+      idEvento: 1,
+      min: 47,
+      tipo: "Jugada",
+      detalle: "Falta",
+      fase: "Primer Tiempo",
+      comentario: "Falta en compensación del primer tiempo",
+      esttVdeo: 0,
+    });
+
+    const segundoTiempo = normalizarEventoNarracion({
+      idEvento: 2,
+      min: 51,
+      tipo: "Jugada",
+      detalle: "Falta",
+      fase: "Segundo Tiempo",
+      comentario: "Falta del segundo tiempo",
+      esttVdeo: 0,
+    });
+
+    const compensacionFinal = normalizarEventoNarracion({
+      idEvento: 3,
+      min: 93,
+      tipo: "Jugada",
+      detalle: "Falta",
+      fase: "Marcador Final",
+      comentario: "Falta en compensación final",
+      esttVdeo: 0,
+    });
+
+    expect(primerTiempo.minutoEtiqueta).toBe("45+2");
+    expect(segundoTiempo.minutoEtiqueta).toBe("51");
+    expect(compensacionFinal.minutoEtiqueta).toBe("90+3");
   });
 
   it("maps visitor lineup data when the API uses the visitante key", () => {
