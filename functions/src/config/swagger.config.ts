@@ -53,6 +53,7 @@ import {
   aplazoAdminActionSchema,
   aplazoInStoreCreateSchema,
   aplazoOnlineCreateSchema,
+  aplazoRefundStatusQuerySchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   listLowStockAlertsQuerySchema,
@@ -447,6 +448,94 @@ const swaggerDefinition = {
       CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
       CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
       AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
+      AplazoRefundStatusQuery: zodToJsonSchema(aplazoRefundStatusQuerySchema),
+      AplazoRefundStatusItem: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            example: "25079",
+            description: "Identificador del refund en Aplazo",
+          },
+          status: {
+            type: "string",
+            example: "PROCESSING",
+            description: "Estado crudo devuelto por Aplazo para ese refund",
+          },
+          refundState: {
+            type: "string",
+            enum: ["none", "requested", "processing", "succeeded", "failed"],
+            example: "processing",
+            description: "Estado canónico del refund en backend",
+          },
+          refundDate: {
+            type: "string",
+            format: "date-time",
+            example: "2024-12-19T17:45:03.59153",
+          },
+          amount: {
+            type: "number",
+            example: 120,
+            description: "Monto del refund en moneda mayor",
+          },
+        },
+      },
+      AplazoRefundStatusResponse: {
+        type: "object",
+        properties: {
+          ok: {
+            type: "boolean",
+            example: true,
+          },
+          paymentAttemptId: {
+            type: "string",
+            example: "pay_attempt_123",
+          },
+          provider: {
+            type: "string",
+            example: "aplazo",
+          },
+          status: {
+            type: "string",
+            example: "partially_refunded",
+            description: "Estado canónico del intento de pago después de sincronizar refunds confirmados",
+          },
+          refundState: {
+            type: "string",
+            enum: ["none", "requested", "processing", "succeeded", "failed"],
+            example: "processing",
+            description: "Estado del refund seleccionado o más reciente",
+          },
+          providerStatus: {
+            type: "string",
+            example: "PROCESSING",
+          },
+          refundId: {
+            type: "string",
+            example: "25083",
+          },
+          refundAmount: {
+            type: "number",
+            example: 10,
+            description: "Monto del refund seleccionado",
+          },
+          totalRefundedAmount: {
+            type: "number",
+            example: 120,
+            description: "Monto acumulado confirmado como reembolsado",
+          },
+          currency: {
+            type: "string",
+            example: "MXN",
+          },
+          refunds: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AplazoRefundStatusItem",
+            },
+          },
+        },
+      },
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,

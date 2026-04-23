@@ -27,6 +27,7 @@ const aplazoProviderMocks = {
   getStatus: jest.fn(),
   cancelOrVoid: jest.fn(),
   refund: jest.fn(),
+  getRefundStatus: jest.fn(),
   mapProviderStatus: jest.fn(),
 };
 
@@ -971,6 +972,145 @@ describe("Aplazo payments service", () => {
     expect(first.duplicate).toBe(false);
     expect(second.duplicate).toBe(true);
     expect(fakeFirestore.countDocs("paymentEventLogs")).toBe(1);
+  });
+
+  it("syncs aplazo refund status and recalculates the confirmed refunded amount", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_refund_1: {
+          ordenId: "orden_aplazo_refund_1",
+          userId: "admin_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          monto: 1299,
+          amountMinor: 129900,
+          currency: "MXN",
+          estado: "REEMBOLSADO",
+          status: "refunded",
+          refundState: "requested",
+          refundAmount: 130,
+          refundId: "25083",
+          idempotencyKey: "idem_aplazo_refund_1",
+          providerReference: "abc321",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          metadata: {},
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.getRefundStatus.mockResolvedValue({
+      refundState: "processing",
+      providerStatus: "PROCESSING",
+      refundId: "25083",
+      refundEntries: [
+        {
+          refundId: "25079",
+          providerStatus: "REFUNDED",
+          refundState: "succeeded",
+          refundDate: "2024-12-19T17:45:03.59153",
+          amountMinor: 12000,
+        },
+        {
+          refundId: "25083",
+          providerStatus: "PROCESSING",
+          refundState: "processing",
+          refundDate: "2024-12-19T17:49:33.910913",
+          amountMinor: 1000,
+        },
+      ],
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    const result = await service.getAplazoRefundStatus(
+      "pago_aplazo_refund_1",
+      {
+        uid: "admin_1",
+        rol: RolUsuario.ADMIN,
+      },
+      {
+        refundId: "25083",
+      },
+    );
+
+    expect(aplazoProviderMocks.getRefundStatus).toHaveBeenCalledWith({
+      paymentAttempt: expect.objectContaining({
+        id: "pago_aplazo_refund_1",
+        providerReference: "abc321",
+      }),
+      refundId: "25083",
+    });
+    expect(result.paymentAttempt.status).toBe(PaymentStatus.PARTIALLY_REFUNDED);
+    expect(result.paymentAttempt.refundState).toBe("processing");
+    expect(result.paymentAttempt.providerStatus).toBe("PROCESSING");
+    expect(result.paymentAttempt.refundAmount).toBe(120);
+    expect(result.totalRefundedAmount).toBe(120);
+    expect(result.selectedRefund).toMatchObject({
+      refundId: "25083",
+      providerStatus: "PROCESSING",
+    });
+  });
+
+  it("rejects aplazo refund status queries from non-privileged actors", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_refund_2: {
+          ordenId: "orden_aplazo_refund_2",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          monto: 500,
+          amountMinor: 50000,
+          currency: "MXN",
+          estado: "COMPLETADO",
+          status: "paid",
+          idempotencyKey: "idem_aplazo_refund_2",
+          providerReference: "cart_refund_2",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await expect(
+      service.getAplazoRefundStatus(
+        "pago_aplazo_refund_2",
+        {
+          uid: "user_1",
+          rol: RolUsuario.CLIENTE,
+        },
+        {},
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_FORBIDDEN",
+    });
   });
 
   it("runs reconcile and finalizes paid status through the finalizer", async () => {

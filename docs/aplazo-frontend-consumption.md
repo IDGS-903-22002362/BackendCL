@@ -8,7 +8,8 @@ Guia corta para consumir Aplazo desde frontend usando este backend.
 - El frontend solo consume el backend.
 - Los endpoints protegidos usan `Authorization: Bearer <JWT de tu app>`.
 - Las return URLs de Aplazo son publicas y no usan JWT.
-- Webhooks y endpoints admin no son para frontend.
+- Webhooks y endpoints admin no son para frontend storefront.
+- El seguimiento de refunds Aplazo se hace desde backoffice/admin contra el backend, nunca directo contra Aplazo.
 
 ## Endpoints frontend
 
@@ -274,6 +275,57 @@ Respuesta `200`:
 Error comun:
 
 - `400` de validacion por query invalido o faltante
+
+### 7. Consultar refund status Aplazo (admin/backoffice)
+
+`GET /api/admin/payments/aplazo/{paymentAttemptId}/refund/status`
+
+Headers:
+
+- `Authorization: Bearer <token>`
+
+Query opcional:
+
+- `refundId=<id de Aplazo>`
+
+Respuesta `200`:
+
+```json
+{
+  "ok": true,
+  "paymentAttemptId": "pay_attempt_123",
+  "provider": "aplazo",
+  "status": "partially_refunded",
+  "refundState": "processing",
+  "providerStatus": "PROCESSING",
+  "refundId": "25083",
+  "refundAmount": 10,
+  "totalRefundedAmount": 120,
+  "currency": "MXN",
+  "refunds": [
+    {
+      "id": "25079",
+      "status": "REFUNDED",
+      "refundState": "succeeded",
+      "refundDate": "2024-12-19T17:45:03.59153",
+      "amount": 120
+    },
+    {
+      "id": "25083",
+      "status": "PROCESSING",
+      "refundState": "processing",
+      "refundDate": "2024-12-19T17:49:33.910913",
+      "amount": 10
+    }
+  ]
+}
+```
+
+Uso backoffice:
+
+1. Solicitar refund con `POST /api/admin/payments/aplazo/{paymentAttemptId}/refund`.
+2. Consultar este endpoint hasta que `refundState` deje de ser `processing`.
+3. Usar `totalRefundedAmount` como monto confirmado y `refunds` para el detalle por solicitud.
 
 ## Formatos de error
 

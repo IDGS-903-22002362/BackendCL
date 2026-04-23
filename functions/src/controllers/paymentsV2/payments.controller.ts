@@ -36,6 +36,24 @@ const serializeDateLike = (value: unknown): unknown => {
   return value;
 };
 
+const serializeRefunds = (
+  refunds: Array<{
+    refundId?: string;
+    providerStatus?: string;
+    refundState?: string;
+    refundDate?: string;
+    amountMinor?: number;
+  }>,
+) =>
+  refunds.map((refund) => ({
+    id: refund.refundId,
+    status: refund.providerStatus,
+    refundState: refund.refundState,
+    refundDate: refund.refundDate,
+    amount:
+      typeof refund.amountMinor === "number" ? refund.amountMinor / 100 : undefined,
+  }));
+
 const toStatusPayload = (
   paymentAttemptId: string,
   paymentAttempt: {
@@ -247,6 +265,38 @@ export const refundAplazoPayment = async (req: Request, res: Response) => {
       provider: "aplazo",
       status: paymentAttempt.status,
       refundState: paymentAttempt.refundState,
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const getAplazoRefundStatus = async (req: Request, res: Response) => {
+  try {
+    const result = await paymentsService.getAplazoRefundStatus(
+      req.params.paymentAttemptId,
+      getActorFromRequest(req),
+      {
+        refundId:
+          typeof req.query?.refundId === "string" ? req.query.refundId : undefined,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      paymentAttemptId: result.paymentAttempt.id,
+      provider: "aplazo",
+      status: result.paymentAttempt.status,
+      refundState: result.paymentAttempt.refundState,
+      providerStatus: result.selectedRefund?.providerStatus,
+      refundId: result.selectedRefund?.refundId ?? result.paymentAttempt.refundId,
+      refundAmount:
+        typeof result.selectedRefund?.amountMinor === "number"
+          ? result.selectedRefund.amountMinor / 100
+          : undefined,
+      totalRefundedAmount: result.totalRefundedAmount,
+      currency: result.paymentAttempt.currency,
+      refunds: serializeRefunds(result.refunds),
     });
   } catch (error) {
     return respondPaymentError(res, error);

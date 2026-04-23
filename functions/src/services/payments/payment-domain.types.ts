@@ -119,7 +119,16 @@ export interface ProviderRefundResult {
   providerStatus?: string;
   refundId?: string;
   refundAmountMinor?: number;
+  refundEntries?: ProviderRefundStatusEntry[];
   rawResponseSanitized?: Record<string, unknown>;
+}
+
+export interface ProviderRefundStatusEntry {
+  refundId?: string;
+  providerStatus?: string;
+  refundState: RefundState;
+  refundDate?: string;
+  amountMinor?: number;
 }
 
 export interface NormalizedProviderWebhookEvent {
