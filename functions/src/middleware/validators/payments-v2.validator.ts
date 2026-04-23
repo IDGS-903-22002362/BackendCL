@@ -85,6 +85,12 @@ export const aplazoAdminActionSchema = z
   })
   .strict();
 
+export const aplazoRefundStatusQuerySchema = z
+  .object({
+    refundId: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+
 export const aplazoReturnQuerySchema = z
   .object({
     paymentAttemptId: z.string().trim().min(1).max(120).optional(),

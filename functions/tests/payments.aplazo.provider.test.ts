@@ -1265,6 +1265,29 @@ describe("Aplazo provider", () => {
     expect(result.refundState).toBe("processing");
     expect(result.status).toBe(PaymentStatus.PENDING_PROVIDER);
     expect(result.refundAmountMinor).toBe(2000);
+    expect(result.refundEntries).toEqual([
+      {
+        refundId: "25079",
+        providerStatus: "PROCESSING",
+        refundState: "processing",
+        refundDate: "2024-12-19T17:45:03.59153",
+        amountMinor: 12000,
+      },
+      {
+        refundId: "25083",
+        providerStatus: "PROCESSING",
+        refundState: "processing",
+        refundDate: "2024-12-19T17:49:33.910913",
+        amountMinor: 1000,
+      },
+      {
+        refundId: "25084",
+        providerStatus: "PROCESSING",
+        refundState: "processing",
+        refundDate: "2024-12-19T17:49:55.499337",
+        amountMinor: 2000,
+      },
+    ]);
     expect(result.rawResponseSanitized).toMatchObject({
       items: [
         {
@@ -1341,6 +1364,53 @@ describe("Aplazo provider", () => {
     expect(result.refundState).toBe("succeeded");
     expect(result.status).toBe(PaymentStatus.REFUNDED);
     expect(result.refundAmountMinor).toBe(1000);
+  });
+
+  it("fails when the requested online refundId is not present in Aplazo response", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    const authClient = buildClientMock();
+    const merchantClient = buildClientMock();
+    authClient.post.mockResolvedValue({
+      data: { Authorization: "Bearer online-token" },
+    });
+    merchantClient.get.mockResolvedValue({
+      data: [
+        {
+          id: 25079,
+          status: "PROCESSING",
+          refundDate: "2024-12-19T17:45:03.59153",
+          amount: 120,
+        },
+      ],
+    });
+    axiosCreate
+      .mockReturnValueOnce(authClient)
+      .mockReturnValueOnce(merchantClient);
+
+    await expect(
+      aplazoProvider.getRefundStatus({
+        paymentAttempt: {
+          id: "attempt_refund_status_missing",
+          ordenId: "orden_123",
+          userId: "user_1",
+          provider: "APLAZO" as any,
+          metodoPago: "APLAZO" as any,
+          monto: 1299,
+          amountMinor: 129900,
+          currency: "mxn",
+          estado: "PAGADO" as any,
+          flowType: "online" as any,
+          idempotencyKey: "idem_attempt_refund_status_missing",
+          createdAt: {} as any,
+          updatedAt: {} as any,
+          providerReference: "abc321",
+        },
+        refundId: "99999",
+      }),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_REFUND_NOT_FOUND",
+      statusCode: 404,
+    });
   });
 
   it("fails when auth does not return a bearer token", async () => {

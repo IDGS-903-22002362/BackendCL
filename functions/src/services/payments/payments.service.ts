@@ -7,6 +7,7 @@ import {
   PaymentFlowType,
   PaymentMethodCode,
   PaymentPricingSnapshot,
+  RefundState,
   PaymentStatus,
   ProveedorPago,
 } from "../../models/pago.model";
@@ -41,6 +42,7 @@ import {
   sanitizeForStorage,
 } from "./payment-sanitizer";
 import { PaymentAttempt } from "./payment-domain.types";
+import { ProviderRefundStatusEntry } from "./payment-domain.types";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
@@ -110,6 +112,13 @@ type BrowserReturnLookup = {
   paymentAttemptId?: string;
   providerPaymentId?: string;
   providerReference?: string;
+};
+
+type AplazoRefundStatusSyncResult = {
+  paymentAttempt: PaymentAttempt;
+  refunds: ProviderRefundStatusEntry[];
+  selectedRefund?: ProviderRefundStatusEntry;
+  totalRefundedAmount: number;
 };
 
 const paymentsLogger = logger.child({
@@ -849,6 +858,77 @@ export class PaymentsService {
     }
   }
 
+  async getAplazoRefundStatus(
+    paymentAttemptId: string,
+    actor: AuthActor,
+    input: { refundId?: string },
+  ): Promise<AplazoRefundStatusSyncResult> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (!isPrivileged(user.rol)) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN o EMPLEADO puede consultar refunds Aplazo",
+      );
+    }
+
+    const attempt = await this.requirePaymentAttempt(paymentAttemptId);
+    if (attempt.provider !== ProveedorPago.APLAZO) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El endpoint de refund status solo soporta Aplazo",
+      );
+    }
+
+    if (!aplazoProvider.getRefundStatus) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_REFUND_UNSUPPORTED",
+        "El proveedor no soporta consultar refund status",
+      );
+    }
+
+    const refundResult = await aplazoProvider.getRefundStatus({
+      paymentAttempt: attempt,
+      refundId: input.refundId,
+    });
+    const refunds = refundResult.refundEntries || [];
+    const confirmedRefundMinor = this.getConfirmedRefundTotalMinor(refunds, attempt);
+    const nextStatus = this.resolvePaymentStatusAfterRefundSync(
+      attempt,
+      confirmedRefundMinor,
+      refunds.length > 0,
+    );
+
+    const updatedAttempt = await this.paymentAttemptRepo.update(paymentAttemptId, {
+      status: nextStatus,
+      providerStatus: refundResult.providerStatus ?? attempt.providerStatus,
+      refundState: refundResult.refundState ?? attempt.refundState ?? RefundState.NONE,
+      refundId: refundResult.refundId ?? attempt.refundId,
+      refundAmount:
+        refunds.length > 0 ? confirmedRefundMinor / 100 : attempt.refundAmount,
+      metadata: {
+        ...(attempt.metadata || {}),
+        lastRefundStatusSyncAt: Timestamp.now(),
+        lastRefundStatusSyncBy: user.uid,
+      },
+    });
+
+    return {
+      paymentAttempt: updatedAttempt,
+      refunds,
+      selectedRefund:
+        refundResult.refundId
+          ? refunds.find((refund) => refund.refundId === refundResult.refundId)
+          : this.selectLatestRefundEntry(refunds),
+      totalRefundedAmount:
+        typeof updatedAttempt.refundAmount === "number"
+          ? updatedAttempt.refundAmount
+          : 0,
+    };
+  }
+
   async resolveBrowserReturnState(
     lookup: BrowserReturnLookup,
   ): Promise<{
@@ -1184,6 +1264,69 @@ export class PaymentsService {
         "El flujo in-store solo está disponible para personal autorizado",
       );
     }
+  }
+
+  private getConfirmedRefundTotalMinor(
+    refunds: ProviderRefundStatusEntry[],
+    attempt: PaymentAttempt,
+  ): number {
+    if (refunds.length === 0) {
+      return typeof attempt.refundAmount === "number"
+        ? Math.round(attempt.refundAmount * 100)
+        : 0;
+    }
+
+    return refunds.reduce((total, refund) => {
+      if (refund.refundState !== RefundState.SUCCEEDED) {
+        return total;
+      }
+
+      return total + (refund.amountMinor ?? 0);
+    }, 0);
+  }
+
+  private resolvePaymentStatusAfterRefundSync(
+    attempt: PaymentAttempt,
+    confirmedRefundMinor: number,
+    hasRefundEntries: boolean,
+  ): PaymentStatus {
+    const currentStatus = toPaymentStatus(attempt);
+    const totalMinor =
+      attempt.amountMinor ?? Math.round((attempt.monto || 0) * 100);
+
+    if (confirmedRefundMinor > 0 && totalMinor > 0) {
+      return confirmedRefundMinor >= totalMinor
+        ? PaymentStatus.REFUNDED
+        : PaymentStatus.PARTIALLY_REFUNDED;
+    }
+
+    if (
+      hasRefundEntries &&
+      (currentStatus === PaymentStatus.REFUNDED ||
+        currentStatus === PaymentStatus.PARTIALLY_REFUNDED)
+    ) {
+      return PaymentStatus.PAID;
+    }
+
+    return currentStatus;
+  }
+
+  private selectLatestRefundEntry(
+    refunds: ProviderRefundStatusEntry[],
+  ): ProviderRefundStatusEntry | undefined {
+    if (refunds.length === 0) {
+      return undefined;
+    }
+
+    return [...refunds].sort((left, right) => {
+      const leftDate = left.refundDate ? new Date(left.refundDate).getTime() : 0;
+      const rightDate = right.refundDate ? new Date(right.refundDate).getTime() : 0;
+      if (rightDate !== leftDate) {
+        return rightDate - leftDate;
+      }
+
+      return Number(right.refundId || 0) - Number(left.refundId || 0);
+    })[0];
   }
 
   private async requireOpenPosSession(

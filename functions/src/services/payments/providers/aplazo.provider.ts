@@ -22,6 +22,7 @@ import {
   PaymentAttempt,
   ProviderCreatePaymentResult,
   ProviderRefundResult,
+  ProviderRefundStatusEntry,
   ProviderStatusResult,
 } from "../payment-domain.types";
 import {
@@ -236,34 +237,74 @@ const parseAplazoDateValue = (value: unknown): Date | undefined => {
 };
 
 const selectRefundStatusEntry = (
-  payload: unknown,
+  entries: ProviderRefundStatusEntry[],
   refundId?: string,
-): JsonRecord | undefined => {
-  const entries = getRecordArray(payload);
+): ProviderRefundStatusEntry | undefined => {
   if (entries.length === 0) {
     return undefined;
   }
 
   if (refundId) {
     const matched = entries.find((entry) => {
-      return pickIdentifier(entry, ["id", "refundId", "refund_id"]) === refundId;
+      return entry.refundId === refundId;
     });
-    if (matched) {
-      return matched;
-    }
+    return matched;
   }
 
   return [...entries].sort((left, right) => {
-    const leftDate = parseAplazoDateValue(left.refundDate)?.getTime() || 0;
-    const rightDate = parseAplazoDateValue(right.refundDate)?.getTime() || 0;
+    const leftDate = parseAplazoDate(left.refundDate)?.getTime() || 0;
+    const rightDate = parseAplazoDate(right.refundDate)?.getTime() || 0;
     if (rightDate !== leftDate) {
       return rightDate - leftDate;
     }
 
-    const leftId = toNumber(left.id) || toNumber(left.refundId) || 0;
-    const rightId = toNumber(right.id) || toNumber(right.refundId) || 0;
+    const leftId = toNumber(left.refundId) || 0;
+    const rightId = toNumber(right.refundId) || 0;
     return rightId - leftId;
   })[0];
+};
+
+const buildRefundStatusEntry = (
+  entry: JsonRecord,
+): ProviderRefundStatusEntry | undefined => {
+  const refundId = pickIdentifier(entry, ["id", "refundId", "refund_id"]);
+  const providerStatus = pickString(entry, ["status", "refundStatus", "state"]);
+  const refundDate =
+    pickString(entry, ["refundDate", "requestedAt", "createdAt"]) ||
+    parseAplazoDateValue(entry.refundDate)?.toISOString();
+  const amountMinor = majorToMinor(
+    pickNumber(entry, ["totalAmount", "refundAmount", "amount"]),
+  );
+
+  if (!refundId && !providerStatus && !refundDate && typeof amountMinor !== "number") {
+    return undefined;
+  }
+
+  return {
+    refundId,
+    providerStatus,
+    refundState: resolveRefundState(providerStatus),
+    refundDate,
+    amountMinor,
+  };
+};
+
+const extractRefundStatusEntries = (
+  payload: unknown,
+): ProviderRefundStatusEntry[] => {
+  const entries = getRecordArray(payload);
+  if (entries.length > 0) {
+    return entries
+      .map((entry) => buildRefundStatusEntry(entry))
+      .filter((entry): entry is ProviderRefundStatusEntry => Boolean(entry));
+  }
+
+  if (isRecord(payload)) {
+    const singleEntry = buildRefundStatusEntry(payload);
+    return singleEntry ? [singleEntry] : [];
+  }
+
+  return [];
 };
 
 const getMetadataString = (
@@ -1715,23 +1756,32 @@ export class AplazoProvider implements PaymentProvider {
             cartId,
           },
         });
-        const selectedEntry =
-          selectRefundStatusEntry(response.data, input.refundId) || response.data;
-        const providerStatus =
-          pickString(selectedEntry, ["status", "refundStatus", "state"]) ||
-          "processing";
-        const refundAmountMinor = majorToMinor(
-          pickNumber(selectedEntry, ["totalAmount", "refundAmount", "amount"]),
-        );
+        const refundEntries = extractRefundStatusEntries(response.data);
+        const selectedEntry = selectRefundStatusEntry(refundEntries, input.refundId);
+        if (input.refundId && !selectedEntry) {
+          throw new PaymentApiError(
+            404,
+            "PAYMENT_REFUND_NOT_FOUND",
+            `No se encontró el refund ${input.refundId} para cartId ${cartId}`,
+          );
+        }
+
+        if (!selectedEntry) {
+          return {
+            refundState: input.paymentAttempt.refundState ?? RefundState.NONE,
+            refundId: input.refundId,
+            refundEntries,
+            rawResponseSanitized: sanitizeAplazoPayload(response.data),
+          };
+        }
 
         return {
-          refundState: resolveRefundState(providerStatus),
-          status: resolveAplazoStatus(providerStatus),
-          providerStatus,
-          refundId:
-            pickIdentifier(selectedEntry, ["id", "refundId", "refund_id"]) ||
-            input.refundId,
-          refundAmountMinor,
+          refundState: selectedEntry.refundState,
+          status: resolveAplazoStatus(selectedEntry.providerStatus),
+          providerStatus: selectedEntry.providerStatus,
+          refundId: selectedEntry.refundId || input.refundId,
+          refundAmountMinor: selectedEntry.amountMinor,
+          refundEntries,
           rawResponseSanitized: sanitizeAplazoPayload(response.data),
         };
       }
@@ -1753,20 +1803,32 @@ export class AplazoProvider implements PaymentProvider {
           headers: this.getInStoreHeaders(contract),
         },
       );
-      const providerStatus =
-        pickString(response.data, ["status", "refundStatus", "state"]) ||
-        "processing";
-      const refundAmountMinor = majorToMinor(
-        pickNumber(response.data, ["totalAmount", "refundAmount", "amount"]),
-      );
+      const refundEntries = extractRefundStatusEntries(response.data);
+      const selectedEntry = selectRefundStatusEntry(refundEntries, input.refundId);
+      if (input.refundId && !selectedEntry) {
+        throw new PaymentApiError(
+          404,
+          "PAYMENT_REFUND_NOT_FOUND",
+          `No se encontró el refund ${input.refundId} para cartId ${cartId}`,
+        );
+      }
+
+      if (!selectedEntry) {
+        return {
+          refundState: input.paymentAttempt.refundState ?? RefundState.NONE,
+          refundId: input.refundId,
+          refundEntries,
+          rawResponseSanitized: sanitizeAplazoPayload(response.data),
+        };
+      }
 
       return {
-        refundState: resolveRefundState(providerStatus),
-        status: resolveAplazoStatus(providerStatus),
-        providerStatus,
-        refundId:
-          pickString(response.data, ["refundId", "refund_id"]) || input.refundId,
-        refundAmountMinor,
+        refundState: selectedEntry.refundState,
+        status: resolveAplazoStatus(selectedEntry.providerStatus),
+        providerStatus: selectedEntry.providerStatus,
+        refundId: selectedEntry.refundId || input.refundId,
+        refundAmountMinor: selectedEntry.amountMinor,
+        refundEntries,
         rawResponseSanitized: sanitizeAplazoPayload(response.data),
       };
     } catch (error) {
