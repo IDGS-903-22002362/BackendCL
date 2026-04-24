@@ -925,8 +925,67 @@ export class PaymentsService {
       totalRefundedAmount:
         typeof updatedAttempt.refundAmount === "number"
           ? updatedAttempt.refundAmount
-          : 0,
+        : 0,
     };
+  }
+
+  async registerAplazoMerchantStores(
+    actor: AuthActor,
+    branches: string[],
+  ): Promise<Record<string, unknown>[]> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (user.rol !== RolUsuario.ADMIN) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN puede registrar sucursales Aplazo",
+      );
+    }
+
+    return aplazoProvider.registerMerchantStores(branches);
+  }
+
+  async resendAplazoInStoreCheckout(
+    actor: AuthActor,
+    input: {
+      cartId: string;
+      phoneNumber: string;
+      channels: Array<"WHATSAPP" | "SMS">;
+    },
+  ): Promise<Record<string, unknown>> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (!isPrivileged(user.rol)) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN o EMPLEADO puede reenviar checkout Aplazo in-store",
+      );
+    }
+
+    return aplazoProvider.resendInStoreCheckout(input);
+  }
+
+  async generateAplazoInStoreQr(
+    actor: AuthActor,
+    input: {
+      cartId: string;
+      shopId: string;
+    },
+  ): Promise<{
+    checkoutUrl?: string;
+    qrCode?: string;
+    rawResponseSanitized: Record<string, unknown>;
+  }> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (!isPrivileged(user.rol)) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN o EMPLEADO puede generar QR Aplazo in-store",
+      );
+    }
+
+    return aplazoProvider.generateInStoreQr(input);
   }
 
   async resolveBrowserReturnState(
