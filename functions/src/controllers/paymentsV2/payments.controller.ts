@@ -302,3 +302,73 @@ export const getAplazoRefundStatus = async (req: Request, res: Response) => {
     return respondPaymentError(res, error);
   }
 };
+
+export const registerAplazoMerchantStores = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const branches = await paymentsService.registerAplazoMerchantStores(
+      getActorFromRequest(req),
+      req.body.branches,
+    );
+
+    return res.status(200).json({
+      ok: true,
+      provider: "aplazo",
+      flowType: "in_store",
+      branches,
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const resendAplazoInStoreCheckout = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const result = await paymentsService.resendAplazoInStoreCheckout(
+      getActorFromRequest(req),
+      {
+        cartId: req.params.cartId,
+        phoneNumber: req.body.target.phoneNumber,
+        channels: req.body.channels,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      provider: "aplazo",
+      flowType: "in_store",
+      cartId: req.params.cartId,
+      result,
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const generateAplazoInStoreQr = async (req: Request, res: Response) => {
+  try {
+    const result = await paymentsService.generateAplazoInStoreQr(
+      getActorFromRequest(req),
+      {
+        cartId: req.params.cartId,
+        shopId: String(req.query.shopId),
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      provider: "aplazo",
+      flowType: "in_store",
+      cartId: req.params.cartId,
+      checkoutUrl: result.checkoutUrl,
+      qrCode: result.qrCode,
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};

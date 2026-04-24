@@ -54,9 +54,6 @@ type JsonRecord = Record<string, unknown>;
 type RequestHeaders = Record<string, string>;
 
 const TODO_PRODUCTS_ONLINE = getAplazoContractTodoMessage("shape de products[] online");
-const TODO_PRODUCTS_INSTORE = getAplazoContractTodoMessage(
-  "shape de products[] in-store",
-);
 const aplazoLogger = logger.child({ component: "aplazo-provider" });
 
 const normalizeComparable = (value: string): string => {
@@ -232,6 +229,14 @@ const getRecordArray = (payload: unknown): JsonRecord[] => {
   return [];
 };
 
+const getPrimaryRecord = (payload: unknown): JsonRecord | undefined => {
+  if (isRecord(payload)) {
+    return payload;
+  }
+
+  return getRecordArray(payload)[0];
+};
+
 const parseAplazoDateValue = (value: unknown): Date | undefined => {
   return parseAplazoDate(toTrimmedString(value));
 };
@@ -258,10 +263,32 @@ const selectRefundStatusEntry = (
       return rightDate - leftDate;
     }
 
+    const leftStateRank = getRefundStateRank(left.refundState);
+    const rightStateRank = getRefundStateRank(right.refundState);
+    if (rightStateRank !== leftStateRank) {
+      return rightStateRank - leftStateRank;
+    }
+
     const leftId = toNumber(left.refundId) || 0;
     const rightId = toNumber(right.refundId) || 0;
     return rightId - leftId;
   })[0];
+};
+
+const getRefundStateRank = (state: RefundState): number => {
+  switch (state) {
+    case RefundState.SUCCEEDED:
+      return 4;
+    case RefundState.PROCESSING:
+      return 3;
+    case RefundState.REQUESTED:
+      return 2;
+    case RefundState.FAILED:
+      return 1;
+    case RefundState.NONE:
+    default:
+      return 0;
+  }
 };
 
 const buildRefundStatusEntry = (
@@ -316,6 +343,17 @@ const getMetadataString = (
   }
 
   return toTrimmedString(metadata[key]);
+};
+
+const getMetadataNumber = (
+  metadata: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined => {
+  if (!metadata) {
+    return undefined;
+  }
+
+  return toNumber(metadata[key]);
 };
 
 const throwContractError = (fieldName: string): never => {
@@ -436,12 +474,15 @@ const resolveAplazoStatus = (providerStatus?: string): PaymentStatus => {
     case "approved":
     case "success":
     case "completed":
+    case "outstanding":
+    case "historical":
       return PaymentStatus.PAID;
     case "no confirmado":
     case "not confirmed":
     case "pending":
     case "created":
     case "initiated":
+    case "request":
       return PaymentStatus.PENDING_CUSTOMER;
     case "processing":
       return PaymentStatus.PENDING_PROVIDER;
@@ -519,6 +560,20 @@ const resolveShopId = (
   }
 
   return toAplazoNumericWhenPossible(candidate) ?? candidate;
+};
+
+const resolveInStoreShopId = (
+  contract: AplazoContractConfig,
+  metadata?: Record<string, unknown>,
+): string => {
+  const shopId = String(resolveShopId("in_store", contract, metadata));
+  if (!/^\d+$/.test(shopId)) {
+    throw createPaymentValidationError("shopId inválido para Aplazo in-store", {
+      shopId,
+    });
+  }
+
+  return shopId;
 };
 
 const resolveCartId = (
@@ -604,6 +659,128 @@ const buildProducts = (
       imageUrl: item.imageUrl,
     };
   });
+};
+
+const resolveAplazoDiscountType = (
+  value: string | undefined,
+  fallback: "a" | "p",
+): "a" | "p" => {
+  const normalized = value?.toLowerCase();
+  if (!normalized) {
+    return fallback;
+  }
+
+  if (normalized === "a" || normalized === "p") {
+    return normalized;
+  }
+
+  throw createPaymentValidationError("discountType debe ser a o p");
+};
+
+const buildInStoreProducts = (
+  pricingSnapshot: PaymentAttempt["pricingSnapshot"],
+): JsonRecord[] => {
+  const items = pricingSnapshot?.items || [];
+  if (items.length === 0) {
+    throw createPaymentValidationError(
+      "No fue posible construir products[] válidos para Aplazo",
+      {
+        reason: "PRODUCTS_EMPTY",
+      },
+    );
+  }
+
+  return items.map((item, index) => {
+    const title = normalizeWhitespace(
+      item.name || item.sku || item.productoId || `item_${index + 1}`,
+    );
+    const quantity = item.cantidad;
+    const unitPriceMinor = item.precioUnitarioMinor;
+    const lineUnitPriceMinor =
+      quantity > 0 ? Math.round(item.subtotalMinor / quantity) : 0;
+    const discountMinor = Math.max(0, unitPriceMinor - lineUnitPriceMinor);
+    const discountType = discountMinor > 0 ? "a" : "p";
+    const discountPriceMinor = Math.max(0, unitPriceMinor - discountMinor);
+
+    if (!title || quantity <= 0 || unitPriceMinor <= 0 || discountPriceMinor <= 0) {
+      throw createPaymentValidationError(
+        "No fue posible construir products[] válidos para Aplazo",
+        {
+          reason: "PRODUCT_INVALID",
+          index,
+          productoId: item.productoId,
+          quantity,
+          unitPrice: minorToMajor(unitPriceMinor),
+        },
+      );
+    }
+
+    return {
+      id: item.productoId,
+      externalId: item.sku || item.productoId,
+      quantity,
+      unitPrice: minorToMajor(unitPriceMinor),
+      discount: minorToMajor(discountMinor),
+      discountType,
+      discountPrice: minorToMajor(discountPriceMinor),
+      title,
+      description: title,
+    };
+  });
+};
+
+const buildInStoreTaxes = (
+  input: CreateInStoreProviderInput,
+): JsonRecord[] => {
+  const taxMinor = input.pricingSnapshot?.taxMinor || 0;
+  if (taxMinor <= 0) {
+    return [];
+  }
+
+  return [
+    {
+      price: minorToMajor(taxMinor),
+      title: getMetadataString(input.metadata, "taxTitle") || "IVA",
+    },
+  ];
+};
+
+const resolveAttemptAmountMajor = (paymentAttempt: PaymentAttempt): number => {
+  if (
+    typeof paymentAttempt.amountMinor === "number" &&
+    Number.isFinite(paymentAttempt.amountMinor)
+  ) {
+    return minorToMajor(paymentAttempt.amountMinor);
+  }
+
+  return Number((paymentAttempt.monto || 0).toFixed(2));
+};
+
+const buildInStoreCancelPayload = (
+  input: ProviderCancelOrVoidInput,
+  cartId: string,
+): JsonRecord => {
+  return {
+    cartId,
+    totalAmount: resolveAttemptAmountMajor(input.paymentAttempt),
+    reason:
+      normalizeWhitespace(input.reason) ||
+      "Cancelación solicitada por comercio",
+  };
+};
+
+const buildInStoreRefundPayload = (
+  input: ProviderRefundInput,
+  cartId: string,
+  refundAmountMinor: number | undefined,
+): JsonRecord => {
+  return {
+    cartId,
+    totalAmount: minorToMajor(refundAmountMinor),
+    reason:
+      normalizeWhitespace(input.reason) ||
+      "Devolución solicitada por comercio",
+  };
 };
 
 const splitFullName = (
@@ -838,36 +1015,33 @@ const buildInStoreAplazoPayload = (
   contract: AplazoContractConfig,
   cartId: string,
 ): JsonRecord => {
-  const pricingSnapshot = input.pricingSnapshot;
+  const custLogin = normalizeMxPhoneForAplazo(input.customerPhone);
+  if (!custLogin) {
+    throw createPaymentValidationError("Teléfono inválido para Aplazo");
+  }
+
+  if (!toTrimmedString(input.webhookUrl)) {
+    throw createPaymentValidationError("Aplazo in-store requiere webhookUrl");
+  }
+
+  const orderDiscount = getMetadataNumber(input.metadata, "orderDiscount") || 0;
+  const discountType = resolveAplazoDiscountType(
+    getMetadataString(input.metadata, "discountType"),
+    "a",
+  );
+
   const payload: JsonRecord = {
-    shopId: resolveShopId("in_store", contract, input.metadata),
+    custLogin,
+    shopId: resolveInStoreShopId(contract, input.metadata),
     cartId,
     webhookUrl: input.webhookUrl,
-    callbackUrl: input.callbackUrl,
+    products: buildInStoreProducts(input.pricingSnapshot),
+    taxes: buildInStoreTaxes(input),
+    totalAmount: minorToMajor(input.amountMinor),
+    orderDiscount,
+    discountType,
     commChannel: resolveCommChannel(input),
-    totalPrice: minorToMajor(input.amountMinor),
-    shipping: minorToMajor(pricingSnapshot?.shippingMinor || 0),
-    taxes: minorToMajor(pricingSnapshot?.taxMinor || 0),
-    products: buildProducts(pricingSnapshot, TODO_PRODUCTS_INSTORE),
   };
-
-  const customer = buildBuyerPayload({
-    name: input.customerName,
-    email: input.customerEmail,
-    phone: input.customerPhone,
-    metadata: input.metadata,
-  });
-  if (customer) {
-    payload.customer = customer;
-  }
-
-  if (input.customerPhone) {
-    const normalizedPhone = normalizeMxPhoneForAplazo(input.customerPhone);
-    if (!normalizedPhone) {
-      throw createPaymentValidationError("Teléfono inválido para Aplazo");
-    }
-    payload.phone = normalizedPhone;
-  }
 
   return payload;
 };
@@ -1119,28 +1293,40 @@ export class AplazoProvider implements PaymentProvider {
       providerStatus?: string;
     } = {},
   ): ProviderStatusResult {
+    const statusData = getPrimaryRecord(rawData) || rawData;
     const providerStatus =
-      pickString(rawData, ["status", "loanStatus", "state"]) ||
+      pickString(statusData, ["status", "loanStatus", "state"]) ||
       fallback.providerStatus ||
       "pending_provider";
-    const amountMajor = pickNumber(rawData, ["totalPrice", "totalAmount", "amount"]);
+    const amountMajor = pickNumber(statusData, [
+      "totalPrice",
+      "totalAmount",
+      "amount",
+    ]);
 
     return {
       status: resolveAplazoStatus(providerStatus),
       providerStatus,
       providerLoanId:
-        pickIdentifier(rawData, ["loanId", "loan_id"]) || fallback.providerLoanId,
+        pickIdentifier(statusData, ["loanId", "loan_id"]) ||
+        fallback.providerLoanId,
       providerReference:
-        pickIdentifier(rawData, ["cartId", "cart_id"]) || fallback.providerReference,
+        pickIdentifier(statusData, ["cartId", "cart_id"]) ||
+        fallback.providerReference,
       amountMinor: majorToMinor(amountMajor),
-      currency: pickString(rawData, ["currency"]),
+      currency: pickString(statusData, ["currency"]),
       paidAt:
         parseAplazoDate(
-          pickString(rawData, ["paidAt", "activatedAt", "activated_at", "updatedAt"]),
+          pickString(statusData, [
+            "paidAt",
+            "activatedAt",
+            "activated_at",
+            "updatedAt",
+          ]),
         ) || undefined,
       expiresAt:
         parseAplazoDate(
-          pickString(rawData, ["expiresAt", "expires_at", "expirationDate"]),
+          pickString(statusData, ["expiresAt", "expires_at", "expirationDate"]),
         ) || undefined,
       rawResponseSanitized: sanitizeAplazoPayload(rawData),
     };
@@ -1265,6 +1451,45 @@ export class AplazoProvider implements PaymentProvider {
     }
   }
 
+  async generateInStoreQr(input: {
+    cartId: string;
+    shopId: string;
+  }): Promise<{ checkoutUrl?: string; qrCode?: string; rawResponseSanitized: JsonRecord }> {
+    assertAplazoEnabled("in_store");
+    const contract = getAplazoContractConfig("in_store");
+    const getQrPath = requirePath(contract, "getQr", true);
+    const cartId = normalizeWhitespace(input.cartId);
+    const shopId = normalizeWhitespace(input.shopId);
+
+    if (!cartId) {
+      throw createPaymentValidationError("cartId inválido para generar QR");
+    }
+
+    if (!shopId || !/^\d+$/.test(shopId)) {
+      throw createPaymentValidationError("shopId inválido para generar QR");
+    }
+
+    const response = await this.request(
+      requireBaseUrl(contract, "merchant"),
+      contract.timeoutMs,
+      {
+        method: "get",
+        url: getQrPath,
+        headers: this.getInStoreHeaders(contract),
+        params: {
+          cartId,
+          shopId,
+        },
+      },
+    );
+
+    return {
+      checkoutUrl: pickString(response.data, ["checkoutUrl", "checkout_url", "url"]),
+      qrCode: pickString(response.data, ["qrCode", "qr_code", "qr", "qrString"]),
+      rawResponseSanitized: sanitizeAplazoPayload(response.data),
+    };
+  }
+
   async resendCheckout(
     contract: AplazoContractConfig,
     cartId: string,
@@ -1288,26 +1513,71 @@ export class AplazoProvider implements PaymentProvider {
     });
   }
 
-  async registerBranch(
-    contract: AplazoContractConfig,
-    payload: JsonRecord,
-    headers: RequestHeaders,
-  ): Promise<Record<string, unknown>> {
-    const registerBranchPath = contract.paths.registerBranch;
-    if (!registerBranchPath) {
-      throwContractError("in_store.registerBranchPath");
+  async resendInStoreCheckout(input: {
+    cartId: string;
+    phoneNumber: string;
+    channels: Array<"WHATSAPP" | "SMS">;
+  }): Promise<JsonRecord> {
+    assertAplazoEnabled("in_store");
+    const contract = getAplazoContractConfig("in_store");
+    const resendCheckoutPath = requirePath(contract, "resendCheckout", true);
+    const normalizedCartId = normalizeWhitespace(input.cartId);
+    if (!normalizedCartId) {
+      throw createPaymentValidationError("cartId inválido para reenviar checkout");
     }
 
-    const baseURL = requireBaseUrl(contract, "merchant");
+    const phoneNumber = normalizeMxPhoneForAplazo(input.phoneNumber);
+    if (!phoneNumber) {
+      throw createPaymentValidationError("Teléfono inválido para Aplazo");
+    }
 
-    const response = await this.request(baseURL, contract.timeoutMs, {
-      method: "post",
-      url: registerBranchPath,
-      headers,
-      data: payload,
-    });
+    const response = await this.request(
+      requireBaseUrl(contract, "merchant"),
+      contract.timeoutMs,
+      {
+        method: "post",
+        url: replaceCartIdPath(resendCheckoutPath, normalizedCartId),
+        headers: this.getInStoreHeaders(contract),
+        data: {
+          target: {
+            phoneNumber,
+          },
+          channels: input.channels,
+        },
+      },
+    );
 
     return sanitizeAplazoPayload(response.data);
+  }
+
+  async registerMerchantStores(branches: string[]): Promise<JsonRecord[]> {
+    assertAplazoEnabled("in_store");
+    const contract = getAplazoContractConfig("in_store");
+    const registerBranchPath = requirePath(contract, "registerBranch", true);
+    const normalizedBranches = branches
+      .map((branch) => normalizeWhitespace(branch))
+      .filter((branch): branch is string => Boolean(branch));
+
+    if (normalizedBranches.length === 0) {
+      throw createPaymentValidationError(
+        "Se requiere al menos una sucursal para registrar en Aplazo",
+      );
+    }
+
+    const response = await this.request(
+      requireBaseUrl(contract, "merchant"),
+      contract.timeoutMs,
+      {
+        method: "post",
+        url: registerBranchPath,
+        headers: this.getInStoreHeaders(contract),
+        data: {
+          branches: normalizedBranches,
+        },
+      },
+    );
+
+    return getRecordArray(response.data).map((entry) => sanitizeAplazoPayload(entry));
   }
 
   async createOnline(
@@ -1599,6 +1869,14 @@ export class AplazoProvider implements PaymentProvider {
         "El intento Aplazo no tiene cartId ni loanId para cancelar",
       );
     }
+    const cancelReference = cartId || input.paymentAttempt.providerLoanId;
+    if (!cancelReference) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El intento Aplazo no tiene cartId ni loanId para cancelar",
+      );
+    }
 
     try {
       const headers =
@@ -1616,23 +1894,19 @@ export class AplazoProvider implements PaymentProvider {
               url: cancelPath,
               headers,
               params: {
-                cartId,
+                cartId: cancelReference,
               },
             })
           : await this.request(baseURL, contract.timeoutMs, {
               method: "post",
               url: cancelPath,
               headers,
-              data: {
-                loanId: input.paymentAttempt.providerLoanId,
-                cartId,
-                reason: input.reason,
-              },
+              data: buildInStoreCancelPayload(input, cancelReference),
             });
 
       const result = this.buildProviderStatusResult(response.data, {
         providerLoanId: input.paymentAttempt.providerLoanId,
-        providerReference: cartId,
+        providerReference: cancelReference,
         providerStatus: "cancelado",
       });
 
@@ -1664,7 +1938,23 @@ export class AplazoProvider implements PaymentProvider {
     const refundPath = requirePath(contract, "refund");
     const cartId = input.paymentAttempt.providerReference;
 
-    if (!cartId && !input.paymentAttempt.providerLoanId) {
+    if (channel === "in_store" && !cartId) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El refund in-store Aplazo requiere cartId",
+      );
+    }
+
+    if (channel === "online" && !cartId && !input.paymentAttempt.providerLoanId) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El intento Aplazo no tiene cartId ni loanId para refund",
+      );
+    }
+    const refundReference = cartId || input.paymentAttempt.providerLoanId;
+    if (!refundReference) {
       throw new PaymentApiError(
         409,
         "PAYMENT_VALIDATION_ERROR",
@@ -1694,16 +1984,11 @@ export class AplazoProvider implements PaymentProvider {
         data:
           channel === "online"
             ? {
-                cartId,
+                cartId: refundReference,
                 totalAmount: minorToMajor(refundAmountMinor),
                 reason: input.reason,
               }
-            : {
-                cartId,
-                loanId: input.paymentAttempt.providerLoanId,
-                totalAmount: minorToMajor(refundAmountMinor),
-                reason: input.reason,
-              },
+            : buildInStoreRefundPayload(input, refundReference, refundAmountMinor),
       });
 
       const providerStatus =
