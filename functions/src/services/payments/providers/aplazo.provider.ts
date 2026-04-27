@@ -1820,7 +1820,7 @@ export class AplazoProvider implements PaymentProvider {
     const providerStatus = pickString(parsedPayload, ["status"]) || "pending_provider";
     const providerLoanId = pickIdentifier(parsedPayload, ["loanId", "loan_id"]);
     const providerReference = pickIdentifier(parsedPayload, ["cartId", "cart_id"]);
-    const merchantId = pickString(parsedPayload, ["merchantId", "merchant_id"]);
+    const merchantId = pickIdentifier(parsedPayload, ["merchantId", "merchant_id"]);
     const eventId = pickString(parsedPayload, ["eventId", "event_id", "id"]);
     const resolvedChannel = this.resolveWebhookChannel(merchantId, input.headers);
     const dedupeKey =

@@ -974,6 +974,114 @@ describe("Aplazo payments service", () => {
     expect(fakeFirestore.countDocs("paymentEventLogs")).toBe(1);
   });
 
+  it("queues and processes the Aplazo confirmation webhook as a paid payment", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_confirmed: {
+          ordenId: "orden_aplazo_confirmed",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_aplazo_confirmed",
+          providerReference: "cart-123-abc",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.parseWebhook.mockResolvedValue({
+      provider: ProveedorPago.APLAZO,
+      eventType: "aplazo.status.activo",
+      dedupeKey: "aplazo-confirmation-1",
+      providerLoanId: "155789",
+      providerReference: "cart-123-abc",
+      merchantId: "1234",
+      channel: "online",
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      payloadSanitized: {
+        status: "Activo",
+        loanId: 155789,
+        cartId: "cart-123-abc",
+        merchantId: 1234,
+      },
+    });
+
+    const finalizer = {
+      finalizeTerminalStatus: jest.fn().mockResolvedValue({
+        id: "pago_aplazo_confirmed",
+        provider: ProveedorPago.APLAZO,
+        status: PaymentStatus.PAID,
+      }),
+      recordLatePaidDivergence: jest.fn(),
+    } as unknown as typeof paymentFinalizerService;
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      finalizer,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    const queued = await service.handleAplazoWebhook({
+      rawBody: Buffer.from(
+        JSON.stringify({
+          status: "Activo",
+          loanId: 155789,
+          cartId: "cart-123-abc",
+          merchantId: 1234,
+        }),
+      ),
+      headers: {
+        authorization: "Bearer expected_secret",
+      },
+      requestId: "req-aplazo-confirmation",
+    });
+
+    const processor = new PaymentEventProcessingService(
+      new PaymentEventLogRepository(),
+      new PaymentAttemptRepository(),
+      finalizer,
+    );
+    await processor.processQueuedEvent(queued.eventLogId);
+
+    expect(finalizer.finalizeTerminalStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pago_aplazo_confirmed",
+        providerReference: "cart-123-abc",
+      }),
+      PaymentStatus.PAID,
+      expect.objectContaining({
+        source: "webhook",
+        requestedBy: "aplazo-webhook",
+        providerResult: expect.objectContaining({
+          providerLoanId: "155789",
+          providerReference: "cart-123-abc",
+          providerStatus: "Activo",
+          status: PaymentStatus.PAID,
+        }),
+      }),
+    );
+    expect(fakeFirestore.getDoc("paymentEventLogs", queued.eventLogId)).toMatchObject({
+      status: "processed",
+      paymentAttemptId: "pago_aplazo_confirmed",
+      merchantId: "1234",
+    });
+  });
+
   it("syncs aplazo refund status and recalculates the confirmed refunded amount", async () => {
     fakeFirestore = createFakeFirestore({
       ordenes: {},
