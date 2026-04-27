@@ -147,6 +147,10 @@ Regla de polling:
 Flujo POS. Se consume desde frontend de punto de venta o backoffice, no desde el
 storefront publico. Requiere rol `ADMIN` o `EMPLEADO`.
 
+La fuente operativa del flujo in-store es la venta POS en `ventasPos`. El backend
+puede crear esa venta desde `items` o reutilizar una venta existente con
+`ventaPosId`; el intento Aplazo siempre queda asociado a esa venta.
+
 ### Crear intento in-store
 
 `POST /api/payments/aplazo/in-store/create`
@@ -212,6 +216,12 @@ Campos y reglas:
 - `metadata.cartId` opcional. Si no viene, el backend usa el id de venta POS.
 - `metadata.commChannel` se pasa a Aplazo para el canal configurado; valores
   usados por integracion: `q` QR, `w` WhatsApp, `s` SMS.
+- Reintentos desde `items` sin `Idempotency-Key` se deduplican por sesion POS,
+  vendedor, telefono, items normalizados y monto.
+- Si `ventaPosId` ya tiene un intento Aplazo activo, el backend devuelve ese
+  intento y no crea otro.
+- Ventas POS terminales (`PAGADA`, `CANCELADA`, `EXPIRADA`) no aceptan nuevos
+  intentos Aplazo.
 
 Respuesta `201` o `200`:
 
@@ -222,6 +232,9 @@ Respuesta `201` o `200`:
   "provider": "aplazo",
   "flowType": "in_store",
   "status": "pending_customer",
+  "ventaPosId": "venta_pos_123",
+  "cartId": "instore_ref_1",
+  "providerReference": "instore_ref_1",
   "paymentLink": "https://aplazo/pos/venta_pos_1",
   "qrString": "qr_payload",
   "qrImageUrl": "https://aplazo/qr/venta_pos_1.png",
@@ -234,7 +247,9 @@ Uso POS:
 1. Crear intento.
 2. Mostrar `qrImageUrl`, renderizar `qrString` o abrir `paymentLink`.
 3. Hacer polling a `GET /api/payments/{paymentAttemptId}/status`.
-4. Cerrar venta solo con `status: "paid"`.
+4. Guardar `ventaPosId` y `cartId`/`providerReference` para trazabilidad POS.
+5. Cerrar venta solo con `status: "paid"`; el backend marca `ventasPos` como
+   `PAGADA` desde webhook/reconciliacion y registra salida de inventario.
 
 Errores comunes:
 

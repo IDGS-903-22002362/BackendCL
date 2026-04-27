@@ -167,6 +167,37 @@ export class PaymentAttemptRepository {
     return candidate || null;
   }
 
+  async findLatestByVentaPosAndFlow(
+    provider: ProveedorPago,
+    ventaPosId: string,
+    flowType: PaymentAttempt["flowType"],
+  ): Promise<PaymentAttempt | null> {
+    const snapshot = await this.collection
+      .where("ventaPosId", "==", ventaPosId)
+      .limit(10)
+      .get();
+    const candidates = snapshot.docs
+      .map((doc) => toPaymentAttempt(doc.id, doc.data() as Pago))
+      .filter(
+        (attempt) =>
+          attempt.provider === provider && attempt.flowType === flowType,
+      )
+      .sort((left, right) => {
+        const leftDate =
+          typeof left.createdAt?.toDate === "function"
+            ? left.createdAt.toDate().getTime()
+            : 0;
+        const rightDate =
+          typeof right.createdAt?.toDate === "function"
+            ? right.createdAt.toDate().getTime()
+            : 0;
+
+        return rightDate - leftDate;
+      });
+
+    return candidates[0] || null;
+  }
+
   async findByProviderIdentifiers(input: {
     provider: ProveedorPago;
     providerPaymentId?: string;

@@ -108,6 +108,8 @@ type InStoreCreateRequest = {
   metadata?: Record<string, unknown>;
 };
 
+type PosSaleDraftPayload = Omit<VentaPos, "id" | "createdAt" | "updatedAt">;
+
 type BrowserReturnLookup = {
   paymentAttemptId?: string;
   providerPaymentId?: string;
@@ -477,42 +479,84 @@ export class PaymentsService {
     const session = await this.requireOpenPosSession(request.posSessionId, user);
     this.assertPosContextMatchesSession(request, session, user);
 
-    const sale = request.ventaPosId
-      ? await this.requireExistingPosSale(request.ventaPosId, session)
-      : await this.createDraftPosSale(request, session);
+    let sale: VentaPos;
+    let pricingSnapshot: PaymentPricingSnapshot;
+    let idempotencyKey: string;
 
-    const pricingSnapshot = this.buildPosPricingSnapshot(sale);
-    const amountMinor = pricingSnapshot.totalMinor;
+    if (request.ventaPosId) {
+      sale = await this.requireExistingPosSale(request.ventaPosId, session);
+      this.assertPosSaleAcceptsAplazoAttempt(sale);
+      pricingSnapshot = this.buildPosPricingSnapshot(sale);
+      this.assertRequestedPosAmountMatches(request, pricingSnapshot);
 
-    if (
-      typeof request.amount === "number" &&
-      roundToMinor(request.amount) !== amountMinor
-    ) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_AMOUNT_MISMATCH",
-        "El monto enviado por POS no coincide con el cálculo del backend",
+      idempotencyKey =
+        validateIdempotencyKey(headerIdempotencyKey) ??
+        this.generateDeterministicIdempotencyKey(
+          "in_store",
+          sale.id!,
+          session.id!,
+          pricingSnapshot.totalMinor,
+          pricingSnapshot,
+        );
+
+      const existingByKey = await this.paymentAttemptRepo.findByIdempotencyKey(
+        ProveedorPago.APLAZO,
+        idempotencyKey,
       );
-    }
+      if (existingByKey) {
+        await this.assertActorCanAccessAttempt(existingByKey, user);
+        return { created: false, paymentAttempt: existingByKey, sale };
+      }
 
-    const idempotencyKey =
-      validateIdempotencyKey(headerIdempotencyKey) ??
-      this.generateDeterministicIdempotencyKey(
-        "in_store",
+      const existingForSale = await this.findActiveAplazoAttemptForPosSale(
         sale.id!,
-        session.id!,
-        amountMinor,
-        pricingSnapshot,
+        user,
       );
+      if (existingForSale) {
+        return { created: false, paymentAttempt: existingForSale, sale };
+      }
+    } else {
+      const normalizedItems = await this.resolvePosItems(request.items || []);
+      const draftSale = this.buildDraftPosSalePayload(
+        request,
+        session,
+        normalizedItems,
+      );
+      pricingSnapshot = this.buildPosPricingSnapshot(draftSale);
+      this.assertRequestedPosAmountMatches(request, pricingSnapshot);
 
-    const existing = await this.paymentAttemptRepo.findByIdempotencyKey(
-      ProveedorPago.APLAZO,
-      idempotencyKey,
-    );
-    if (existing) {
-      await this.assertActorCanAccessAttempt(existing, user);
-      return { created: false, paymentAttempt: existing, sale };
+      idempotencyKey =
+        validateIdempotencyKey(headerIdempotencyKey) ??
+        this.generateDeterministicIdempotencyKey(
+          "in_store",
+          this.buildInStoreItemsDedupePrimaryId(
+            session,
+            draftSale,
+            pricingSnapshot,
+          ),
+          session.id!,
+          pricingSnapshot.totalMinor,
+          this.normalizePricingSnapshotForDedupe(pricingSnapshot),
+        );
+
+      const existingByKey = await this.paymentAttemptRepo.findByIdempotencyKey(
+        ProveedorPago.APLAZO,
+        idempotencyKey,
+      );
+      if (existingByKey) {
+        await this.assertActorCanAccessAttempt(existingByKey, user);
+        const existingSale = await this.requirePosSaleForAttempt(existingByKey);
+        return {
+          created: false,
+          paymentAttempt: existingByKey,
+          sale: existingSale,
+        };
+      }
+
+      sale = await this.posSaleRepo.create(draftSale);
     }
+
+    const amountMinor = pricingSnapshot.totalMinor;
 
     const providerReference =
       sale.providerReference ||
@@ -570,6 +614,12 @@ export class PaymentsService {
       status: PaymentStatus.PENDING_PROVIDER,
     });
 
+    let currentSale = await this.posSaleRepo.update(sale.id!, {
+      paymentAttemptId: attempt.id,
+      providerReference,
+      status: EstadoVentaPos.PENDIENTE_PAGO,
+    });
+
     try {
       const providerResult = await aplazoProvider.createInStore({
         paymentAttemptId: attempt.id!,
@@ -594,12 +644,14 @@ export class PaymentsService {
         pricingSnapshot,
       });
 
+      const resolvedProviderReference =
+        providerResult.providerReference || providerReference;
       const updated = await this.paymentAttemptRepo.update(attempt.id!, {
         status: providerResult.status,
         providerStatus: providerResult.providerStatus,
         providerPaymentId: providerResult.providerPaymentId,
         providerLoanId: providerResult.providerLoanId,
-        providerReference: providerResult.providerReference,
+        providerReference: resolvedProviderReference,
         redirectUrl: providerResult.paymentLink,
         expiresAt: providerResult.expiresAt
           ? Timestamp.fromDate(providerResult.expiresAt)
@@ -608,7 +660,7 @@ export class PaymentsService {
         rawCreateResponseSanitized: providerResult.rawResponseSanitized,
         metadata: {
           ...(attempt.metadata || {}),
-          cartId: providerResult.providerReference || providerReference,
+          cartId: resolvedProviderReference,
           paymentLink: providerResult.paymentLink,
           qrString: providerResult.qrString,
           qrImageUrl: providerResult.qrImageUrl,
@@ -617,14 +669,16 @@ export class PaymentsService {
 
       const updatedSale = await this.posSaleRepo.update(sale.id!, {
         paymentAttemptId: updated.id,
-        providerReference: providerResult.providerReference,
+        providerReference: resolvedProviderReference,
         status: EstadoVentaPos.PENDIENTE_PAGO,
       });
+
+      currentSale = updatedSale;
 
       return {
         created: true,
         paymentAttempt: updated,
-        sale: updatedSale,
+        sale: currentSale,
       };
     } catch (error) {
       if (
@@ -638,7 +692,7 @@ export class PaymentsService {
         return {
           created: true,
           paymentAttempt: timeoutAttempt,
-          sale,
+          sale: currentSale,
         };
       }
 
@@ -646,6 +700,10 @@ export class PaymentsService {
         status: PaymentStatus.FAILED,
         providerStatus: "create_failed",
         failedAt: Timestamp.now(),
+      });
+      await this.posSaleRepo.markStatus(sale.id!, EstadoVentaPos.FALLIDA, {
+        paymentAttemptId: attempt.id,
+        providerReference,
       });
       throw error;
     }
@@ -1282,7 +1340,17 @@ export class PaymentsService {
     };
   }
 
-  private buildPosPricingSnapshot(sale: VentaPos): PaymentPricingSnapshot {
+  private buildPosPricingSnapshot(
+    sale: Pick<
+      VentaPos,
+      | "subtotalMinor"
+      | "taxMinor"
+      | "shippingMinor"
+      | "totalMinor"
+      | "currency"
+      | "items"
+    >,
+  ): PaymentPricingSnapshot {
     return {
       subtotalMinor: sale.subtotalMinor,
       taxMinor: sale.taxMinor,
@@ -1297,6 +1365,60 @@ export class PaymentsService {
         tallaId: item.tallaId,
       })),
     };
+  }
+
+  private normalizePricingSnapshotForDedupe(
+    pricingSnapshot: PaymentPricingSnapshot,
+  ): PaymentPricingSnapshot {
+    return {
+      ...pricingSnapshot,
+      items: [...pricingSnapshot.items].sort((left, right) => {
+        const leftKey = `${left.productoId}:${left.tallaId || "_"}`;
+        const rightKey = `${right.productoId}:${right.tallaId || "_"}`;
+        if (leftKey !== rightKey) {
+          return leftKey.localeCompare(rightKey);
+        }
+
+        return left.cantidad - right.cantidad;
+      }),
+    };
+  }
+
+  private buildInStoreItemsDedupePrimaryId(
+    session: PosSession,
+    draftSale: PosSaleDraftPayload,
+    pricingSnapshot: PaymentPricingSnapshot,
+  ): string {
+    const customerPhone = normalizeMxPhoneForAplazo(draftSale.customerPhone);
+    const seed = {
+      posSessionId: session.id,
+      vendedorUid: session.vendedorUid,
+      customerPhone,
+      currency: draftSale.currency,
+      amountMinor: pricingSnapshot.totalMinor,
+      items: this.normalizePricingSnapshotForDedupe(pricingSnapshot).items,
+    };
+    const digest = createHash("sha256")
+      .update(JSON.stringify(seed))
+      .digest("hex");
+
+    return `pos_items_${digest.slice(0, 48)}`;
+  }
+
+  private assertRequestedPosAmountMatches(
+    request: InStoreCreateRequest,
+    pricingSnapshot: PaymentPricingSnapshot,
+  ): void {
+    if (
+      typeof request.amount === "number" &&
+      roundToMinor(request.amount) !== pricingSnapshot.totalMinor
+    ) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_AMOUNT_MISMATCH",
+        "El monto enviado por POS no coincide con el cálculo del backend",
+      );
+    }
   }
 
   private generateDeterministicIdempotencyKey(
@@ -1482,10 +1604,71 @@ export class PaymentsService {
     return sale;
   }
 
-  private async createDraftPosSale(
+  private assertPosSaleAcceptsAplazoAttempt(sale: VentaPos): void {
+    if (
+      sale.status !== EstadoVentaPos.PAGADA &&
+      sale.status !== EstadoVentaPos.CANCELADA &&
+      sale.status !== EstadoVentaPos.EXPIRADA
+    ) {
+      return;
+    }
+
+    throw new PaymentApiError(
+      409,
+      "PAYMENT_POS_SALE_TERMINAL",
+      `La venta POS ${sale.id} ya está en estado terminal ${sale.status}`,
+      {
+        ventaPosId: sale.id,
+        status: sale.status,
+      },
+    );
+  }
+
+  private async findActiveAplazoAttemptForPosSale(
+    ventaPosId: string,
+    actor: AuthActor,
+  ): Promise<PaymentAttempt | null> {
+    const existing = await this.paymentAttemptRepo.findLatestByVentaPosAndFlow(
+      ProveedorPago.APLAZO,
+      ventaPosId,
+      PaymentFlowType.IN_STORE,
+    );
+    if (!existing || this.isTerminalStatus(toPaymentStatus(existing))) {
+      return null;
+    }
+
+    await this.assertActorCanAccessAttempt(existing, actor);
+    return existing;
+  }
+
+  private async requirePosSaleForAttempt(
+    paymentAttempt: PaymentAttempt,
+  ): Promise<VentaPos> {
+    if (!paymentAttempt.ventaPosId) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_POS_SALE_NOT_FOUND",
+        "El intento in-store existente no está asociado a una venta POS",
+      );
+    }
+
+    const sale = await this.posSaleRepo.getById(paymentAttempt.ventaPosId);
+    if (!sale) {
+      throw new PaymentApiError(
+        404,
+        "PAYMENT_POS_SALE_NOT_FOUND",
+        `Venta POS ${paymentAttempt.ventaPosId} no encontrada`,
+      );
+    }
+
+    return sale;
+  }
+
+  private buildDraftPosSalePayload(
     request: InStoreCreateRequest,
     session: PosSession,
-  ): Promise<VentaPos> {
+    normalizedItems: VentaPosItem[],
+  ): PosSaleDraftPayload {
     if (!request.items || request.items.length === 0) {
       throw new PaymentApiError(
         400,
@@ -1494,7 +1677,6 @@ export class PaymentsService {
       );
     }
 
-    const normalizedItems = await this.resolvePosItems(request.items);
     const subtotalMinor = normalizedItems.reduce(
       (acc, item) => acc + roundToMinor(item.subtotal),
       0,
@@ -1503,7 +1685,7 @@ export class PaymentsService {
     const shippingMinor = 0;
     const totalMinor = subtotalMinor + taxMinor + shippingMinor;
 
-    return this.posSaleRepo.create({
+    return {
       posSessionId: session.id!,
       deviceId: session.deviceId,
       cajaId: session.cajaId,
@@ -1524,7 +1706,7 @@ export class PaymentsService {
       status: EstadoVentaPos.BORRADOR,
       items: normalizedItems,
       metadata: request.metadata || {},
-    });
+    };
   }
 
   private async resolvePosItems(items: PaymentItemInput[]): Promise<VentaPosItem[]> {
