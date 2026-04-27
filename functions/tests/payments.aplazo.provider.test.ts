@@ -2309,9 +2309,9 @@ describe("Aplazo provider", () => {
       rawBody: Buffer.from(
         JSON.stringify({
           status: "Activo",
-          loanId: "loan_987",
+          loanId: 155789,
           cartId: "orden_123",
-          merchantId: "2639",
+          merchantId: 2639,
         }),
       ),
       headers: {
@@ -2320,8 +2320,9 @@ describe("Aplazo provider", () => {
     });
 
     expect(result.channel).toBe("online");
-    expect(result.providerLoanId).toBe("loan_987");
+    expect(result.providerLoanId).toBe("155789");
     expect(result.providerReference).toBe("orden_123");
+    expect(result.merchantId).toBe("2639");
     expect(result.status).toBe(PaymentStatus.PAID);
   });
 
