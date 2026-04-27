@@ -1,5 +1,6 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { MetodoPago, EstadoOrden } from "../src/models/orden.model";
+import { EstadoVentaPos } from "../src/models/venta-pos.model";
 import {
   PaymentFlowType,
   PaymentMethodCode,
@@ -61,6 +62,8 @@ jest.mock("../src/services/product.service", () => ({
   __esModule: true,
   default: {
     getProductById: jest.fn(),
+    getStockBySize: jest.fn(),
+    updateStock: jest.fn(),
   },
 }));
 
@@ -75,7 +78,9 @@ import { PosSaleRepository } from "../src/services/payments/pos-sale.repository"
 import { PosSessionRepository } from "../src/services/payments/pos-session.repository";
 import { PaymentsService } from "../src/services/payments/payments.service";
 import { PaymentEventProcessingService } from "../src/services/payments/payment-event-processing.service";
-import paymentFinalizerService from "../src/services/payments/payment-finalizer.service";
+import paymentFinalizerService, {
+  PaymentFinalizerService,
+} from "../src/services/payments/payment-finalizer.service";
 import paymentReconciliationService from "../src/services/payments/payment-reconciliation.service";
 import productService from "../src/services/product.service";
 
@@ -332,6 +337,8 @@ describe("Aplazo payments service", () => {
 
     Object.values(aplazoProviderMocks).forEach((mock) => mock.mockReset());
     (productService.getProductById as jest.Mock).mockReset();
+    (productService.getStockBySize as jest.Mock).mockReset();
+    (productService.updateStock as jest.Mock).mockReset();
   });
 
   it("returns the same online payment attempt on safe retries without a client key", async () => {
@@ -532,6 +539,365 @@ describe("Aplazo payments service", () => {
       "https://aplazo.example/pay/instore_ref_1",
     );
     expect(result.sale.paymentAttemptId).toBe(result.paymentAttempt.id);
+  });
+
+  it("deduplicates an in-store attempt created from items without a client key", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {},
+      usuariosApp: {},
+      posSessions: {
+        pos_session_items_dedupe: {
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          status: "OPEN",
+          openedAt: Timestamp.now(),
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    (productService.getProductById as jest.Mock).mockResolvedValue({
+      id: "prod_1",
+      descripcion: "Jersey Oficial",
+      precioPublico: 850,
+      activo: true,
+      existencias: 10,
+      tallaIds: [],
+      inventarioPorTalla: [],
+    });
+
+    aplazoProviderMocks.createInStore.mockResolvedValue({
+      status: PaymentStatus.PENDING_CUSTOMER,
+      providerStatus: "pending",
+      providerPaymentId: "instore_1",
+      providerReference: "instore_ref_1",
+      paymentLink: "https://aplazo.example/pay/instore_ref_1",
+      rawRequestSanitized: {},
+      rawResponseSanitized: {},
+    });
+
+    const finalizer = new PaymentFinalizerService(
+      new PaymentAttemptRepository(),
+      new PosSaleRepository(),
+    );
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      finalizer,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+    const payload = {
+      posSessionId: "pos_session_items_dedupe",
+      deviceId: "device-1",
+      cajaId: "caja-1",
+      sucursalId: "sucursal-1",
+      vendedorUid: "empleado_1",
+      customer: {
+        name: "Cliente POS",
+        phone: "4771234567",
+      },
+      items: [{ productoId: "prod_1", cantidad: 1 }],
+      currency: "mxn",
+    };
+
+    const first = await service.createAplazoInStore(
+      {
+        uid: "empleado_1",
+        rol: RolUsuario.EMPLEADO,
+      },
+      payload,
+    );
+    const second = await service.createAplazoInStore(
+      {
+        uid: "empleado_1",
+        rol: RolUsuario.EMPLEADO,
+      },
+      payload,
+    );
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.paymentAttempt.id).toBe(first.paymentAttempt.id);
+    expect(second.sale.id).toBe(first.sale.id);
+    expect(fakeFirestore.countDocs("ventasPos")).toBe(1);
+    expect(fakeFirestore.countDocs("pagos")).toBe(1);
+    expect(aplazoProviderMocks.createInStore).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the active in-store attempt for an existing POS sale", async () => {
+    const now = Timestamp.now();
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_pos_active: {
+          ordenId: "",
+          ventaPosId: "venta_pos_active",
+          userId: "empleado_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.IN_STORE,
+          paymentMethodCode: PaymentMethodCode.APLAZO,
+          monto: 850,
+          amountMinor: 85000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_previous_active",
+          providerReference: "cart_active",
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      usuariosApp: {},
+      posSessions: {
+        pos_session_existing: {
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          status: "OPEN",
+          openedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      ventasPos: {
+        venta_pos_active: {
+          posSessionId: "pos_session_existing",
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          currency: "mxn",
+          subtotal: 850,
+          tax: 0,
+          shipping: 0,
+          total: 850,
+          subtotalMinor: 85000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 85000,
+          status: EstadoVentaPos.PENDIENTE_PAGO,
+          paymentAttemptId: "pago_pos_active",
+          providerReference: "cart_active",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 850,
+              subtotal: 850,
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      paymentEventLogs: {},
+    });
+
+    const finalizer = new PaymentFinalizerService(
+      new PaymentAttemptRepository(),
+      new PosSaleRepository(),
+    );
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      finalizer,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    const result = await service.createAplazoInStore(
+      {
+        uid: "empleado_1",
+        rol: RolUsuario.EMPLEADO,
+      },
+      {
+        ventaPosId: "venta_pos_active",
+        posSessionId: "pos_session_existing",
+        deviceId: "device-1",
+        cajaId: "caja-1",
+        sucursalId: "sucursal-1",
+        vendedorUid: "empleado_1",
+      },
+      "different_key_123456",
+    );
+
+    expect(result.created).toBe(false);
+    expect(result.paymentAttempt.id).toBe("pago_pos_active");
+    expect(aplazoProviderMocks.createInStore).not.toHaveBeenCalled();
+    expect(fakeFirestore.countDocs("pagos")).toBe(1);
+  });
+
+  it("rejects an existing POS sale from a different session", async () => {
+    const now = Timestamp.now();
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {},
+      usuariosApp: {},
+      posSessions: {
+        pos_session_requested: {
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          status: "OPEN",
+          openedAt: now,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      ventasPos: {
+        venta_pos_other_session: {
+          posSessionId: "pos_session_other",
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          currency: "mxn",
+          subtotal: 850,
+          tax: 0,
+          shipping: 0,
+          total: 850,
+          subtotalMinor: 85000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 85000,
+          status: EstadoVentaPos.BORRADOR,
+          items: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      paymentEventLogs: {},
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    await expect(
+      service.createAplazoInStore(
+        {
+          uid: "empleado_1",
+          rol: RolUsuario.EMPLEADO,
+        },
+        {
+          ventaPosId: "venta_pos_other_session",
+          posSessionId: "pos_session_requested",
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_VALIDATION_ERROR",
+    });
+    expect(aplazoProviderMocks.createInStore).not.toHaveBeenCalled();
+  });
+
+  it("rejects terminal POS sales before calling Aplazo", async () => {
+    const terminalStatuses = [
+      EstadoVentaPos.PAGADA,
+      EstadoVentaPos.CANCELADA,
+      EstadoVentaPos.EXPIRADA,
+    ];
+
+    for (const status of terminalStatuses) {
+      const now = Timestamp.now();
+      fakeFirestore = createFakeFirestore({
+        ordenes: {},
+        pagos: {},
+        usuariosApp: {},
+        posSessions: {
+          pos_session_terminal: {
+            deviceId: "device-1",
+            cajaId: "caja-1",
+            sucursalId: "sucursal-1",
+            vendedorUid: "empleado_1",
+            status: "OPEN",
+            openedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        ventasPos: {
+          venta_pos_terminal: {
+            posSessionId: "pos_session_terminal",
+            deviceId: "device-1",
+            cajaId: "caja-1",
+            sucursalId: "sucursal-1",
+            vendedorUid: "empleado_1",
+            currency: "mxn",
+            subtotal: 850,
+            tax: 0,
+            shipping: 0,
+            total: 850,
+            subtotalMinor: 85000,
+            taxMinor: 0,
+            shippingMinor: 0,
+            totalMinor: 85000,
+            status,
+            items: [
+              {
+                productoId: "prod_1",
+                cantidad: 1,
+                precioUnitario: 850,
+                subtotal: 850,
+              },
+            ],
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+        paymentEventLogs: {},
+      });
+
+      const service = new PaymentsService(
+        new PaymentAttemptRepository(),
+        new PaymentEventLogRepository(),
+        paymentFinalizerService,
+        paymentReconciliationService,
+        new PosSaleRepository(),
+        new PosSessionRepository(),
+      );
+
+      await expect(
+        service.createAplazoInStore(
+          {
+            uid: "empleado_1",
+            rol: RolUsuario.EMPLEADO,
+          },
+          {
+            ventaPosId: "venta_pos_terminal",
+            posSessionId: "pos_session_terminal",
+            deviceId: "device-1",
+            cajaId: "caja-1",
+            sucursalId: "sucursal-1",
+            vendedorUid: "empleado_1",
+          },
+        ),
+      ).rejects.toMatchObject({
+        code: "PAYMENT_POS_SALE_TERMINAL",
+      });
+    }
+
+    expect(aplazoProviderMocks.createInStore).not.toHaveBeenCalled();
   });
 
   it("reuses the same online attempt for the same order even with a different idempotency key", async () => {
@@ -1079,6 +1445,155 @@ describe("Aplazo payments service", () => {
       status: "processed",
       paymentAttemptId: "pago_aplazo_confirmed",
       merchantId: "1234",
+    });
+  });
+
+  it("finalizes an in-store paid webhook by marking the POS sale as paid and moving inventory", async () => {
+    const now = Timestamp.now();
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_pos_confirmed: {
+          ordenId: "",
+          ventaPosId: "venta_pos_confirmed",
+          userId: "empleado_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.IN_STORE,
+          paymentMethodCode: PaymentMethodCode.APLAZO,
+          monto: 850,
+          amountMinor: 85000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_aplazo_pos_confirmed",
+          providerReference: "cart-pos-confirmed",
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {
+        venta_pos_confirmed: {
+          posSessionId: "pos_session_1",
+          deviceId: "device-1",
+          cajaId: "caja-1",
+          sucursalId: "sucursal-1",
+          vendedorUid: "empleado_1",
+          currency: "mxn",
+          subtotal: 850,
+          tax: 0,
+          shipping: 0,
+          total: 850,
+          subtotalMinor: 85000,
+          taxMinor: 0,
+          shippingMinor: 0,
+          totalMinor: 85000,
+          status: EstadoVentaPos.PENDIENTE_PAGO,
+          paymentAttemptId: "pago_aplazo_pos_confirmed",
+          providerReference: "cart-pos-confirmed",
+          items: [
+            {
+              productoId: "prod_1",
+              cantidad: 1,
+              precioUnitario: 850,
+              subtotal: 850,
+            },
+          ],
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      paymentEventLogs: {},
+    });
+
+    (productService.getStockBySize as jest.Mock).mockResolvedValue({
+      productoId: "prod_1",
+      existencias: 10,
+      tallaIds: [],
+      inventarioPorTalla: [],
+    });
+    (productService.updateStock as jest.Mock).mockResolvedValue({
+      movimientoId: "mov_1",
+      productoId: "prod_1",
+      tallaId: null,
+      cantidadAnterior: 10,
+      cantidadNueva: 9,
+      diferencia: -1,
+      createdAt: new Date("2026-04-27T00:00:00.000Z"),
+    });
+
+    aplazoProviderMocks.parseWebhook.mockResolvedValue({
+      provider: ProveedorPago.APLAZO,
+      eventType: "aplazo.status.activo",
+      dedupeKey: "aplazo-pos-confirmation-1",
+      providerLoanId: "155790",
+      providerReference: "cart-pos-confirmed",
+      merchantId: "merchant_instore",
+      channel: "in_store",
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      payloadSanitized: {
+        status: "Activo",
+        loanId: 155790,
+        cartId: "cart-pos-confirmed",
+        merchantId: "merchant_instore",
+      },
+    });
+
+    const finalizer = new PaymentFinalizerService(
+      new PaymentAttemptRepository(),
+      new PosSaleRepository(),
+    );
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      finalizer,
+      paymentReconciliationService,
+      new PosSaleRepository(),
+      new PosSessionRepository(),
+    );
+
+    const queued = await service.handleAplazoWebhook({
+      rawBody: Buffer.from(
+        JSON.stringify({
+          status: "Activo",
+          loanId: 155790,
+          cartId: "cart-pos-confirmed",
+          merchantId: "merchant_instore",
+        }),
+      ),
+      headers: {
+        authorization: "Bearer expected_secret",
+      },
+      requestId: "req-aplazo-pos-confirmation",
+    });
+
+    const processor = new PaymentEventProcessingService(
+      new PaymentEventLogRepository(),
+      new PaymentAttemptRepository(),
+      finalizer,
+    );
+    await processor.processQueuedEvent(queued.eventLogId);
+
+    expect(fakeFirestore.getDoc("ventasPos", "venta_pos_confirmed")).toMatchObject({
+      status: EstadoVentaPos.PAGADA,
+      paymentAttemptId: "pago_aplazo_pos_confirmed",
+      providerReference: "cart-pos-confirmed",
+    });
+    expect(productService.updateStock).toHaveBeenCalledWith(
+      "prod_1",
+      expect.objectContaining({
+        cantidadNueva: 9,
+        ventaPosId: "venta_pos_confirmed",
+        usuarioId: "empleado_1",
+      }),
+    );
+    expect(fakeFirestore.countDocs("inventarioMovimientosIdempotency")).toBe(1);
+    expect(fakeFirestore.getDoc("paymentEventLogs", queued.eventLogId)).toMatchObject({
+      status: "processed",
+      paymentAttemptId: "pago_aplazo_pos_confirmed",
     });
   });
 

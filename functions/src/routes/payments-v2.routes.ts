@@ -79,8 +79,64 @@ router.post(
  *     responses:
  *       200:
  *         description: Reintento idempotente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 paymentAttemptId:
+ *                   type: string
+ *                 provider:
+ *                   type: string
+ *                   example: aplazo
+ *                 flowType:
+ *                   type: string
+ *                   example: in_store
+ *                 status:
+ *                   type: string
+ *                   example: pending_customer
+ *                 ventaPosId:
+ *                   type: string
+ *                   description: ID de la venta POS asociada al intento
+ *                 cartId:
+ *                   type: string
+ *                   description: CartId enviado o resuelto para Aplazo
+ *                 providerReference:
+ *                   type: string
+ *                   description: Referencia canonica del proveedor
  *       201:
  *         description: Intento creado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 paymentAttemptId:
+ *                   type: string
+ *                 provider:
+ *                   type: string
+ *                   example: aplazo
+ *                 flowType:
+ *                   type: string
+ *                   example: in_store
+ *                 status:
+ *                   type: string
+ *                   example: pending_customer
+ *                 ventaPosId:
+ *                   type: string
+ *                   description: ID de la venta POS asociada al intento
+ *                 cartId:
+ *                   type: string
+ *                   description: CartId enviado o resuelto para Aplazo
+ *                 providerReference:
+ *                   type: string
+ *                   description: Referencia canonica del proveedor
  */
 router.post(
   "/aplazo/in-store/create",

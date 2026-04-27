@@ -147,6 +147,12 @@ export const createAplazoInStore = async (req: Request, res: Response) => {
       provider: "aplazo",
       flowType: "in_store",
       status: result.paymentAttempt.status,
+      ventaPosId: result.sale.id || result.paymentAttempt.ventaPosId,
+      cartId:
+        typeof metadata.cartId === "string"
+          ? metadata.cartId
+          : result.paymentAttempt.providerReference,
+      providerReference: result.paymentAttempt.providerReference,
       paymentLink:
         typeof metadata.paymentLink === "string" ? metadata.paymentLink : undefined,
       qrString: typeof metadata.qrString === "string" ? metadata.qrString : undefined,
