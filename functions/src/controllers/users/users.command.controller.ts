@@ -113,9 +113,10 @@ export const update = async (req: Request, res: Response) => {
 export const actualizarPerfil = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
-        const { telefono } = req.body;
+        const { nombre, telefono } = req.body;
 
         const usuario = await userAppService.updateByUid(uid, {
+            nombre,
             telefono
         });
 
@@ -154,11 +155,12 @@ const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
 export const completarPerfil = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
-        const { telefono, fechaNacimiento, genero } = req.body;
+        const { nombre, telefono, fechaNacimiento, genero } = req.body;
 
         const edad = calcularEdad(fechaNacimiento);
 
         const usuario = await userAppService.updateByUid(uid, {
+            nombre,
             telefono,
             fechaNacimiento,
             genero,
