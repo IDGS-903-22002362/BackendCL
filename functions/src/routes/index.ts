@@ -29,6 +29,7 @@ import aiRoutes from "./ai.routes";
 import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
 import favoritosRoutes from "./favorito.routes";
+import beneficiosRoutes from "./beneficios.routes";
 import ligaMxRoutes from "./liga-mx.routes";
 import paymentsV2Routes from "./payments-v2.routes";
 import adminPaymentsRoutes from "./admin-payments.routes";
@@ -61,6 +62,7 @@ router.use("/galeria", galeriaRoutes);
 router.use("/ai", aiRoutes);
 router.use("/notificaciones", notificationsRoutes);
 router.use("/favoritos", favoritosRoutes);
+router.use("/beneficios", beneficiosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
 
 // Futuros módulos:
