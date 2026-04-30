@@ -12,9 +12,6 @@ export interface AplazoContractPaths {
   cancelOrVoid?: string;
   refund?: string;
   refundStatus?: string;
-  registerBranch?: string;
-  resendCheckout?: string;
-  getQr?: string;
 }
 
 export interface AplazoContractBaseUrls {
@@ -47,8 +44,8 @@ export const getAplazoContractConfig = (
   channel: AplazoChannel,
 ): AplazoContractConfig => {
   const config = getAplazoConfig();
-  const channelConfig = channel === "online" ? config.online : config.inStore;
-  const prefix = channel === "online" ? "APLAZO_ONLINE" : "APLAZO_INSTORE";
+  const channelConfig = config.online;
+  const prefix = "APLAZO_ONLINE";
 
   return {
     channel,
@@ -63,22 +60,12 @@ export const getAplazoContractConfig = (
       refunds: channelConfig.refundsBaseUrl,
     },
     paths: {
-      auth: channel === "online" ? getEnv(`${prefix}_AUTH_PATH`) : undefined,
+      auth: getEnv(`${prefix}_AUTH_PATH`),
       create: getRequiredPath(`${prefix}_CREATE_PATH`),
       status: getRequiredPath(`${prefix}_STATUS_PATH`),
       cancelOrVoid: getEnv(`${prefix}_CANCEL_PATH`),
       refund: getEnv(`${prefix}_REFUND_PATH`),
       refundStatus: getEnv(`${prefix}_REFUND_STATUS_PATH`),
-      registerBranch:
-        channel === "in_store"
-          ? getEnv(`${prefix}_REGISTER_BRANCH_PATH`)
-          : undefined,
-      resendCheckout:
-        channel === "in_store"
-          ? getEnv(`${prefix}_RESEND_CHECKOUT_PATH`)
-          : undefined,
-      getQr:
-        channel === "in_store" ? getEnv(`${prefix}_GET_QR_PATH`) : undefined,
     },
   };
 };

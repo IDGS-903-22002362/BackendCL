@@ -45,43 +45,6 @@ export const aplazoOnlineCreateSchema = z
   })
   .strict();
 
-export const aplazoInStoreCreateSchema = z
-  .object({
-    ventaPosId: z.string().trim().min(1).max(120).optional(),
-    posSessionId: z.string().trim().min(1).max(120),
-    deviceId: z.string().trim().min(1).max(120),
-    cajaId: z.string().trim().min(1).max(120),
-    sucursalId: z.string().trim().min(1).max(120),
-    vendedorUid: z.string().trim().min(1).max(120),
-    customer: paymentCustomerSchema.optional(),
-    items: z.array(paymentItemInputSchema).max(100).optional(),
-    subtotal: z.number().nonnegative().optional(),
-    tax: z.number().nonnegative().optional(),
-    shipping: z.number().nonnegative().optional(),
-    total: z.number().nonnegative().optional(),
-    amount: z.number().nonnegative().optional(),
-    currency: z.string().trim().min(3).max(3).optional(),
-    metadata: z.record(metadataValueSchema).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (!value.ventaPosId && (!value.items || value.items.length === 0)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["items"],
-        message: "Se requiere ventaPosId o items para crear el intento POS",
-      });
-    }
-
-    if (!value.ventaPosId && !value.customer?.phone) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["customer", "phone"],
-        message: "Se requiere teléfono del cliente para Aplazo in-store",
-      });
-    }
-  });
-
 export const paymentAttemptStatusParamSchema = z.object({
   paymentAttemptId: z.string().trim().min(1).max(120),
 });
@@ -98,42 +61,6 @@ export const aplazoRefundStatusQuerySchema = z
     refundId: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
-
-export const aplazoRegisterBranchesSchema = z
-  .object({
-    branches: z.array(z.string().trim().min(1).max(120)).min(1).max(100),
-  })
-  .strict();
-
-export const aplazoInStoreCartParamSchema = z.object({
-  cartId: z.string().trim().min(1).max(120),
-});
-
-export const aplazoGenerateQrQuerySchema = z
-  .object({
-    shopId: z.string().trim().regex(/^\d+$/),
-  })
-  .strict();
-
-export const aplazoResendCheckoutSchema = z
-  .object({
-    target: z
-      .object({
-        phoneNumber: z.string().trim().min(10).max(20),
-      })
-      .strict(),
-    channels: z.array(z.enum(["WHATSAPP", "SMS"])).min(1).max(2),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (new Set(value.channels).size !== value.channels.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["channels"],
-        message: "channels no debe contener duplicados",
-      });
-    }
-  });
 
 export const aplazoReturnQuerySchema = z
   .object({

@@ -2,14 +2,12 @@ import axios, { AxiosError, AxiosRequestConfig } from "axios";
 import { createHash } from "crypto";
 import {
   AplazoChannel,
-  AplazoCommunicationChannel,
   assertAplazoEnabled,
   getAplazoConfig,
 } from "../../../config/aplazo.config";
 import { ProveedorPago, RefundState } from "../../../models/pago.model";
 import logger from "../../../utils/logger";
 import {
-  CreateInStoreProviderInput,
   CreateOnlineProviderInput,
   PaymentProvider,
   ProviderCancelOrVoidInput,
@@ -345,17 +343,6 @@ const getMetadataString = (
   return toTrimmedString(metadata[key]);
 };
 
-const getMetadataNumber = (
-  metadata: Record<string, unknown> | undefined,
-  key: string,
-): number | undefined => {
-  if (!metadata) {
-    return undefined;
-  }
-
-  return toNumber(metadata[key]);
-};
-
 const throwContractError = (fieldName: string): never => {
   throw new PaymentApiError(
     503,
@@ -413,10 +400,6 @@ const majorToMinor = (amount: number | undefined): number | undefined => {
   }
 
   return Math.round(amount * 100);
-};
-
-const replaceCartIdPath = (path: string, cartId: string): string => {
-  return path.replace("{cartId}", encodeURIComponent(cartId));
 };
 
 const parseAplazoDate = (value: unknown): Date | undefined => {
@@ -535,20 +518,13 @@ const resolveRefundState = (providerStatus?: string): RefundState => {
 };
 
 const resolveShopId = (
-  channel: AplazoChannel,
   contract: AplazoContractConfig,
   metadata?: Record<string, unknown>,
 ): string | number => {
-  const configuredShopId =
-    (channel === "online"
-      ? process.env.APLAZO_ONLINE_SHOP_ID
-      : process.env.APLAZO_INSTORE_SHOP_ID) || undefined;
+  const configuredShopId = process.env.APLAZO_ONLINE_SHOP_ID || undefined;
   const candidate =
     getMetadataString(metadata, "shopId") ||
     toTrimmedString(configuredShopId) ||
-    (channel === "in_store"
-      ? getMetadataString(metadata, "sucursalId")
-      : undefined) ||
     contract.merchantId;
 
   if (!candidate) {
@@ -562,26 +538,8 @@ const resolveShopId = (
   return toAplazoNumericWhenPossible(candidate) ?? candidate;
 };
 
-const resolveInStoreShopId = (
-  contract: AplazoContractConfig,
-  metadata?: Record<string, unknown>,
-): string => {
-  const shopId = String(resolveShopId("in_store", contract, metadata));
-  if (!/^\d+$/.test(shopId)) {
-    throw createPaymentValidationError("shopId inválido para Aplazo in-store", {
-      shopId,
-    });
-  }
-
-  return shopId;
-};
-
 const resolveCartId = (
-  input:
-    | CreateOnlineProviderInput
-    | CreateInStoreProviderInput
-    | PaymentAttempt
-    | Record<string, unknown>,
+  input: CreateOnlineProviderInput | PaymentAttempt | Record<string, unknown>,
 ): string => {
   if ("providerReference" in input) {
     const providerReference = toTrimmedString(input.providerReference);
@@ -659,128 +617,6 @@ const buildProducts = (
       imageUrl: item.imageUrl,
     };
   });
-};
-
-const resolveAplazoDiscountType = (
-  value: string | undefined,
-  fallback: "a" | "p",
-): "a" | "p" => {
-  const normalized = value?.toLowerCase();
-  if (!normalized) {
-    return fallback;
-  }
-
-  if (normalized === "a" || normalized === "p") {
-    return normalized;
-  }
-
-  throw createPaymentValidationError("discountType debe ser a o p");
-};
-
-const buildInStoreProducts = (
-  pricingSnapshot: PaymentAttempt["pricingSnapshot"],
-): JsonRecord[] => {
-  const items = pricingSnapshot?.items || [];
-  if (items.length === 0) {
-    throw createPaymentValidationError(
-      "No fue posible construir products[] válidos para Aplazo",
-      {
-        reason: "PRODUCTS_EMPTY",
-      },
-    );
-  }
-
-  return items.map((item, index) => {
-    const title = normalizeWhitespace(
-      item.name || item.sku || item.productoId || `item_${index + 1}`,
-    );
-    const quantity = item.cantidad;
-    const unitPriceMinor = item.precioUnitarioMinor;
-    const lineUnitPriceMinor =
-      quantity > 0 ? Math.round(item.subtotalMinor / quantity) : 0;
-    const discountMinor = Math.max(0, unitPriceMinor - lineUnitPriceMinor);
-    const discountType = discountMinor > 0 ? "a" : "p";
-    const discountPriceMinor = Math.max(0, unitPriceMinor - discountMinor);
-
-    if (!title || quantity <= 0 || unitPriceMinor <= 0 || discountPriceMinor <= 0) {
-      throw createPaymentValidationError(
-        "No fue posible construir products[] válidos para Aplazo",
-        {
-          reason: "PRODUCT_INVALID",
-          index,
-          productoId: item.productoId,
-          quantity,
-          unitPrice: minorToMajor(unitPriceMinor),
-        },
-      );
-    }
-
-    return {
-      id: item.productoId,
-      externalId: item.sku || item.productoId,
-      quantity,
-      unitPrice: minorToMajor(unitPriceMinor),
-      discount: minorToMajor(discountMinor),
-      discountType,
-      discountPrice: minorToMajor(discountPriceMinor),
-      title,
-      description: title,
-    };
-  });
-};
-
-const buildInStoreTaxes = (
-  input: CreateInStoreProviderInput,
-): JsonRecord[] => {
-  const taxMinor = input.pricingSnapshot?.taxMinor || 0;
-  if (taxMinor <= 0) {
-    return [];
-  }
-
-  return [
-    {
-      price: minorToMajor(taxMinor),
-      title: getMetadataString(input.metadata, "taxTitle") || "IVA",
-    },
-  ];
-};
-
-const resolveAttemptAmountMajor = (paymentAttempt: PaymentAttempt): number => {
-  if (
-    typeof paymentAttempt.amountMinor === "number" &&
-    Number.isFinite(paymentAttempt.amountMinor)
-  ) {
-    return minorToMajor(paymentAttempt.amountMinor);
-  }
-
-  return Number((paymentAttempt.monto || 0).toFixed(2));
-};
-
-const buildInStoreCancelPayload = (
-  input: ProviderCancelOrVoidInput,
-  cartId: string,
-): JsonRecord => {
-  return {
-    cartId,
-    totalAmount: resolveAttemptAmountMajor(input.paymentAttempt),
-    reason:
-      normalizeWhitespace(input.reason) ||
-      "Cancelación solicitada por comercio",
-  };
-};
-
-const buildInStoreRefundPayload = (
-  input: ProviderRefundInput,
-  cartId: string,
-  refundAmountMinor: number | undefined,
-): JsonRecord => {
-  return {
-    cartId,
-    totalAmount: minorToMajor(refundAmountMinor),
-    reason:
-      normalizeWhitespace(input.reason) ||
-      "Devolución solicitada por comercio",
-  };
 };
 
 const splitFullName = (
@@ -954,7 +790,7 @@ const buildOnlineAplazoPayload = (
   const payload: JsonRecord = {
     totalPrice: minorToMajor(input.amountMinor),
     currency,
-    shopId: resolveShopId("online", contract, input.metadata),
+    shopId: resolveShopId(contract, input.metadata),
     cartId,
     successUrl: input.successUrl,
     errorUrl: input.failureUrl || input.cancelUrl,
@@ -992,58 +828,18 @@ const buildOnlineAplazoPayload = (
   return payload;
 };
 
-const resolveCommChannel = (
-  input: CreateInStoreProviderInput,
-): AplazoCommunicationChannel => {
-  const fromMetadata = getMetadataString(input.metadata, "commChannel")?.toLowerCase();
-  const configuredDefault = getAplazoConfig().inStore.defaultCommChannel || "q";
-  const value = fromMetadata || configuredDefault;
-
-  if (value === "q" || value === "w" || value === "s") {
-    return value;
+const assertOnlineAttempt = (paymentAttempt: PaymentAttempt): void => {
+  if (paymentAttempt.flowType === "in_store") {
+    throw new PaymentApiError(
+      409,
+      "PAYMENT_FLOW_UNSUPPORTED",
+      "Las APIs Aplazo in-store ya no están disponibles; este provider solo soporta Aplazo online",
+      {
+        paymentAttemptId: paymentAttempt.id,
+        flowType: paymentAttempt.flowType,
+      },
+    );
   }
-
-  throw new PaymentApiError(
-    400,
-    "PAYMENT_VALIDATION_ERROR",
-    "commChannel debe ser q, w o s",
-  );
-};
-
-const buildInStoreAplazoPayload = (
-  input: CreateInStoreProviderInput,
-  contract: AplazoContractConfig,
-  cartId: string,
-): JsonRecord => {
-  const custLogin = normalizeMxPhoneForAplazo(input.customerPhone);
-  if (!custLogin) {
-    throw createPaymentValidationError("Teléfono inválido para Aplazo");
-  }
-
-  if (!toTrimmedString(input.webhookUrl)) {
-    throw createPaymentValidationError("Aplazo in-store requiere webhookUrl");
-  }
-
-  const orderDiscount = getMetadataNumber(input.metadata, "orderDiscount") || 0;
-  const discountType = resolveAplazoDiscountType(
-    getMetadataString(input.metadata, "discountType"),
-    "a",
-  );
-
-  const payload: JsonRecord = {
-    custLogin,
-    shopId: resolveInStoreShopId(contract, input.metadata),
-    cartId,
-    webhookUrl: input.webhookUrl,
-    products: buildInStoreProducts(input.pricingSnapshot),
-    taxes: buildInStoreTaxes(input),
-    totalAmount: minorToMajor(input.amountMinor),
-    orderDiscount,
-    discountType,
-    commChannel: resolveCommChannel(input),
-  };
-
-  return payload;
 };
 
 export const normalizeProviderError = (
@@ -1162,7 +958,7 @@ export class AplazoProvider implements PaymentProvider {
     requiredPaths: Array<keyof AplazoContractConfig["paths"]>,
   ): void {
     const missing: string[] = [];
-    const channelLabel = channel === "online" ? "APLAZO_ONLINE" : "APLAZO_INSTORE";
+    const channelLabel = "APLAZO_ONLINE";
 
     if (!contract.merchantId) {
       missing.push(`${channelLabel}_MERCHANT_ID`);
@@ -1257,21 +1053,6 @@ export class AplazoProvider implements PaymentProvider {
     }
   }
 
-  private getInStoreHeaders(contract: AplazoContractConfig): RequestHeaders {
-    if (!contract.apiToken || !contract.merchantId) {
-      throw new PaymentApiError(
-        503,
-        "PAYMENT_PROVIDER_ERROR",
-        "Faltan credenciales in-store de Aplazo",
-      );
-    }
-
-    return {
-      api_token: contract.apiToken,
-      merchant_id: contract.merchantId,
-    };
-  }
-
   private async request(
     baseURL: string,
     timeoutMs: number,
@@ -1337,11 +1118,7 @@ export class AplazoProvider implements PaymentProvider {
     headers: Record<string, string | string[] | undefined>,
   ): { channel: AplazoChannel; contract: AplazoContractConfig } {
     const onlineContract = getAplazoContractConfig("online");
-    const inStoreContract = getAplazoContractConfig("in_store");
-    const configuredMerchantIds = [
-      onlineContract.merchantId,
-      inStoreContract.merchantId,
-    ].filter(Boolean);
+    const configuredMerchantIds = [onlineContract.merchantId].filter(Boolean);
 
     const candidates: Array<{ channel: AplazoChannel; contract: AplazoContractConfig }> =
       [];
@@ -1349,9 +1126,6 @@ export class AplazoProvider implements PaymentProvider {
     if (payloadMerchantId) {
       if (onlineContract.merchantId === payloadMerchantId) {
         candidates.push({ channel: "online", contract: onlineContract });
-      }
-      if (inStoreContract.merchantId === payloadMerchantId) {
-        candidates.push({ channel: "in_store", contract: inStoreContract });
       }
 
       if (configuredMerchantIds.length > 0 && candidates.length === 0) {
@@ -1364,10 +1138,7 @@ export class AplazoProvider implements PaymentProvider {
     }
 
     if (candidates.length === 0) {
-      candidates.push(
-        { channel: "online", contract: onlineContract },
-        { channel: "in_store", contract: inStoreContract },
-      );
+      candidates.push({ channel: "online", contract: onlineContract });
     }
 
     let invalidAuthDetected = false;
@@ -1417,167 +1188,6 @@ export class AplazoProvider implements PaymentProvider {
         "Authorization inválido para webhook Aplazo",
       );
     }
-  }
-
-  private async getCheckoutQr(
-    contract: AplazoContractConfig,
-    cartId: string,
-    headers: RequestHeaders,
-  ): Promise<{ qrString?: string; qrImageUrl?: string }> {
-    const getQrPath = contract.paths.getQr;
-    if (!getQrPath) {
-      return {};
-    }
-
-    const baseURL = contract.baseUrls.merchant || requireBaseUrl(contract, "api");
-
-    try {
-      const response = await this.request(baseURL, contract.timeoutMs, {
-        method: "get",
-        url: replaceCartIdPath(getQrPath, cartId),
-        headers,
-      });
-      return {
-        qrString: pickString(response.data, ["qr", "qrString", "code"]),
-        qrImageUrl: pickString(response.data, [
-          "qrImageUrl",
-          "qr_url",
-          "qrUrl",
-          "imageUrl",
-        ]),
-      };
-    } catch (error) {
-      throw normalizeProviderError(error);
-    }
-  }
-
-  async generateInStoreQr(input: {
-    cartId: string;
-    shopId: string;
-  }): Promise<{ checkoutUrl?: string; qrCode?: string; rawResponseSanitized: JsonRecord }> {
-    assertAplazoEnabled("in_store");
-    const contract = getAplazoContractConfig("in_store");
-    const getQrPath = requirePath(contract, "getQr", true);
-    const cartId = normalizeWhitespace(input.cartId);
-    const shopId = normalizeWhitespace(input.shopId);
-
-    if (!cartId) {
-      throw createPaymentValidationError("cartId inválido para generar QR");
-    }
-
-    if (!shopId || !/^\d+$/.test(shopId)) {
-      throw createPaymentValidationError("shopId inválido para generar QR");
-    }
-
-    const response = await this.request(
-      requireBaseUrl(contract, "merchant"),
-      contract.timeoutMs,
-      {
-        method: "get",
-        url: getQrPath,
-        headers: this.getInStoreHeaders(contract),
-        params: {
-          cartId,
-          shopId,
-        },
-      },
-    );
-
-    return {
-      checkoutUrl: pickString(response.data, ["checkoutUrl", "checkout_url", "url"]),
-      qrCode: pickString(response.data, ["qrCode", "qr_code", "qr", "qrString"]),
-      rawResponseSanitized: sanitizeAplazoPayload(response.data),
-    };
-  }
-
-  async resendCheckout(
-    contract: AplazoContractConfig,
-    cartId: string,
-    headers: RequestHeaders,
-  ): Promise<void> {
-    const resendCheckoutPath = contract.paths.resendCheckout;
-    if (!resendCheckoutPath) {
-      throwContractError("in_store.resendCheckoutPath");
-    }
-
-    const baseURL = contract.baseUrls.merchant || requireBaseUrl(contract, "api");
-
-    await this.request(baseURL, contract.timeoutMs, {
-      method: "post",
-      url: resendCheckoutPath,
-      headers,
-      data: {
-        cartId,
-        // TODO: confirmar path y payload exactos de resend checkout con colección Postman de Aplazo
-      },
-    });
-  }
-
-  async resendInStoreCheckout(input: {
-    cartId: string;
-    phoneNumber: string;
-    channels: Array<"WHATSAPP" | "SMS">;
-  }): Promise<JsonRecord> {
-    assertAplazoEnabled("in_store");
-    const contract = getAplazoContractConfig("in_store");
-    const resendCheckoutPath = requirePath(contract, "resendCheckout", true);
-    const normalizedCartId = normalizeWhitespace(input.cartId);
-    if (!normalizedCartId) {
-      throw createPaymentValidationError("cartId inválido para reenviar checkout");
-    }
-
-    const phoneNumber = normalizeMxPhoneForAplazo(input.phoneNumber);
-    if (!phoneNumber) {
-      throw createPaymentValidationError("Teléfono inválido para Aplazo");
-    }
-
-    const response = await this.request(
-      requireBaseUrl(contract, "merchant"),
-      contract.timeoutMs,
-      {
-        method: "post",
-        url: replaceCartIdPath(resendCheckoutPath, normalizedCartId),
-        headers: this.getInStoreHeaders(contract),
-        data: {
-          target: {
-            phoneNumber,
-          },
-          channels: input.channels,
-        },
-      },
-    );
-
-    return sanitizeAplazoPayload(response.data);
-  }
-
-  async registerMerchantStores(branches: string[]): Promise<JsonRecord[]> {
-    assertAplazoEnabled("in_store");
-    const contract = getAplazoContractConfig("in_store");
-    const registerBranchPath = requirePath(contract, "registerBranch", true);
-    const normalizedBranches = branches
-      .map((branch) => normalizeWhitespace(branch))
-      .filter((branch): branch is string => Boolean(branch));
-
-    if (normalizedBranches.length === 0) {
-      throw createPaymentValidationError(
-        "Se requiere al menos una sucursal para registrar en Aplazo",
-      );
-    }
-
-    const response = await this.request(
-      requireBaseUrl(contract, "merchant"),
-      contract.timeoutMs,
-      {
-        method: "post",
-        url: registerBranchPath,
-        headers: this.getInStoreHeaders(contract),
-        data: {
-          branches: normalizedBranches,
-        },
-      },
-    );
-
-    return getRecordArray(response.data).map((entry) => sanitizeAplazoPayload(entry));
   }
 
   async createOnline(
@@ -1666,130 +1276,40 @@ export class AplazoProvider implements PaymentProvider {
     }
   }
 
-  async createInStore(
-    input: CreateInStoreProviderInput,
-  ): Promise<ProviderCreatePaymentResult> {
-    assertAplazoEnabled("in_store");
-    const contract = getAplazoContractConfig("in_store");
-    this.validateChannelConfig("in_store", contract, ["create"]);
-    const apiBaseUrl = requireBaseUrl(contract, "api");
-    const createPath = requirePath(contract, "create");
-    const cartId = resolveCartId(input);
-
-    try {
-      const headers = this.getInStoreHeaders(contract);
-      const requestPayload = buildInStoreAplazoPayload(input, contract, cartId);
-      const response = await this.request(apiBaseUrl, contract.timeoutMs, {
-        method: "post",
-        url: createPath,
-        headers,
-        data: requestPayload,
-      });
-      const rawData = response.data;
-      const providerStatus =
-        pickString(rawData, ["status", "loanStatus", "state"]) ||
-        "pending_customer";
-      let qrString = pickString(rawData, ["qr", "qrString", "code"]);
-      let qrImageUrl = pickString(rawData, [
-        "qrImageUrl",
-        "qr_url",
-        "qrUrl",
-        "imageUrl",
-      ]);
-
-      if (
-        resolveCommChannel(input) === "q" &&
-        (!qrString || !qrImageUrl) &&
-        contract.paths.getQr
-      ) {
-        const qrResult = await this.getCheckoutQr(contract, cartId, headers);
-        qrString = qrString || qrResult.qrString;
-        qrImageUrl = qrImageUrl || qrResult.qrImageUrl;
-      }
-
-      return {
-        status: resolveAplazoStatus(providerStatus),
-        providerStatus,
-        providerLoanId: pickIdentifier(rawData, ["loanId", "loan_id"]),
-        providerReference: pickIdentifier(rawData, ["cartId", "cart_id"]) || cartId,
-        paymentLink: pickString(rawData, [
-          "url",
-          "link",
-          "paymentLink",
-          "checkoutUrl",
-        ]),
-        qrString,
-        qrImageUrl,
-        expiresAt:
-          parseAplazoDate(
-            pickString(rawData, ["expiresAt", "expires_at", "expirationDate"]),
-          ) || undefined,
-        rawRequestSanitized: sanitizeAplazoPayload(requestPayload),
-        rawResponseSanitized: sanitizeAplazoPayload(rawData),
-      };
-    } catch (error) {
-      throw normalizeProviderError(error);
-    }
-  }
-
   async getStatus(paymentAttempt: PaymentAttempt): Promise<ProviderStatusResult> {
-    const channel = paymentAttempt.flowType === "in_store" ? "in_store" : "online";
-    assertAplazoEnabled(channel);
-    const contract = getAplazoContractConfig(channel);
-    this.validateChannelConfig(channel, contract, ["status"]);
+    assertOnlineAttempt(paymentAttempt);
+    assertAplazoEnabled("online");
+    const contract = getAplazoContractConfig("online");
+    this.validateChannelConfig("online", contract, ["status"]);
 
     try {
-      if (channel === "online") {
-        const merchantBaseUrl = requireBaseUrl(contract, "merchant");
-        const statusPath = requirePath(contract, "status");
-        const headers = await this.authenticateOnline(contract);
-        const params: Record<string, string> = {};
+      const merchantBaseUrl = requireBaseUrl(contract, "merchant");
+      const statusPath = requirePath(contract, "status");
+      const headers = await this.authenticateOnline(contract);
+      const params: Record<string, string> = {};
 
-        if (paymentAttempt.providerLoanId) {
-          params.loan_id = paymentAttempt.providerLoanId;
-        } else if (paymentAttempt.providerReference) {
-          params.cart_id = paymentAttempt.providerReference;
-        } else {
-          throw new PaymentApiError(
-            409,
-            "PAYMENT_VALIDATION_ERROR",
-            "El intento Aplazo online no tiene loanId ni cartId para consultar status",
-          );
-        }
-
-        const response = await this.request(merchantBaseUrl, contract.timeoutMs, {
-          method: "get",
-          url: statusPath,
-          headers,
-          params,
-        });
-
-        return this.buildProviderStatusResult(response.data, {
-          providerLoanId: paymentAttempt.providerLoanId,
-          providerReference: paymentAttempt.providerReference,
-          providerStatus: paymentAttempt.providerStatus,
-        });
-      }
-
-      const apiBaseUrl = requireBaseUrl(contract, "api");
-      const cartId = paymentAttempt.providerReference;
-      if (!cartId) {
+      if (paymentAttempt.providerLoanId) {
+        params.loan_id = paymentAttempt.providerLoanId;
+      } else if (paymentAttempt.providerReference) {
+        params.cart_id = paymentAttempt.providerReference;
+      } else {
         throw new PaymentApiError(
           409,
           "PAYMENT_VALIDATION_ERROR",
-          "El intento Aplazo in-store no tiene cartId para consultar status",
+          "El intento Aplazo online no tiene loanId ni cartId para consultar status",
         );
       }
 
-      const response = await this.request(apiBaseUrl, contract.timeoutMs, {
+      const response = await this.request(merchantBaseUrl, contract.timeoutMs, {
         method: "get",
-        url: replaceCartIdPath(requirePath(contract, "status"), cartId),
-        headers: this.getInStoreHeaders(contract),
+        url: statusPath,
+        headers,
+        params,
       });
 
       return this.buildProviderStatusResult(response.data, {
         providerLoanId: paymentAttempt.providerLoanId,
-        providerReference: cartId,
+        providerReference: paymentAttempt.providerReference,
         providerStatus: paymentAttempt.providerStatus,
       });
     } catch (error) {
@@ -1856,9 +1376,9 @@ export class AplazoProvider implements PaymentProvider {
   async cancelOrVoid(
     input: ProviderCancelOrVoidInput,
   ): Promise<ProviderStatusResult> {
-    const channel = input.paymentAttempt.flowType === "in_store" ? "in_store" : "online";
-    assertAplazoEnabled(channel);
-    const contract = getAplazoContractConfig(channel);
+    assertOnlineAttempt(input.paymentAttempt);
+    assertAplazoEnabled("online");
+    const contract = getAplazoContractConfig("online");
     const cancelPath = requirePath(contract, "cancelOrVoid", true);
     const cartId = input.paymentAttempt.providerReference;
 
@@ -1879,30 +1399,19 @@ export class AplazoProvider implements PaymentProvider {
     }
 
     try {
-      const headers =
-        channel === "online"
-          ? await this.authenticateOnline(contract)
-          : this.getInStoreHeaders(contract);
-      const baseURL =
-        channel === "online"
-          ? requireBaseUrl(contract, "refunds")
-          : requireBaseUrl(contract, "api");
-      const response =
-        channel === "online"
-          ? await this.request(baseURL, contract.timeoutMs, {
-              method: "get",
-              url: cancelPath,
-              headers,
-              params: {
-                cartId: cancelReference,
-              },
-            })
-          : await this.request(baseURL, contract.timeoutMs, {
-              method: "post",
-              url: cancelPath,
-              headers,
-              data: buildInStoreCancelPayload(input, cancelReference),
-            });
+      const headers = await this.authenticateOnline(contract);
+      const response = await this.request(
+        requireBaseUrl(contract, "refunds"),
+        contract.timeoutMs,
+        {
+          method: "get",
+          url: cancelPath,
+          headers,
+          params: {
+            cartId: cancelReference,
+          },
+        },
+      );
 
       const result = this.buildProviderStatusResult(response.data, {
         providerLoanId: input.paymentAttempt.providerLoanId,
@@ -1923,7 +1432,7 @@ export class AplazoProvider implements PaymentProvider {
   }
 
   async refund(input: ProviderRefundInput): Promise<ProviderRefundResult> {
-    const channel = input.paymentAttempt.flowType === "in_store" ? "in_store" : "online";
+    assertOnlineAttempt(input.paymentAttempt);
     const aplazoConfig = getAplazoConfig();
     if (!aplazoConfig.refundsEnabled) {
       throw new PaymentApiError(
@@ -1933,20 +1442,12 @@ export class AplazoProvider implements PaymentProvider {
       );
     }
 
-    assertAplazoEnabled(channel);
-    const contract = getAplazoContractConfig(channel);
+    assertAplazoEnabled("online");
+    const contract = getAplazoContractConfig("online");
     const refundPath = requirePath(contract, "refund");
     const cartId = input.paymentAttempt.providerReference;
 
-    if (channel === "in_store" && !cartId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "El refund in-store Aplazo requiere cartId",
-      );
-    }
-
-    if (channel === "online" && !cartId && !input.paymentAttempt.providerLoanId) {
+    if (!cartId && !input.paymentAttempt.providerLoanId) {
       throw new PaymentApiError(
         409,
         "PAYMENT_VALIDATION_ERROR",
@@ -1969,26 +1470,16 @@ export class AplazoProvider implements PaymentProvider {
         : input.paymentAttempt.amountMinor;
 
     try {
-      const headers =
-        channel === "online"
-          ? await this.authenticateOnline(contract)
-          : this.getInStoreHeaders(contract);
-      const baseURL =
-        channel === "online"
-          ? requireBaseUrl(contract, "merchant")
-          : requireBaseUrl(contract, "api");
-      const response = await this.request(baseURL, contract.timeoutMs, {
+      const headers = await this.authenticateOnline(contract);
+      const response = await this.request(requireBaseUrl(contract, "merchant"), contract.timeoutMs, {
         method: "post",
         url: refundPath,
         headers,
-        data:
-          channel === "online"
-            ? {
-                cartId: refundReference,
-                totalAmount: minorToMajor(refundAmountMinor),
-                reason: input.reason,
-              }
-            : buildInStoreRefundPayload(input, refundReference, refundAmountMinor),
+        data: {
+          cartId: refundReference,
+          totalAmount: minorToMajor(refundAmountMinor),
+          reason: input.reason,
+        },
       });
 
       const providerStatus =
@@ -2015,79 +1506,29 @@ export class AplazoProvider implements PaymentProvider {
   async getRefundStatus(
     input: ProviderRefundStatusInput,
   ): Promise<ProviderRefundResult> {
-    const channel = input.paymentAttempt.flowType === "in_store" ? "in_store" : "online";
-    assertAplazoEnabled(channel);
-    const contract = getAplazoContractConfig(channel);
+    assertOnlineAttempt(input.paymentAttempt);
+    assertAplazoEnabled("online");
+    const contract = getAplazoContractConfig("online");
     const refundStatusPath = requirePath(contract, "refundStatus");
     const cartId = input.paymentAttempt.providerReference;
 
     try {
-      if (channel === "online") {
-        const merchantBaseUrl = requireBaseUrl(contract, "merchant");
-        const headers = await this.authenticateOnline(contract);
-        if (!cartId) {
-          throw new PaymentApiError(
-            409,
-            "PAYMENT_VALIDATION_ERROR",
-            "El refund online Aplazo requiere cartId para consultar status",
-          );
-        }
-
-        const response = await this.request(merchantBaseUrl, contract.timeoutMs, {
-          method: "get",
-          url: refundStatusPath,
-          headers,
-          params: {
-            cartId,
-          },
-        });
-        const refundEntries = extractRefundStatusEntries(response.data);
-        const selectedEntry = selectRefundStatusEntry(refundEntries, input.refundId);
-        if (input.refundId && !selectedEntry) {
-          throw new PaymentApiError(
-            404,
-            "PAYMENT_REFUND_NOT_FOUND",
-            `No se encontró el refund ${input.refundId} para cartId ${cartId}`,
-          );
-        }
-
-        if (!selectedEntry) {
-          return {
-            refundState: input.paymentAttempt.refundState ?? RefundState.NONE,
-            refundId: input.refundId,
-            refundEntries,
-            rawResponseSanitized: sanitizeAplazoPayload(response.data),
-          };
-        }
-
-        return {
-          refundState: selectedEntry.refundState,
-          status: resolveAplazoStatus(selectedEntry.providerStatus),
-          providerStatus: selectedEntry.providerStatus,
-          refundId: selectedEntry.refundId || input.refundId,
-          refundAmountMinor: selectedEntry.amountMinor,
-          refundEntries,
-          rawResponseSanitized: sanitizeAplazoPayload(response.data),
-        };
-      }
-
       if (!cartId) {
         throw new PaymentApiError(
           409,
           "PAYMENT_VALIDATION_ERROR",
-          "El refund in-store Aplazo requiere cartId para consultar status",
+          "El refund online Aplazo requiere cartId para consultar status",
         );
       }
 
-      const response = await this.request(
-        requireBaseUrl(contract, "api"),
-        contract.timeoutMs,
-        {
-          method: "get",
-          url: replaceCartIdPath(refundStatusPath, cartId),
-          headers: this.getInStoreHeaders(contract),
+      const response = await this.request(requireBaseUrl(contract, "merchant"), contract.timeoutMs, {
+        method: "get",
+        url: refundStatusPath,
+        headers: await this.authenticateOnline(contract),
+        params: {
+          cartId,
         },
-      );
+      });
       const refundEntries = extractRefundStatusEntries(response.data);
       const selectedEntry = selectRefundStatusEntry(refundEntries, input.refundId);
       if (input.refundId && !selectedEntry) {

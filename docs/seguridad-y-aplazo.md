@@ -12,7 +12,7 @@ Este backend implementa una estrategia de seguridad en capas:
 - Uso de secretos en Cloud Functions para credenciales sensibles.
 - Controles especificos de pagos Aplazo (idempotencia, ownership, webhook auth, deduplicacion y reconciliacion).
 
-Ademas, Aplazo esta integrado como un proveedor de pagos desacoplado de Stripe legacy, con flujo online e in-store y modelo asincrono basado en webhook mas reconciliacion.
+Ademas, Aplazo esta integrado como un proveedor de pagos desacoplado de Stripe legacy, con flujo online y modelo asincrono basado en webhook mas reconciliacion.
 
 ## 2. Seguridad implementada en el repositorio
 
@@ -59,7 +59,6 @@ Controles actuales:
 - Autorizacion por rol (ADMIN, EMPLEADO, CLIENTE) en varios modulos.
 - En pagos V2:
   - paymentAuthMiddleware exige token valido.
-  - paymentStaffMiddleware restringe flujo in-store a ADMIN/EMPLEADO.
   - Operaciones sensibles (cancel/refund manual) requieren ADMIN en el servicio.
 - En AI:
   - Capabilities por rol/scopes.
@@ -77,7 +76,7 @@ Controles actuales:
 - Validacion de body, params y query con Zod.
 - Respuestas estructuradas para errores de validacion.
 - Uso de schemas strict para rechazar campos extra (mass assignment prevention).
-- Reglas de negocio en validacion (por ejemplo, in-store requiere ventaPosId o items).
+- Reglas de negocio en validacion para crear pagos Aplazo online desde ordenes.
 
 ### 2.5 Anti-abuso y control de consumo
 
@@ -167,11 +166,6 @@ Online:
 - GET /payments/aplazo/failure
 - GET /payments/aplazo/cancel
 
-In-store:
-
-- POST /api/payments/aplazo/in-store/create
-- GET /api/payments/:paymentAttemptId/status
-
 Webhook:
 
 - POST /api/webhooks/aplazo
@@ -181,6 +175,7 @@ Admin operativo:
 - POST /api/admin/payments/aplazo/:paymentAttemptId/reconcile
 - POST /api/admin/payments/aplazo/:paymentAttemptId/cancel
 - POST /api/admin/payments/aplazo/:paymentAttemptId/refund
+- GET /api/admin/payments/aplazo/:paymentAttemptId/refund/status
 
 ## 3.2 Componentes principales
 
@@ -195,7 +190,7 @@ Referencias:
 
 Piezas de integracion:
 
-- Config central de Aplazo por canal (online/in_store).
+- Config central de Aplazo online.
 - Provider adapter para llamadas HTTP al proveedor.
 - PaymentsService como orquestador de negocio.
 - Repositorio de PaymentAttempt y EventLog para persistencia.
@@ -206,9 +201,8 @@ Piezas de integracion:
 
 ### Autenticacion y autorizacion del actor
 
-- create online/in-store requiere usuario autenticado.
+- create online requiere usuario autenticado.
 - Online valida ownership de orden (si no es staff, la orden debe pertenecer al uid).
-- In-store valida rol privilegiado y consistencia de sesion POS (deviceId, cajaId, sucursalId, vendedorUid).
 - Consulta de status valida acceso al PaymentAttempt por ownership/rol.
 - Cancel y refund manual restringidos a ADMIN.
 
@@ -220,17 +214,17 @@ Piezas de integracion:
 
 ### Validacion de montos y moneda
 
-- El backend recalcula montos desde orden/venta POS.
-- Si total/amount del cliente no coincide con el calculo interno, responde PAYMENT_AMOUNT_MISMATCH.
+- El backend recalcula montos desde la orden.
+- Si total del cliente no coincide con el calculo interno, responde PAYMENT_AMOUNT_MISMATCH.
 - En procesamiento de webhook se valida amountMinor/currency contra el intento persistido.
 
 ### Webhook security y deduplicacion
 
 - El endpoint recibe raw body para parse robusto.
 - parseWebhook exige JSON valido.
-- Resolucion de canal por merchantId y/o credenciales configuradas.
+- Resolucion del merchantId online por credenciales configuradas.
 - Validacion de Authorization en webhook:
-  - compara header contra esquema configurado (Bearer o Basic) y webhookSecret por canal.
+  - compara header contra esquema configurado (Bearer o Basic) y `APLAZO_ONLINE_WEBHOOK_SECRET`.
 - Dedupe key por eventId o hash SHA-256 del body.
 - Reserva de evento en paymentEventLogs con id deterministico (provider + dedupeKey) para evitar reproceso.
 
@@ -264,14 +258,13 @@ Flags principales:
 
 - APLAZO_ENABLED
 - APLAZO_ONLINE_ENABLED
-- APLAZO_INSTORE_ENABLED
 - APLAZO_REFUNDS_ENABLED
 - APLAZO_RECONCILE_ENABLED
 
 Patron recomendado de rollout:
 
 - Desplegar con APLAZO_ENABLED=false.
-- Activar por canal gradualmente (online primero, in-store despues).
+- Activar Aplazo online cuando el contrato y webhooks esten validados.
 - Mantener refunds deshabilitado hasta certificar contrato operativo.
 
 ## 5. Evidencia de pruebas automatizadas de Aplazo

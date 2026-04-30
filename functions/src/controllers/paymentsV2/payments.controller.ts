@@ -132,39 +132,6 @@ export const createAplazoOnline = async (req: Request, res: Response) => {
   }
 };
 
-export const createAplazoInStore = async (req: Request, res: Response) => {
-  try {
-    const result = await paymentsService.createAplazoInStore(
-      getActorFromRequest(req),
-      req.body,
-      getOptionalIdempotencyKey(req),
-    );
-
-    const metadata = result.paymentAttempt.metadata || {};
-    return res.status(result.created ? 201 : 200).json({
-      ok: true,
-      paymentAttemptId: result.paymentAttempt.id,
-      provider: "aplazo",
-      flowType: "in_store",
-      status: result.paymentAttempt.status,
-      ventaPosId: result.sale.id || result.paymentAttempt.ventaPosId,
-      cartId:
-        typeof metadata.cartId === "string"
-          ? metadata.cartId
-          : result.paymentAttempt.providerReference,
-      providerReference: result.paymentAttempt.providerReference,
-      paymentLink:
-        typeof metadata.paymentLink === "string" ? metadata.paymentLink : undefined,
-      qrString: typeof metadata.qrString === "string" ? metadata.qrString : undefined,
-      qrImageUrl:
-        typeof metadata.qrImageUrl === "string" ? metadata.qrImageUrl : undefined,
-      expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
 export const getPaymentStatus = async (req: Request, res: Response) => {
   try {
     const result = await paymentsService.getPaymentStatusForActor(
@@ -303,76 +270,6 @@ export const getAplazoRefundStatus = async (req: Request, res: Response) => {
       totalRefundedAmount: result.totalRefundedAmount,
       currency: result.paymentAttempt.currency,
       refunds: serializeRefunds(result.refunds),
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
-export const registerAplazoMerchantStores = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const branches = await paymentsService.registerAplazoMerchantStores(
-      getActorFromRequest(req),
-      req.body.branches,
-    );
-
-    return res.status(200).json({
-      ok: true,
-      provider: "aplazo",
-      flowType: "in_store",
-      branches,
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
-export const resendAplazoInStoreCheckout = async (
-  req: Request,
-  res: Response,
-) => {
-  try {
-    const result = await paymentsService.resendAplazoInStoreCheckout(
-      getActorFromRequest(req),
-      {
-        cartId: req.params.cartId,
-        phoneNumber: req.body.target.phoneNumber,
-        channels: req.body.channels,
-      },
-    );
-
-    return res.status(200).json({
-      ok: true,
-      provider: "aplazo",
-      flowType: "in_store",
-      cartId: req.params.cartId,
-      result,
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
-export const generateAplazoInStoreQr = async (req: Request, res: Response) => {
-  try {
-    const result = await paymentsService.generateAplazoInStoreQr(
-      getActorFromRequest(req),
-      {
-        cartId: req.params.cartId,
-        shopId: String(req.query.shopId),
-      },
-    );
-
-    return res.status(200).json({
-      ok: true,
-      provider: "aplazo",
-      flowType: "in_store",
-      cartId: req.params.cartId,
-      checkoutUrl: result.checkoutUrl,
-      qrCode: result.qrCode,
     });
   } catch (error) {
     return respondPaymentError(res, error);
