@@ -26,21 +26,6 @@ export interface CreateOnlineProviderInput {
   pricingSnapshot: PaymentAttempt["pricingSnapshot"];
 }
 
-export interface CreateInStoreProviderInput {
-  paymentAttemptId: string;
-  idempotencyKey: string;
-  amountMinor: number;
-  currency: string;
-  providerReference?: string;
-  customerName?: string;
-  customerEmail?: string;
-  customerPhone?: string;
-  webhookUrl?: string;
-  callbackUrl?: string;
-  metadata?: Record<string, unknown>;
-  pricingSnapshot: PaymentAttempt["pricingSnapshot"];
-}
-
 export interface ProviderWebhookInput {
   rawBody: Buffer;
   headers: Record<string, string | string[] | undefined>;
@@ -67,9 +52,6 @@ export interface PaymentProvider {
   readonly provider: ProveedorPago;
 
   createOnline(input: CreateOnlineProviderInput): Promise<ProviderCreatePaymentResult>;
-  createInStore(
-    input: CreateInStoreProviderInput,
-  ): Promise<ProviderCreatePaymentResult>;
   getStatus(paymentAttempt: PaymentAttempt): Promise<ProviderStatusResult>;
   parseWebhook(
     input: ProviderWebhookInput,

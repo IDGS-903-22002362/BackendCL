@@ -51,11 +51,7 @@ import {
 } from "../middleware/validators/stripe.validator";
 import {
   aplazoAdminActionSchema,
-  aplazoGenerateQrQuerySchema,
-  aplazoInStoreCreateSchema,
   aplazoOnlineCreateSchema,
-  aplazoRegisterBranchesSchema,
-  aplazoResendCheckoutSchema,
   aplazoRefundStatusQuerySchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
@@ -459,11 +455,7 @@ const swaggerDefinition = {
       ),
       CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
       CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
-      CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
       AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
-      AplazoGenerateQrQuery: zodToJsonSchema(aplazoGenerateQrQuerySchema),
-      AplazoRegisterBranches: zodToJsonSchema(aplazoRegisterBranchesSchema),
-      AplazoResendCheckout: zodToJsonSchema(aplazoResendCheckoutSchema),
       AplazoRefundStatusQuery: zodToJsonSchema(aplazoRefundStatusQuerySchema),
       AplazoRefundStatusItem: {
         type: "object",

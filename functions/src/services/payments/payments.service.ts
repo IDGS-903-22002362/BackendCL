@@ -11,13 +11,6 @@ import {
   PaymentStatus,
   ProveedorPago,
 } from "../../models/pago.model";
-import { Producto } from "../../models/producto.model";
-import { PosSession } from "../../models/pos-session.model";
-import {
-  EstadoVentaPos,
-  VentaPos,
-  VentaPosItem,
-} from "../../models/venta-pos.model";
 import { RolUsuario } from "../../models/usuario.model";
 import logger from "../../utils/logger";
 import productService from "../product.service";
@@ -31,8 +24,6 @@ import paymentAttemptRepository, {
 import paymentEventLogRepository from "./payment-event-log.repository";
 import paymentFinalizerService from "./payment-finalizer.service";
 import paymentReconciliationService from "./payment-reconciliation.service";
-import posSaleRepository from "./pos-sale.repository";
-import posSessionRepository from "./pos-session.repository";
 import aplazoProvider from "./providers/aplazo.provider";
 import {
   isValidEmail,
@@ -49,7 +40,6 @@ const USERS_APP_COLLECTION = "usuariosApp";
 const POLL_NEXT_PENDING_SHORT_MS = 3_000;
 const POLL_NEXT_PENDING_LONG_MS = 10_000;
 const ONLINE_FALLBACK_EXPIRATION_MINUTES = 30;
-const POS_FALLBACK_EXPIRATION_MINUTES = 15;
 const STATUS_SYNC_THROTTLE_MS = 30_000;
 const IDEMPOTENCY_KEY_MIN_LENGTH = 8;
 const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
@@ -89,26 +79,6 @@ type OnlineCreateRequest = {
   cartUrl?: string;
   metadata?: Record<string, unknown>;
 };
-
-type InStoreCreateRequest = {
-  ventaPosId?: string;
-  posSessionId: string;
-  deviceId: string;
-  cajaId: string;
-  sucursalId: string;
-  vendedorUid: string;
-  customer?: PaymentCustomerInput;
-  items?: PaymentItemInput[];
-  subtotal?: number;
-  tax?: number;
-  shipping?: number;
-  total?: number;
-  amount?: number;
-  currency?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type PosSaleDraftPayload = Omit<VentaPos, "id" | "createdAt" | "updatedAt">;
 
 type BrowserReturnLookup = {
   paymentAttemptId?: string;
@@ -240,8 +210,6 @@ export class PaymentsService {
     private readonly paymentEventLogRepo = paymentEventLogRepository,
     private readonly finalizer = paymentFinalizerService,
     private readonly reconciliationService = paymentReconciliationService,
-    private readonly posSaleRepo = posSaleRepository,
-    private readonly posSessionRepo = posSessionRepository,
   ) {}
 
   async createAplazoOnline(
@@ -468,247 +436,6 @@ export class PaymentsService {
     }
   }
 
-  async createAplazoInStore(
-    actor: AuthActor,
-    request: InStoreCreateRequest,
-    headerIdempotencyKey?: string,
-  ): Promise<{ created: boolean; paymentAttempt: PaymentAttempt; sale: VentaPos }> {
-    const user = await this.requireAuthenticatedActor(actor);
-    this.assertPrivilegedPosActor(user);
-
-    const session = await this.requireOpenPosSession(request.posSessionId, user);
-    this.assertPosContextMatchesSession(request, session, user);
-
-    let sale: VentaPos;
-    let pricingSnapshot: PaymentPricingSnapshot;
-    let idempotencyKey: string;
-
-    if (request.ventaPosId) {
-      sale = await this.requireExistingPosSale(request.ventaPosId, session);
-      this.assertPosSaleAcceptsAplazoAttempt(sale);
-      pricingSnapshot = this.buildPosPricingSnapshot(sale);
-      this.assertRequestedPosAmountMatches(request, pricingSnapshot);
-
-      idempotencyKey =
-        validateIdempotencyKey(headerIdempotencyKey) ??
-        this.generateDeterministicIdempotencyKey(
-          "in_store",
-          sale.id!,
-          session.id!,
-          pricingSnapshot.totalMinor,
-          pricingSnapshot,
-        );
-
-      const existingByKey = await this.paymentAttemptRepo.findByIdempotencyKey(
-        ProveedorPago.APLAZO,
-        idempotencyKey,
-      );
-      if (existingByKey) {
-        await this.assertActorCanAccessAttempt(existingByKey, user);
-        return { created: false, paymentAttempt: existingByKey, sale };
-      }
-
-      const existingForSale = await this.findActiveAplazoAttemptForPosSale(
-        sale.id!,
-        user,
-      );
-      if (existingForSale) {
-        return { created: false, paymentAttempt: existingForSale, sale };
-      }
-    } else {
-      const normalizedItems = await this.resolvePosItems(request.items || []);
-      const draftSale = this.buildDraftPosSalePayload(
-        request,
-        session,
-        normalizedItems,
-      );
-      pricingSnapshot = this.buildPosPricingSnapshot(draftSale);
-      this.assertRequestedPosAmountMatches(request, pricingSnapshot);
-
-      idempotencyKey =
-        validateIdempotencyKey(headerIdempotencyKey) ??
-        this.generateDeterministicIdempotencyKey(
-          "in_store",
-          this.buildInStoreItemsDedupePrimaryId(
-            session,
-            draftSale,
-            pricingSnapshot,
-          ),
-          session.id!,
-          pricingSnapshot.totalMinor,
-          this.normalizePricingSnapshotForDedupe(pricingSnapshot),
-        );
-
-      const existingByKey = await this.paymentAttemptRepo.findByIdempotencyKey(
-        ProveedorPago.APLAZO,
-        idempotencyKey,
-      );
-      if (existingByKey) {
-        await this.assertActorCanAccessAttempt(existingByKey, user);
-        const existingSale = await this.requirePosSaleForAttempt(existingByKey);
-        return {
-          created: false,
-          paymentAttempt: existingByKey,
-          sale: existingSale,
-        };
-      }
-
-      sale = await this.posSaleRepo.create(draftSale);
-    }
-
-    const amountMinor = pricingSnapshot.totalMinor;
-
-    const providerReference =
-      sale.providerReference ||
-      getMetadataString(request.metadata, "cartId") ||
-      sale.id;
-    const webhookUrl = getBackendWebhookUrl();
-    const callbackUrl =
-      getAplazoConfig().inStore.callbackUrl ||
-      `${process.env.APP_URL || "http://localhost:3000"}/payments/aplazo/success`;
-    const expiresAt = Timestamp.fromDate(
-      new Date(Date.now() + POS_FALLBACK_EXPIRATION_MINUTES * 60 * 1000),
-    );
-    const customer = {
-      name: request.customer?.name || sale.customerName,
-      email: request.customer?.email || sale.customerEmail,
-      phone: request.customer?.phone || sale.customerPhone,
-    };
-
-    const attempt = await this.paymentAttemptRepo.create({
-      provider: ProveedorPago.APLAZO,
-      flowType: PaymentFlowType.IN_STORE,
-      paymentMethodCode: PaymentMethodCode.APLAZO,
-      metodoPago: MetodoPago.APLAZO,
-      ventaPosId: sale.id,
-      userId: user.uid,
-      customerId: user.uid,
-      customerName: customer.name,
-      customerEmail: customer.email,
-      customerPhone: customer.phone,
-      currency: pricingSnapshot.currency,
-      amount: pricingSnapshot.totalMinor / 100,
-      amountMinor,
-      idempotencyKey,
-      webhookUrl,
-      providerReference,
-      expiresAt,
-      pricingSnapshot,
-      metadata: {
-        ...(request.metadata || {}),
-        cartId: providerReference,
-        callbackUrl,
-      },
-      posSessionId: session.id,
-      deviceId: session.deviceId,
-      status: PaymentStatus.CREATED,
-      rawCreateRequestSanitized: sanitizeForStorage({
-        ventaPosId: sale.id,
-        posSessionId: request.posSessionId,
-        cartId: providerReference,
-        customer,
-      }),
-    });
-
-    await this.paymentAttemptRepo.update(attempt.id!, {
-      status: PaymentStatus.PENDING_PROVIDER,
-    });
-
-    let currentSale = await this.posSaleRepo.update(sale.id!, {
-      paymentAttemptId: attempt.id,
-      providerReference,
-      status: EstadoVentaPos.PENDIENTE_PAGO,
-    });
-
-    try {
-      const providerResult = await aplazoProvider.createInStore({
-        paymentAttemptId: attempt.id!,
-        idempotencyKey,
-        amountMinor,
-        currency: pricingSnapshot.currency,
-        providerReference,
-        customerName: customer.name,
-        customerEmail: customer.email,
-        customerPhone: customer.phone,
-        webhookUrl,
-        callbackUrl,
-        metadata: {
-          ventaPosId: sale.id,
-          posSessionId: session.id,
-          cajaId: session.cajaId,
-          sucursalId: session.sucursalId,
-          vendedorUid: session.vendedorUid,
-          cartId: providerReference,
-          ...(request.metadata || {}),
-        },
-        pricingSnapshot,
-      });
-
-      const resolvedProviderReference =
-        providerResult.providerReference || providerReference;
-      const updated = await this.paymentAttemptRepo.update(attempt.id!, {
-        status: providerResult.status,
-        providerStatus: providerResult.providerStatus,
-        providerPaymentId: providerResult.providerPaymentId,
-        providerLoanId: providerResult.providerLoanId,
-        providerReference: resolvedProviderReference,
-        redirectUrl: providerResult.paymentLink,
-        expiresAt: providerResult.expiresAt
-          ? Timestamp.fromDate(providerResult.expiresAt)
-          : attempt.expiresAt,
-        rawCreateRequestSanitized: providerResult.rawRequestSanitized,
-        rawCreateResponseSanitized: providerResult.rawResponseSanitized,
-        metadata: {
-          ...(attempt.metadata || {}),
-          cartId: resolvedProviderReference,
-          paymentLink: providerResult.paymentLink,
-          qrString: providerResult.qrString,
-          qrImageUrl: providerResult.qrImageUrl,
-        },
-      });
-
-      const updatedSale = await this.posSaleRepo.update(sale.id!, {
-        paymentAttemptId: updated.id,
-        providerReference: resolvedProviderReference,
-        status: EstadoVentaPos.PENDIENTE_PAGO,
-      });
-
-      currentSale = updatedSale;
-
-      return {
-        created: true,
-        paymentAttempt: updated,
-        sale: currentSale,
-      };
-    } catch (error) {
-      if (
-        error instanceof PaymentApiError &&
-        error.code === "PAYMENT_PROVIDER_TIMEOUT"
-      ) {
-        const timeoutAttempt = await this.paymentAttemptRepo.update(attempt.id!, {
-          status: PaymentStatus.PENDING_PROVIDER,
-          providerStatus: "timeout",
-        });
-        return {
-          created: true,
-          paymentAttempt: timeoutAttempt,
-          sale: currentSale,
-        };
-      }
-
-      await this.paymentAttemptRepo.update(attempt.id!, {
-        status: PaymentStatus.FAILED,
-        providerStatus: "create_failed",
-        failedAt: Timestamp.now(),
-      });
-      await this.posSaleRepo.markStatus(sale.id!, EstadoVentaPos.FALLIDA, {
-        paymentAttemptId: attempt.id,
-        providerReference,
-      });
-      throw error;
-    }
-  }
-
   async handleAplazoWebhook(input: {
     rawBody: Buffer;
     headers: Record<string, string | string[] | undefined>;
@@ -786,6 +513,7 @@ export class PaymentsService {
       !this.isTerminalStatus(currentStatus) &&
       this.shouldSyncStatus(effectiveAttempt)
     ) {
+      this.assertAplazoOnlineAttempt(effectiveAttempt);
       effectiveAttempt = await this.reconciliationService.reconcilePaymentAttempt(
         paymentAttemptId,
         user.uid,
@@ -810,6 +538,15 @@ export class PaymentsService {
   ): Promise<PaymentAttempt> {
     const user = await this.requireAuthenticatedActor(actor);
     this.assertPrivilegedPosActor(user);
+    const attempt = await this.requirePaymentAttempt(paymentAttemptId);
+    if (attempt.provider !== ProveedorPago.APLAZO) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El endpoint de reconciliación manual solo soporta Aplazo",
+      );
+    }
+    this.assertAplazoOnlineAttempt(attempt);
     return this.reconciliationService.reconcilePaymentAttempt(
       paymentAttemptId,
       user.uid,
@@ -838,6 +575,8 @@ export class PaymentsService {
         "El endpoint de cancelación manual solo soporta Aplazo",
       );
     }
+
+    this.assertAplazoOnlineAttempt(attempt);
 
     const providerStatus = await aplazoProvider.cancelOrVoid({
       paymentAttempt: attempt,
@@ -880,6 +619,8 @@ export class PaymentsService {
         "El endpoint de refund manual solo soporta Aplazo",
       );
     }
+
+    this.assertAplazoOnlineAttempt(attempt);
 
     const config = getAplazoConfig();
     if (!config.refundsEnabled) {
@@ -939,6 +680,8 @@ export class PaymentsService {
       );
     }
 
+    this.assertAplazoOnlineAttempt(attempt);
+
     if (!aplazoProvider.getRefundStatus) {
       throw new PaymentApiError(
         409,
@@ -985,65 +728,6 @@ export class PaymentsService {
           ? updatedAttempt.refundAmount
         : 0,
     };
-  }
-
-  async registerAplazoMerchantStores(
-    actor: AuthActor,
-    branches: string[],
-  ): Promise<Record<string, unknown>[]> {
-    const user = await this.requireAuthenticatedActor(actor);
-    if (user.rol !== RolUsuario.ADMIN) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "Solo ADMIN puede registrar sucursales Aplazo",
-      );
-    }
-
-    return aplazoProvider.registerMerchantStores(branches);
-  }
-
-  async resendAplazoInStoreCheckout(
-    actor: AuthActor,
-    input: {
-      cartId: string;
-      phoneNumber: string;
-      channels: Array<"WHATSAPP" | "SMS">;
-    },
-  ): Promise<Record<string, unknown>> {
-    const user = await this.requireAuthenticatedActor(actor);
-    if (!isPrivileged(user.rol)) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "Solo ADMIN o EMPLEADO puede reenviar checkout Aplazo in-store",
-      );
-    }
-
-    return aplazoProvider.resendInStoreCheckout(input);
-  }
-
-  async generateAplazoInStoreQr(
-    actor: AuthActor,
-    input: {
-      cartId: string;
-      shopId: string;
-    },
-  ): Promise<{
-    checkoutUrl?: string;
-    qrCode?: string;
-    rawResponseSanitized: Record<string, unknown>;
-  }> {
-    const user = await this.requireAuthenticatedActor(actor);
-    if (!isPrivileged(user.rol)) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "Solo ADMIN o EMPLEADO puede generar QR Aplazo in-store",
-      );
-    }
-
-    return aplazoProvider.generateInStoreQr(input);
   }
 
   async resolveBrowserReturnState(
@@ -1340,89 +1024,8 @@ export class PaymentsService {
     };
   }
 
-  private buildPosPricingSnapshot(
-    sale: Pick<
-      VentaPos,
-      | "subtotalMinor"
-      | "taxMinor"
-      | "shippingMinor"
-      | "totalMinor"
-      | "currency"
-      | "items"
-    >,
-  ): PaymentPricingSnapshot {
-    return {
-      subtotalMinor: sale.subtotalMinor,
-      taxMinor: sale.taxMinor,
-      shippingMinor: sale.shippingMinor,
-      totalMinor: sale.totalMinor,
-      currency: sale.currency,
-      items: sale.items.map((item) => ({
-        productoId: item.productoId,
-        cantidad: item.cantidad,
-        precioUnitarioMinor: roundToMinor(item.precioUnitario),
-        subtotalMinor: roundToMinor(item.subtotal),
-        tallaId: item.tallaId,
-      })),
-    };
-  }
-
-  private normalizePricingSnapshotForDedupe(
-    pricingSnapshot: PaymentPricingSnapshot,
-  ): PaymentPricingSnapshot {
-    return {
-      ...pricingSnapshot,
-      items: [...pricingSnapshot.items].sort((left, right) => {
-        const leftKey = `${left.productoId}:${left.tallaId || "_"}`;
-        const rightKey = `${right.productoId}:${right.tallaId || "_"}`;
-        if (leftKey !== rightKey) {
-          return leftKey.localeCompare(rightKey);
-        }
-
-        return left.cantidad - right.cantidad;
-      }),
-    };
-  }
-
-  private buildInStoreItemsDedupePrimaryId(
-    session: PosSession,
-    draftSale: PosSaleDraftPayload,
-    pricingSnapshot: PaymentPricingSnapshot,
-  ): string {
-    const customerPhone = normalizeMxPhoneForAplazo(draftSale.customerPhone);
-    const seed = {
-      posSessionId: session.id,
-      vendedorUid: session.vendedorUid,
-      customerPhone,
-      currency: draftSale.currency,
-      amountMinor: pricingSnapshot.totalMinor,
-      items: this.normalizePricingSnapshotForDedupe(pricingSnapshot).items,
-    };
-    const digest = createHash("sha256")
-      .update(JSON.stringify(seed))
-      .digest("hex");
-
-    return `pos_items_${digest.slice(0, 48)}`;
-  }
-
-  private assertRequestedPosAmountMatches(
-    request: InStoreCreateRequest,
-    pricingSnapshot: PaymentPricingSnapshot,
-  ): void {
-    if (
-      typeof request.amount === "number" &&
-      roundToMinor(request.amount) !== pricingSnapshot.totalMinor
-    ) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_AMOUNT_MISMATCH",
-        "El monto enviado por POS no coincide con el cálculo del backend",
-      );
-    }
-  }
-
   private generateDeterministicIdempotencyKey(
-    flow: "online" | "in_store",
+    flow: "online",
     primaryId: string,
     actorKey: string,
     amountMinor: number,
@@ -1442,7 +1045,21 @@ export class PaymentsService {
       throw new PaymentApiError(
         403,
         "PAYMENT_FORBIDDEN",
-        "El flujo in-store solo está disponible para personal autorizado",
+        "Solo personal autorizado puede operar pagos Aplazo",
+      );
+    }
+  }
+
+  private assertAplazoOnlineAttempt(attempt: PaymentAttempt): void {
+    if (attempt.flowType === PaymentFlowType.IN_STORE) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_FLOW_UNSUPPORTED",
+        "Las APIs Aplazo in-store ya no están disponibles; este endpoint solo soporta Aplazo online",
+        {
+          paymentAttemptId: attempt.id,
+          flowType: attempt.flowType,
+        },
       );
     }
   }
@@ -1508,281 +1125,6 @@ export class PaymentsService {
 
       return Number(right.refundId || 0) - Number(left.refundId || 0);
     })[0];
-  }
-
-  private async requireOpenPosSession(
-    posSessionId: string,
-    actor: AuthActor,
-  ): Promise<PosSession & { id: string }> {
-    const session = await this.posSessionRepo.getOpenSession(posSessionId);
-    if (!session) {
-      throw new PaymentApiError(
-        404,
-        "PAYMENT_POS_SESSION_NOT_FOUND",
-        `La sesión POS ${posSessionId} no existe o no está abierta`,
-      );
-    }
-
-    if (actor.rol === RolUsuario.EMPLEADO && session.vendedorUid !== actor.uid) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "La sesión POS pertenece a otro vendedor",
-      );
-    }
-
-    return session as PosSession & { id: string };
-  }
-
-  private assertPosContextMatchesSession(
-    request: InStoreCreateRequest,
-    session: PosSession,
-    actor: AuthActor,
-  ): void {
-    if (request.deviceId !== session.deviceId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "deviceId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.cajaId !== session.cajaId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "cajaId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.sucursalId !== session.sucursalId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "sucursalId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.vendedorUid !== session.vendedorUid) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "vendedorUid no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (actor.rol === RolUsuario.EMPLEADO && request.vendedorUid !== actor.uid) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "No puedes crear intentos POS a nombre de otro vendedor",
-      );
-    }
-  }
-
-  private async requireExistingPosSale(
-    ventaPosId: string,
-    session: PosSession,
-  ): Promise<VentaPos> {
-    const sale = await this.posSaleRepo.getById(ventaPosId);
-    if (!sale) {
-      throw new PaymentApiError(
-        404,
-        "PAYMENT_POS_SALE_NOT_FOUND",
-        `Venta POS ${ventaPosId} no encontrada`,
-      );
-    }
-
-    if (sale.posSessionId !== session.id) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "La venta POS no pertenece a la sesión de caja indicada",
-      );
-    }
-
-    return sale;
-  }
-
-  private assertPosSaleAcceptsAplazoAttempt(sale: VentaPos): void {
-    if (
-      sale.status !== EstadoVentaPos.PAGADA &&
-      sale.status !== EstadoVentaPos.CANCELADA &&
-      sale.status !== EstadoVentaPos.EXPIRADA
-    ) {
-      return;
-    }
-
-    throw new PaymentApiError(
-      409,
-      "PAYMENT_POS_SALE_TERMINAL",
-      `La venta POS ${sale.id} ya está en estado terminal ${sale.status}`,
-      {
-        ventaPosId: sale.id,
-        status: sale.status,
-      },
-    );
-  }
-
-  private async findActiveAplazoAttemptForPosSale(
-    ventaPosId: string,
-    actor: AuthActor,
-  ): Promise<PaymentAttempt | null> {
-    const existing = await this.paymentAttemptRepo.findLatestByVentaPosAndFlow(
-      ProveedorPago.APLAZO,
-      ventaPosId,
-      PaymentFlowType.IN_STORE,
-    );
-    if (!existing || this.isTerminalStatus(toPaymentStatus(existing))) {
-      return null;
-    }
-
-    await this.assertActorCanAccessAttempt(existing, actor);
-    return existing;
-  }
-
-  private async requirePosSaleForAttempt(
-    paymentAttempt: PaymentAttempt,
-  ): Promise<VentaPos> {
-    if (!paymentAttempt.ventaPosId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_POS_SALE_NOT_FOUND",
-        "El intento in-store existente no está asociado a una venta POS",
-      );
-    }
-
-    const sale = await this.posSaleRepo.getById(paymentAttempt.ventaPosId);
-    if (!sale) {
-      throw new PaymentApiError(
-        404,
-        "PAYMENT_POS_SALE_NOT_FOUND",
-        `Venta POS ${paymentAttempt.ventaPosId} no encontrada`,
-      );
-    }
-
-    return sale;
-  }
-
-  private buildDraftPosSalePayload(
-    request: InStoreCreateRequest,
-    session: PosSession,
-    normalizedItems: VentaPosItem[],
-  ): PosSaleDraftPayload {
-    if (!request.items || request.items.length === 0) {
-      throw new PaymentApiError(
-        400,
-        "PAYMENT_VALIDATION_ERROR",
-        "Se requieren items o ventaPosId para crear un intento in-store",
-      );
-    }
-
-    const subtotalMinor = normalizedItems.reduce(
-      (acc, item) => acc + roundToMinor(item.subtotal),
-      0,
-    );
-    const taxMinor = 0;
-    const shippingMinor = 0;
-    const totalMinor = subtotalMinor + taxMinor + shippingMinor;
-
-    return {
-      posSessionId: session.id!,
-      deviceId: session.deviceId,
-      cajaId: session.cajaId,
-      sucursalId: session.sucursalId,
-      vendedorUid: session.vendedorUid,
-      customerName: request.customer?.name,
-      customerEmail: request.customer?.email,
-      customerPhone: request.customer?.phone,
-      currency: (request.currency || "mxn").toLowerCase(),
-      subtotal: subtotalMinor / 100,
-      tax: taxMinor / 100,
-      shipping: shippingMinor / 100,
-      total: totalMinor / 100,
-      subtotalMinor,
-      taxMinor,
-      shippingMinor,
-      totalMinor,
-      status: EstadoVentaPos.BORRADOR,
-      items: normalizedItems,
-      metadata: request.metadata || {},
-    };
-  }
-
-  private async resolvePosItems(items: PaymentItemInput[]): Promise<VentaPosItem[]> {
-    const requestedByVariant = new Map<string, number>();
-    const normalizedItems: VentaPosItem[] = [];
-
-    for (const item of items) {
-      const product = await productService.getProductById(item.productoId);
-      if (!product || !product.activo) {
-        throw new PaymentApiError(
-          404,
-          "PAYMENT_VALIDATION_ERROR",
-          `Producto ${item.productoId} no encontrado o inactivo`,
-        );
-      }
-
-      const stockContext = this.resolveProductStock(product, item);
-      const variantKey = `${item.productoId}:${stockContext.tallaId || "_"}`;
-      const requestedTotal =
-        (requestedByVariant.get(variantKey) ?? 0) + item.cantidad;
-      if (requestedTotal > stockContext.available) {
-        throw new PaymentApiError(
-          409,
-          "PAYMENT_VALIDATION_ERROR",
-          `Stock insuficiente para ${product.descripcion}`,
-        );
-      }
-      requestedByVariant.set(variantKey, requestedTotal);
-
-      normalizedItems.push({
-        productoId: item.productoId,
-        cantidad: item.cantidad,
-        precioUnitario: product.precioPublico,
-        subtotal: Number((product.precioPublico * item.cantidad).toFixed(2)),
-        tallaId: stockContext.tallaId,
-      });
-    }
-
-    return normalizedItems;
-  }
-
-  private resolveProductStock(
-    product: Producto,
-    item: PaymentItemInput,
-  ): { available: number; tallaId?: string } {
-    const normalizedTallaId = item.tallaId?.trim();
-    if (!product.tallaIds.length) {
-      if (normalizedTallaId) {
-        throw new PaymentApiError(
-          409,
-          "PAYMENT_VALIDATION_ERROR",
-          `El producto ${item.productoId} no maneja inventario por talla`,
-        );
-      }
-
-      return {
-        available: Math.max(0, Math.floor(Number(product.existencias || 0))),
-      };
-    }
-
-    if (!normalizedTallaId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        `Se requiere tallaId para ${product.descripcion}`,
-      );
-    }
-
-    const variant = product.inventarioPorTalla.find(
-      (entry) => entry.tallaId === normalizedTallaId,
-    );
-
-    return {
-      available: Math.max(0, Math.floor(Number(variant?.cantidad || 0))),
-      tallaId: normalizedTallaId,
-    };
   }
 
   private async assertActorCanAccessAttempt(
