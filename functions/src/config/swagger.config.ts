@@ -69,6 +69,10 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import {
+  createBeneficioSchema,
+  updateBeneficioSchema,
+} from "../middleware/validators/beneficio.validator";
 import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
 import {
@@ -160,6 +164,10 @@ const swaggerDefinition = {
     {
       name: "News",
       description: "Gestión de noticias del sistema",
+    },
+    {
+      name: "Beneficios",
+      description: "Gestión de publicaciones informativas de beneficios",
     },
     {
       name: "Gallery",
@@ -325,6 +333,8 @@ const swaggerDefinition = {
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+      CreateBenefit: zodToJsonSchema(createBeneficioSchema),
+      UpdateBenefit: zodToJsonSchema(updateBeneficioSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
       CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
@@ -938,6 +948,32 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
+      },
+      Benefit: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "benefit_12345" },
+          titulo: {
+            type: "string",
+            example: "Descuento especial en taquilla",
+          },
+          descripcion: {
+            type: "string",
+            example: "Presenta tu membresia y recibe un beneficio exclusivo.",
+          },
+          estatus: { type: "boolean", example: true },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:00:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:30:00Z",
+          },
+        },
+      },
       FavoritoProductSummary: {
         type: "object",
         properties: {
@@ -985,7 +1021,6 @@ const swaggerDefinition = {
           },
         },
         required: ["id", "usuarioId", "createdAt", "producto"],
-      },
       },
       DetalleProducto: {
         type: "object",
