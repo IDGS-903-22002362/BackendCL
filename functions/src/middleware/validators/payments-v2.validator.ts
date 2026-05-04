@@ -52,7 +52,7 @@ export const paymentAttemptStatusParamSchema = z.object({
 export const aplazoAdminActionSchema = z
   .object({
     reason: z.string().trim().max(500).optional(),
-    refundAmountMinor: z.number().int().positive().optional(),
+    refundAmountMinor: z.number().int().optional(),
   })
   .strict();
 

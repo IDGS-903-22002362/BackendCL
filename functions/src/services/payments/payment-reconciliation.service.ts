@@ -114,6 +114,117 @@ export class PaymentReconciliationService {
     });
   }
 
+  private async cancelExpiredAplazoAttempt(
+    attempt: PaymentAttempt,
+  ): Promise<PaymentAttempt> {
+    if (!attempt.id) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ATTEMPT_NOT_FOUND",
+        "El intento Aplazo expirado no tiene identificador",
+      );
+    }
+
+    const providerStatus = await aplazoProvider.getStatus(attempt);
+
+    if (
+      providerStatus.status === PaymentStatus.PAID ||
+      providerStatus.status === PaymentStatus.FAILED ||
+      providerStatus.status === PaymentStatus.CANCELED ||
+      providerStatus.status === PaymentStatus.EXPIRED
+    ) {
+      return this.finalizer.finalizeTerminalStatus(
+        attempt,
+        providerStatus.status,
+        {
+          source: "reconcile",
+          requestedBy: "scheduler-expiration-check",
+          providerResult: providerStatus,
+        },
+      );
+    }
+
+    if (providerStatus.status !== PaymentStatus.PENDING_CUSTOMER) {
+      return this.paymentAttemptRepo.update(attempt.id, {
+        status: providerStatus.status,
+        providerStatus: providerStatus.providerStatus ?? attempt.providerStatus,
+        providerPaymentId:
+          providerStatus.providerPaymentId ?? attempt.providerPaymentId,
+        providerLoanId:
+          providerStatus.providerLoanId ?? attempt.providerLoanId,
+        providerReference:
+          providerStatus.providerReference ?? attempt.providerReference,
+        metadata: {
+          ...(attempt.metadata || {}),
+          lastExpirationCancelSkippedAt: Timestamp.now(),
+          lastExpirationCancelSkippedStatus: providerStatus.status,
+          ...(providerStatus.providerStatus
+            ? {
+                lastExpirationCancelSkippedProviderStatus:
+                  providerStatus.providerStatus,
+              }
+            : {}),
+        },
+      });
+    }
+
+    const cancelResult = await aplazoProvider.cancelOrVoid({
+      paymentAttempt: {
+        ...attempt,
+        providerPaymentId:
+          providerStatus.providerPaymentId ?? attempt.providerPaymentId,
+        providerLoanId: providerStatus.providerLoanId ?? attempt.providerLoanId,
+        providerReference:
+          providerStatus.providerReference ?? attempt.providerReference,
+        providerStatus: providerStatus.providerStatus ?? attempt.providerStatus,
+      },
+      reason: "expired_by_timeout",
+    });
+
+    if (
+      cancelResult.status === PaymentStatus.CANCELED ||
+      cancelResult.status === PaymentStatus.REFUNDED
+    ) {
+      return this.finalizer.finalizeTerminalStatus(
+        attempt,
+        PaymentStatus.CANCELED,
+        {
+          source: "timeout",
+          requestedBy: "scheduler",
+          cancelReason: "expired_by_timeout",
+          providerResult: cancelResult,
+        },
+      );
+    }
+
+    return this.paymentAttemptRepo.update(attempt.id, {
+      status: cancelResult.status,
+      providerStatus: cancelResult.providerStatus ?? attempt.providerStatus,
+      providerPaymentId:
+        cancelResult.providerPaymentId ?? attempt.providerPaymentId,
+      providerLoanId: cancelResult.providerLoanId ?? attempt.providerLoanId,
+      providerReference:
+        cancelResult.providerReference ?? attempt.providerReference,
+      metadata: {
+        ...(attempt.metadata || {}),
+        lastExpirationCancelAttemptAt: Timestamp.now(),
+        lastExpirationCancelResultStatus: cancelResult.status,
+        ...(cancelResult.providerStatus
+          ? {
+              lastExpirationCancelResultProviderStatus:
+                cancelResult.providerStatus,
+            }
+          : {}),
+        ...(cancelResult.rawResponseSanitized
+          ? {
+              lastExpirationCancelProviderResponse:
+                cancelResult.rawResponseSanitized,
+            }
+          : {}),
+      },
+    });
+  }
+
   async runScheduledReconciliation(): Promise<{
     processedAttempts: number;
     processedEvents: number;
@@ -162,37 +273,7 @@ export class PaymentReconciliationService {
             );
 
         if (effectiveExpiration.getTime() <= Date.now()) {
-          try {
-            await this.reconcilePaymentAttempt(
-              candidate.id,
-              "scheduler-expiration-check",
-            );
-          } catch (error) {
-            reconciliationLogger.warn("payment_expiration_provider_check_failed", {
-              paymentAttemptId: candidate.id,
-              errorMessage: error instanceof Error ? error.message : "Error desconocido",
-            });
-          }
-
-          const refreshed = await this.paymentAttemptRepo.getById(candidate.id);
-          const refreshedStatus =
-            refreshed?.status ?? mapLegacyEstadoToPaymentStatus(refreshed?.estado);
-          if (
-            refreshed &&
-            refreshedStatus !== PaymentStatus.PAID &&
-            refreshedStatus !== PaymentStatus.CANCELED &&
-            refreshedStatus !== PaymentStatus.EXPIRED &&
-            refreshedStatus !== PaymentStatus.FAILED
-          ) {
-            await this.finalizer.finalizeTerminalStatus(
-              refreshed,
-              PaymentStatus.EXPIRED,
-              {
-                source: "timeout",
-                requestedBy: "scheduler",
-              },
-            );
-          }
+          await this.cancelExpiredAplazoAttempt(candidate);
         } else {
           await this.reconcilePaymentAttempt(candidate.id, "scheduler");
         }

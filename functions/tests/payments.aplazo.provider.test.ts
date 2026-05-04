@@ -980,7 +980,7 @@ describe("Aplazo provider", () => {
     expect(result.providerReference).toBe("cart-id-321");
   });
 
-  it("preserves LOAN_BAD_STATUS when online cancel is rejected by provider", async () => {
+  it("treats LOAN_BAD_STATUS with CANCELLED provider state as idempotent cancel", async () => {
     const authClient = buildClientMock();
     const refundsClient = buildClientMock();
     authClient.post.mockResolvedValue({
@@ -1010,8 +1010,7 @@ describe("Aplazo provider", () => {
       .mockReturnValueOnce(authClient)
       .mockReturnValueOnce(refundsClient);
 
-    await expect(
-      aplazoProvider.cancelOrVoid({
+    const result = await aplazoProvider.cancelOrVoid({
         paymentAttempt: {
           id: "attempt_cancel_bad_status",
           ordenId: "orden_123",
@@ -1028,25 +1027,18 @@ describe("Aplazo provider", () => {
           updatedAt: {} as any,
           providerReference: "cart-id-321",
         },
-      }),
-    ).rejects.toMatchObject({
-      code: "PAYMENT_PROVIDER_ERROR",
-      message: "LOAN BAD STATUS",
-      details: {
-        providerHttpStatus: 400,
-        providerCode: "LOAN_BAD_STATUS",
-        providerUrl: "/v1/merchant/loan/cancel",
-        providerResponse: {
-          code: "LOAN_BAD_STATUS",
-          data: {
-            status: "CANCELLED",
-          },
-          error: "LOAN BAD STATUS",
-          timestamp: 1734637318072,
-          message: "LOAN BAD STATUS",
-          path: "/api/v1/merchant/loan/cancel",
+    });
+
+    expect(result).toMatchObject({
+      status: PaymentStatus.CANCELED,
+      providerStatus: "CANCELLED",
+      providerReference: "cart-id-321",
+      rawResponseSanitized: expect.objectContaining({
+        code: "LOAN_BAD_STATUS",
+        data: {
+          status: "CANCELLED",
         },
-      },
+      }),
     });
   });
 
