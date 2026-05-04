@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { ZodError, ZodSchema } from "zod";
+import { RolUsuario } from "../models/usuario.model";
 
 /**
  * Middleware para validar el body de la petición usando un schema de Zod.
@@ -32,6 +33,18 @@ export const validateBody = (schema: ZodSchema) => {
       // Error inesperado, pasar al error handler global
       next(error);
     }
+  };
+};
+export const verifyRole = (allowedRoles: RolUsuario[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user;
+    if (!user || !allowedRoles.includes(user.rol)) {
+      return res.status(403).json({
+        success: false,
+        message: "No tienes permisos para acceder a este recurso",
+      });
+    }
+    return next();
   };
 };
 
