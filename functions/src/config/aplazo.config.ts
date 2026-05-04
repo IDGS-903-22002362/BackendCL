@@ -1,8 +1,7 @@
 import { ApiError } from "../utils/error-handler";
 
-export type AplazoChannel = "online" | "in_store";
+export type AplazoChannel = "online";
 export type AplazoWebhookAuthScheme = "Bearer" | "Basic";
-export type AplazoCommunicationChannel = "q" | "w" | "s";
 
 export interface AplazoChannelConfig {
   enabled: boolean;
@@ -18,8 +17,6 @@ export interface AplazoChannelConfig {
   cancelUrl?: string;
   failureUrl?: string;
   cartUrl?: string;
-  callbackUrl?: string;
-  defaultCommChannel?: AplazoCommunicationChannel;
 }
 
 export interface AplazoConfig {
@@ -29,7 +26,6 @@ export interface AplazoConfig {
   refundsEnabled: boolean;
   reconcileEnabled: boolean;
   online: AplazoChannelConfig;
-  inStore: AplazoChannelConfig;
 }
 
 const getBoolean = (name: string, fallback: boolean): boolean => {
@@ -67,19 +63,6 @@ const getWebhookAuthScheme = (
   return value === "basic" ? "Basic" : "Bearer";
 };
 
-const getCommChannel = (
-  name: string,
-): AplazoCommunicationChannel | undefined => {
-  const value = getOptional(name)?.toLowerCase();
-  if (!value) {
-    return undefined;
-  }
-
-  return value === "w" || value === "s" || value === "q"
-    ? value
-    : undefined;
-};
-
 export const getAplazoConfig = (): AplazoConfig => {
   return {
     enabled: getBoolean("APLAZO_ENABLED", false),
@@ -104,28 +87,14 @@ export const getAplazoConfig = (): AplazoConfig => {
       failureUrl: getOptional("APLAZO_ONLINE_FAILURE_URL"),
       cartUrl: getOptional("APLAZO_ONLINE_CART_URL"),
     },
-    inStore: {
-      enabled: getBoolean("APLAZO_INSTORE_ENABLED", false),
-      baseUrl: getOptional("APLAZO_INSTORE_BASE_URL"),
-      merchantBaseUrl: getOptional("APLAZO_INSTORE_MERCHANT_BASE_URL"),
-      merchantId: getOptional("APLAZO_INSTORE_MERCHANT_ID"),
-      apiToken: getOptional("APLAZO_INSTORE_API_TOKEN"),
-      webhookSecret: getOptional("APLAZO_INSTORE_WEBHOOK_SECRET"),
-      webhookAuthScheme:
-        getWebhookAuthScheme("APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME") || "Bearer",
-      timeoutMs: getNumber("APLAZO_INSTORE_TIMEOUT_MS", 15000),
-      callbackUrl: getOptional("APLAZO_INSTORE_CALLBACK_URL"),
-      defaultCommChannel:
-        getCommChannel("APLAZO_INSTORE_DEFAULT_COMM_CHANNEL") || "q",
-    },
   };
 };
 
 export const assertAplazoEnabled = (channel: AplazoChannel): AplazoConfig => {
   const config = getAplazoConfig();
-  const channelConfig = channel === "online" ? config.online : config.inStore;
+  const channelConfig = channel === "online" ? config.online : undefined;
 
-  if (!config.enabled || !channelConfig.enabled) {
+  if (!config.enabled || !channelConfig?.enabled) {
     throw new ApiError(503, "APLAZO_DISABLED");
   }
 

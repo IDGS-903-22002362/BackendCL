@@ -45,35 +45,6 @@ export const aplazoOnlineCreateSchema = z
   })
   .strict();
 
-export const aplazoInStoreCreateSchema = z
-  .object({
-    ventaPosId: z.string().trim().min(1).max(120).optional(),
-    posSessionId: z.string().trim().min(1).max(120),
-    deviceId: z.string().trim().min(1).max(120),
-    cajaId: z.string().trim().min(1).max(120),
-    sucursalId: z.string().trim().min(1).max(120),
-    vendedorUid: z.string().trim().min(1).max(120),
-    customer: paymentCustomerSchema.optional(),
-    items: z.array(paymentItemInputSchema).max(100).optional(),
-    subtotal: z.number().nonnegative().optional(),
-    tax: z.number().nonnegative().optional(),
-    shipping: z.number().nonnegative().optional(),
-    total: z.number().nonnegative().optional(),
-    amount: z.number().nonnegative().optional(),
-    currency: z.string().trim().min(3).max(3).optional(),
-    metadata: z.record(metadataValueSchema).optional(),
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (!value.ventaPosId && (!value.items || value.items.length === 0)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["items"],
-        message: "Se requiere ventaPosId o items para crear el intento POS",
-      });
-    }
-  });
-
 export const paymentAttemptStatusParamSchema = z.object({
   paymentAttemptId: z.string().trim().min(1).max(120),
 });
@@ -82,6 +53,12 @@ export const aplazoAdminActionSchema = z
   .object({
     reason: z.string().trim().max(500).optional(),
     refundAmountMinor: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export const aplazoRefundStatusQuerySchema = z
+  .object({
+    refundId: z.string().trim().min(1).max(120).optional(),
   })
   .strict();
 

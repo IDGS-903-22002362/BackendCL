@@ -2,7 +2,6 @@ import pagoService from "../../pago.service";
 import { ProveedorPago, RefundState } from "../../../models/pago.model";
 import { PaymentProvider } from "../payment-provider.interface";
 import {
-  CreateInStoreProviderInput,
   CreateOnlineProviderInput,
   ProviderCancelOrVoidInput,
   ProviderRefundInput,
@@ -48,9 +47,7 @@ export class StripeProvider implements PaymentProvider {
     );
   }
 
-  async createInStore(
-    _input: CreateInStoreProviderInput,
-  ): Promise<ProviderCreatePaymentResult> {
+  async createInStore(_input: unknown): Promise<ProviderCreatePaymentResult> {
     throw new PaymentApiError(
       409,
       "PAYMENT_PROVIDER_UNSUPPORTED",

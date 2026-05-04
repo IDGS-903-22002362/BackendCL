@@ -36,6 +36,24 @@ const serializeDateLike = (value: unknown): unknown => {
   return value;
 };
 
+const serializeRefunds = (
+  refunds: Array<{
+    refundId?: string;
+    providerStatus?: string;
+    refundState?: string;
+    refundDate?: string;
+    amountMinor?: number;
+  }>,
+) =>
+  refunds.map((refund) => ({
+    id: refund.refundId,
+    status: refund.providerStatus,
+    refundState: refund.refundState,
+    refundDate: refund.refundDate,
+    amount:
+      typeof refund.amountMinor === "number" ? refund.amountMinor / 100 : undefined,
+  }));
+
 const toStatusPayload = (
   paymentAttemptId: string,
   paymentAttempt: {
@@ -107,33 +125,6 @@ export const createAplazoOnline = async (req: Request, res: Response) => {
       status: result.paymentAttempt.status,
       redirectUrl: result.paymentAttempt.redirectUrl,
       checkoutUrl: result.paymentAttempt.redirectUrl,
-      expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
-export const createAplazoInStore = async (req: Request, res: Response) => {
-  try {
-    const result = await paymentsService.createAplazoInStore(
-      getActorFromRequest(req),
-      req.body,
-      getOptionalIdempotencyKey(req),
-    );
-
-    const metadata = result.paymentAttempt.metadata || {};
-    return res.status(result.created ? 201 : 200).json({
-      ok: true,
-      paymentAttemptId: result.paymentAttempt.id,
-      provider: "aplazo",
-      flowType: "in_store",
-      status: result.paymentAttempt.status,
-      paymentLink:
-        typeof metadata.paymentLink === "string" ? metadata.paymentLink : undefined,
-      qrString: typeof metadata.qrString === "string" ? metadata.qrString : undefined,
-      qrImageUrl:
-        typeof metadata.qrImageUrl === "string" ? metadata.qrImageUrl : undefined,
       expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
     });
   } catch (error) {
@@ -247,6 +238,38 @@ export const refundAplazoPayment = async (req: Request, res: Response) => {
       provider: "aplazo",
       status: paymentAttempt.status,
       refundState: paymentAttempt.refundState,
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const getAplazoRefundStatus = async (req: Request, res: Response) => {
+  try {
+    const result = await paymentsService.getAplazoRefundStatus(
+      req.params.paymentAttemptId,
+      getActorFromRequest(req),
+      {
+        refundId:
+          typeof req.query?.refundId === "string" ? req.query.refundId : undefined,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      paymentAttemptId: result.paymentAttempt.id,
+      provider: "aplazo",
+      status: result.paymentAttempt.status,
+      refundState: result.paymentAttempt.refundState,
+      providerStatus: result.selectedRefund?.providerStatus,
+      refundId: result.selectedRefund?.refundId ?? result.paymentAttempt.refundId,
+      refundAmount:
+        typeof result.selectedRefund?.amountMinor === "number"
+          ? result.selectedRefund.amountMinor / 100
+          : undefined,
+      totalRefundedAmount: result.totalRefundedAmount,
+      currency: result.paymentAttempt.currency,
+      refunds: serializeRefunds(result.refunds),
     });
   } catch (error) {
     return respondPaymentError(res, error);
