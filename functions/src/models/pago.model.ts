@@ -162,6 +162,8 @@ export interface Pago {
   paidAt?: Timestamp; // Fecha canonical de pago confirmado
   failedAt?: Timestamp; // Fecha canonical de fallo
   canceledAt?: Timestamp; // Fecha canonical de cancelación
+  cancelReason?: string; // Motivo canonical de cancelación
+  canceledBy?: string; // Actor que solicitó/procesó la cancelación
   expiredAt?: Timestamp; // Fecha canonical de expiración
 
   // Referencias internas
@@ -188,6 +190,12 @@ export interface Pago {
   refundAmount?: number; // Monto reembolsado (puede ser parcial)
   refundReason?: string; // Motivo del reembolso
   refundState?: RefundState; // Estado del subflujo de refund
+  refundTotalMinor?: number; // Total acumulado reembolsado en centavos
+  refundRemainingMinor?: number; // Saldo reembolsable restante en centavos
+  refundsCount?: number; // Cantidad de refunds exitosos registrados
+  lastRefundAt?: Timestamp; // Fecha del último refund exitoso
+  lastRefundReason?: string; // Motivo del último refund exitoso
+  currentRefundOperationId?: string; // Lock de refund en proceso
   rawCreateRequestSanitized?: Record<string, unknown>; // Request saneado al proveedor
   rawCreateResponseSanitized?: Record<string, unknown>; // Response saneada del proveedor
   rawLastWebhookSanitized?: Record<string, unknown>; // Último webhook saneado

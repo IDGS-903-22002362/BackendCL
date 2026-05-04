@@ -1427,6 +1427,24 @@ export class AplazoProvider implements PaymentProvider {
             : PaymentStatus.CANCELED,
       };
     } catch (error) {
+      const responseData = isRecord(error)
+        ? (error as { response?: { data?: unknown } }).response?.data
+        : undefined;
+      const responseStatus =
+        pickString(responseData, ["status", "loanStatus", "state"]) ||
+        (isRecord(responseData)
+          ? pickString(responseData.data, ["status", "loanStatus", "state"])
+          : undefined);
+      if (resolveAplazoStatus(responseStatus) === PaymentStatus.CANCELED) {
+        return {
+          status: PaymentStatus.CANCELED,
+          providerReference: cancelReference,
+          providerLoanId: input.paymentAttempt.providerLoanId,
+          providerStatus: responseStatus || "cancelado",
+          rawResponseSanitized: sanitizeAplazoPayload(responseData || {}),
+        };
+      }
+
       throw normalizeProviderError(error);
     }
   }

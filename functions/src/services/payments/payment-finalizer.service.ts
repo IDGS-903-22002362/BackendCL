@@ -27,6 +27,7 @@ const ORDENES_COLLECTION = "ordenes";
 type FinalizePaymentContext = {
   source: "webhook" | "reconcile" | "cancel" | "timeout";
   requestedBy?: string;
+  cancelReason?: string;
   providerResult?: ProviderStatusResult;
   webhookPayloadSanitized?: Record<string, unknown>;
   eventId?: string;
@@ -158,6 +159,23 @@ export class PaymentFinalizerService {
       }
 
       const providerResult = context.providerResult;
+      const metadataPatch =
+        targetStatus === PaymentStatus.CANCELED
+          ? {
+              ...(attempt.metadata || {}),
+              cancelReason: context.cancelReason || context.source,
+              canceledBy: context.requestedBy || "system",
+              cancelSource: context.source,
+              ...(providerResult?.rawResponseSanitized ||
+              attempt.metadata?.providerCancelResponse
+                ? {
+                    providerCancelResponse:
+                      providerResult?.rawResponseSanitized ||
+                      attempt.metadata?.providerCancelResponse,
+                  }
+                : {}),
+            }
+          : attempt.metadata;
       const patch: Partial<PaymentAttempt> = {
         status: targetStatus,
         providerStatus: providerResult?.providerStatus ?? attempt.providerStatus,
@@ -168,6 +186,13 @@ export class PaymentFinalizerService {
           providerResult?.providerReference ?? attempt.providerReference,
         rawLastWebhookSanitized:
           context.webhookPayloadSanitized ?? attempt.rawLastWebhookSanitized,
+        ...(metadataPatch ? { metadata: metadataPatch } : {}),
+        ...(targetStatus === PaymentStatus.CANCELED
+          ? {
+              cancelReason: context.cancelReason || context.source,
+              canceledBy: context.requestedBy || "system",
+            }
+          : {}),
         ...buildTimestampPatch(targetStatus, providerResult),
       };
 

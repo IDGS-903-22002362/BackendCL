@@ -24,6 +24,9 @@ import paymentAttemptRepository, {
 import paymentEventLogRepository from "./payment-event-log.repository";
 import paymentFinalizerService from "./payment-finalizer.service";
 import paymentReconciliationService from "./payment-reconciliation.service";
+import paymentRefundRepository, {
+  PaymentRefundRepository,
+} from "./payment-refund.repository";
 import aplazoProvider from "./providers/aplazo.provider";
 import {
   isValidEmail,
@@ -210,6 +213,7 @@ export class PaymentsService {
     private readonly paymentEventLogRepo = paymentEventLogRepository,
     private readonly finalizer = paymentFinalizerService,
     private readonly reconciliationService = paymentReconciliationService,
+    private readonly refundRepo: PaymentRefundRepository = paymentRefundRepository,
   ) {}
 
   async createAplazoOnline(
@@ -578,22 +582,90 @@ export class PaymentsService {
 
     this.assertAplazoOnlineAttempt(attempt);
 
+    if (toPaymentStatus(attempt) === PaymentStatus.CANCELED) {
+      return attempt;
+    }
+
+    const reconciledAttempt = await this.reconciliationService.reconcilePaymentAttempt(
+      paymentAttemptId,
+      user.uid,
+    );
+    const currentStatus = toPaymentStatus(reconciledAttempt);
+
+    if (currentStatus === PaymentStatus.CANCELED) {
+      return reconciledAttempt;
+    }
+
+    if (currentStatus === PaymentStatus.PAID) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "El pago Aplazo ya está ACTIVO/pagado; usa el flujo de refund para devolverlo",
+      );
+    }
+
+    if (currentStatus !== PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "La cancelación Aplazo solo aplica a pagos NO CONFIRMADOS",
+        {
+          currentStatus,
+          providerStatus: reconciledAttempt.providerStatus,
+        },
+      );
+    }
+
     const providerStatus = await aplazoProvider.cancelOrVoid({
-      paymentAttempt: attempt,
+      paymentAttempt: reconciledAttempt,
       reason,
     });
 
-    if (providerStatus.status === PaymentStatus.CANCELED) {
-      return this.finalizer.finalizeTerminalStatus(attempt, PaymentStatus.CANCELED, {
-        source: "cancel",
-        requestedBy: user.uid,
-        providerResult: providerStatus,
-      });
+    if (
+      providerStatus.status === PaymentStatus.CANCELED ||
+      providerStatus.status === PaymentStatus.REFUNDED
+    ) {
+      return this.finalizer.finalizeTerminalStatus(
+        reconciledAttempt,
+        PaymentStatus.CANCELED,
+        {
+          source: "cancel",
+          requestedBy: user.uid,
+          cancelReason: reason || "manual_admin_cancel",
+          providerResult: providerStatus,
+        },
+      );
     }
 
-    return this.paymentAttemptRepo.update(attempt.id!, {
+    if (providerStatus.status === PaymentStatus.PAID) {
+      await this.finalizer.finalizeTerminalStatus(
+        reconciledAttempt,
+        PaymentStatus.PAID,
+        {
+          source: "reconcile",
+          requestedBy: user.uid,
+          providerResult: providerStatus,
+        },
+      );
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "El pago Aplazo ya está ACTIVO/pagado; usa el flujo de refund para devolverlo",
+      );
+    }
+
+    return this.paymentAttemptRepo.update(reconciledAttempt.id!, {
       status: providerStatus.status,
-      providerStatus: providerStatus.providerStatus ?? attempt.providerStatus,
+      providerStatus:
+        providerStatus.providerStatus ?? reconciledAttempt.providerStatus,
+      metadata: {
+        ...(reconciledAttempt.metadata || {}),
+        lastCancelAttemptAt: Timestamp.now(),
+        ...(reason ? { lastCancelReason: reason } : {}),
+        ...(providerStatus.rawResponseSanitized
+          ? { lastCancelProviderResponse: providerStatus.rawResponseSanitized }
+          : {}),
+      },
     });
   }
 
@@ -631,29 +703,81 @@ export class PaymentsService {
       );
     }
 
+    this.assertAplazoRefundLocalStatus(attempt);
+    const providerStatus = await aplazoProvider.getStatus(attempt);
+    this.assertAplazoRefundProviderStatus(providerStatus.status);
+
+    const refundAmounts = this.resolveAplazoRefundAmounts(
+      attempt,
+      input.refundAmountMinor,
+    );
+    const refundOperation = await this.refundRepo.createProcessingRefund({
+      paymentAttemptId,
+      amountMinor: refundAmounts.requestedMinor,
+      reason: input.reason,
+      requestedBy: user.uid,
+    });
+
     try {
       const refundResult = await aplazoProvider.refund({
         paymentAttempt: attempt,
-        refundAmountMinor: input.refundAmountMinor,
+        refundAmountMinor: refundAmounts.requestedMinor,
         reason: input.reason,
       });
-      return this.finalizer.applyRefundResult(attempt, refundResult, {
-        requestedBy: user.uid,
-        refundAmountMinor: input.refundAmountMinor,
+
+      const nextRefundTotalMinor =
+        refundAmounts.alreadyRefundedMinor + refundAmounts.requestedMinor;
+      const nextRefundRemainingMinor = Math.max(
+        refundAmounts.totalPaidMinor - nextRefundTotalMinor,
+        0,
+      );
+      const nextStatus =
+        nextRefundRemainingMinor === 0
+          ? PaymentStatus.REFUNDED
+          : PaymentStatus.PARTIALLY_REFUNDED;
+      const nextRefundsCount = (attempt.refundsCount ?? 0) + 1;
+
+      await this.refundRepo.markSucceeded({
+        operationId: refundOperation.id!,
+        paymentAttemptId,
+        orderId: attempt.ordenId,
+        providerRefundId: refundResult.refundId,
+        providerResponse: refundResult.rawResponseSanitized,
+        nextPaymentStatus: nextStatus,
+        refundTotalMinor: nextRefundTotalMinor,
+        refundRemainingMinor: nextRefundRemainingMinor,
+        refundsCount: nextRefundsCount,
         reason: input.reason,
+        refundAmountMinor: refundAmounts.requestedMinor,
+        refundAmountMajor: nextRefundTotalMinor / 100,
+        providerStatus: refundResult.providerStatus,
       });
+
+      const updatedAttempt = await this.requirePaymentAttempt(paymentAttemptId);
+      return updatedAttempt;
     } catch (error) {
-      if (
-        error instanceof PaymentApiError &&
-        error.code === "PAYMENT_REFUND_UNSUPPORTED"
-      ) {
-        return this.finalizer.markManualRefundRequested(
-          attempt,
-          user.uid,
-          input.reason,
-        );
-      }
-      throw error;
+      await this.refundRepo.markFailed({
+        operationId: refundOperation.id!,
+        paymentAttemptId,
+        failedReason:
+          error instanceof Error ? error.message : "Error desconocido con Aplazo",
+        providerResponse:
+          error instanceof PaymentApiError ? error.details : undefined,
+      });
+
+      throw new PaymentApiError(
+        error instanceof PaymentApiError ? error.statusCode : 502,
+        "APLAZO_REFUND_FAILED",
+        "Aplazo no pudo procesar el refund; el pago local no fue marcado como reembolsado",
+        {
+          paymentAttemptId,
+          refundOperationId: refundOperation.id,
+          originalCode:
+            error instanceof PaymentApiError ? error.code : "UNKNOWN_ERROR",
+          originalMessage:
+            error instanceof Error ? error.message : "Error desconocido",
+        },
+      );
     }
   }
 
@@ -1062,6 +1186,153 @@ export class PaymentsService {
         },
       );
     }
+  }
+
+  private assertAplazoRefundLocalStatus(attempt: PaymentAttempt): void {
+    const currentStatus = toPaymentStatus(attempt);
+    if (currentStatus === PaymentStatus.PAID) {
+      return;
+    }
+
+    if (currentStatus === PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_NOT_PAID_USE_CANCEL",
+        "El pago Aplazo sigue NO CONFIRMADO; usa cancelación en lugar de refund",
+        {
+          paymentAttemptId: attempt.id,
+          currentStatus,
+          providerStatus: attempt.providerStatus,
+        },
+      );
+    }
+
+    if (currentStatus === PaymentStatus.REFUNDED) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ALREADY_REFUNDED",
+        "El pago Aplazo ya está completamente reembolsado",
+        {
+          paymentAttemptId: attempt.id,
+          currentStatus,
+        },
+      );
+    }
+
+    throw new PaymentApiError(
+      409,
+      "PAYMENT_NOT_PAID_USE_CANCEL",
+      "Solo se pueden reembolsar pagos Aplazo confirmados/pagados",
+      {
+        paymentAttemptId: attempt.id,
+        currentStatus,
+        providerStatus: attempt.providerStatus,
+      },
+    );
+  }
+
+  private assertAplazoRefundProviderStatus(status: PaymentStatus): void {
+    if (status === PaymentStatus.PAID) {
+      return;
+    }
+
+    if (status === PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_NOT_PAID_USE_CANCEL",
+        "Aplazo reporta el pago como NO CONFIRMADO; usa cancelación en lugar de refund",
+        {
+          providerStatus: status,
+        },
+      );
+    }
+
+    throw new PaymentApiError(
+      409,
+      status === PaymentStatus.REFUNDED
+        ? "PAYMENT_ALREADY_REFUNDED"
+        : "PAYMENT_NOT_PAID_USE_CANCEL",
+      status === PaymentStatus.REFUNDED
+        ? "Aplazo reporta el pago como completamente reembolsado"
+        : "Aplazo no reporta el pago como ACTIVO/pagado; no se puede solicitar refund",
+      {
+        providerStatus: status,
+      },
+    );
+  }
+
+  private resolveAplazoRefundAmounts(
+    attempt: PaymentAttempt,
+    requestedMinor?: number,
+  ): {
+    totalPaidMinor: number;
+    alreadyRefundedMinor: number;
+    remainingMinor: number;
+    requestedMinor: number;
+  } {
+    const totalPaidMinor =
+      typeof attempt.amountMinor === "number" && Number.isFinite(attempt.amountMinor)
+        ? attempt.amountMinor
+        : Math.round((attempt.monto || 0) * 100);
+    const alreadyRefundedMinor =
+      typeof attempt.refundTotalMinor === "number" &&
+      Number.isFinite(attempt.refundTotalMinor)
+        ? attempt.refundTotalMinor
+        : typeof attempt.refundAmount === "number" &&
+            Number.isFinite(attempt.refundAmount)
+          ? Math.round(attempt.refundAmount * 100)
+          : 0;
+    const remainingMinor = Math.max(totalPaidMinor - alreadyRefundedMinor, 0);
+
+    if (remainingMinor <= 0) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ALREADY_REFUNDED",
+        "El pago Aplazo ya está completamente reembolsado",
+        {
+          paymentAttemptId: attempt.id,
+          totalPaidMinor,
+          alreadyRefundedMinor,
+        },
+      );
+    }
+
+    const effectiveRequestedMinor =
+      typeof requestedMinor === "number" ? requestedMinor : remainingMinor;
+
+    if (!Number.isFinite(effectiveRequestedMinor) || effectiveRequestedMinor <= 0) {
+      throw new PaymentApiError(
+        400,
+        "REFUND_AMOUNT_INVALID",
+        "refundAmountMinor debe ser mayor a 0",
+        {
+          paymentAttemptId: attempt.id,
+          refundAmountMinor: requestedMinor,
+        },
+      );
+    }
+
+    if (effectiveRequestedMinor > remainingMinor) {
+      throw new PaymentApiError(
+        409,
+        "REFUND_AMOUNT_EXCEEDS_AVAILABLE",
+        "El monto solicitado excede el saldo reembolsable disponible",
+        {
+          paymentAttemptId: attempt.id,
+          requestedMinor: effectiveRequestedMinor,
+          remainingMinor,
+          totalPaidMinor,
+          alreadyRefundedMinor,
+        },
+      );
+    }
+
+    return {
+      totalPaidMinor,
+      alreadyRefundedMinor,
+      remainingMinor,
+      requestedMinor: effectiveRequestedMinor,
+    };
   }
 
   private getConfirmedRefundTotalMinor(

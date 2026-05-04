@@ -1,165 +1,137 @@
-# Aplazo Frontend Consumption
+# Aplazo Frontend Consumption Guide
 
-Guia para consumir Aplazo Online desde storefront y backoffice usando este
-backend.
+Guía para consumir desde frontend los endpoints operativos de Aplazo:
 
-El frontend no debe llamar a Aplazo directo. Este backend autentica contra
-Aplazo, crea intentos de pago online, registra el webhook, consulta estado del
-proveedor cuando aplica y confirma ordenes solo desde webhook/reconciliacion.
+- Cancelar un pago.
+- Solicitar un reembolso.
+- Consultar el estado de un reembolso.
 
-## Bases y reglas comunes
+Estos endpoints son administrativos y requieren Bearer token de Firebase Auth. El frontend público del cliente no debe llamarlos directamente.
 
-- Base local: `http://localhost:3000`.
-- Base Cloud Functions: `https://<region>-<project>.cloudfunctions.net/api`.
-- En los ejemplos se muestran paths completos desde la raiz Express. Si usas
-  una variable `API_BASE_URL` que ya termina en `/api`, no dupliques `/api`.
-- Los endpoints bajo `/api` requieren `Authorization: Bearer <JWT de la app>`,
-  excepto webhooks.
-- Los endpoints backoffice requieren rol `ADMIN` o `EMPLEADO`; cancelacion y
-  refunds manuales exigen `ADMIN` en servicio.
-- Usa `Idempotency-Key` en creates cuando el cliente pueda reintentar la misma
-  accion. Debe tener entre 8 y 255 caracteres.
-- Los schemas son estrictos: campos extra en body se rechazan.
-- Estados canonicos del backend: `created`, `pending_provider`,
-  `pending_customer`, `authorized`, `paid`, `failed`, `canceled`, `expired`,
-  `refunded`, `partially_refunded`.
-- No confirmes pago por return URL. Confirma pago solo cuando el status del
-  backend sea `paid`.
+## Base URL y Auth
 
-## Inventario de APIs Aplazo Online implementadas
+Usa la URL pública del backend:
 
-- Autenticacion Aplazo Online: interna del backend mediante `APLAZO_ONLINE_AUTH_PATH`.
-- `POST /api/payments/aplazo/online/create`
-- `GET /api/payments/{paymentAttemptId}/status`
-- `POST /api/admin/payments/aplazo/{paymentAttemptId}/reconcile`
-- `POST /api/admin/payments/aplazo/{paymentAttemptId}/cancel`
-- `POST /api/admin/payments/aplazo/{paymentAttemptId}/refund`
-- `GET /api/admin/payments/aplazo/{paymentAttemptId}/refund/status`
-- `GET /payments/aplazo/success`
-- `GET /payments/aplazo/failure`
-- `GET /payments/aplazo/cancel`
-- `POST /api/webhooks/aplazo`
+```ts
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+```
 
-Nota: no hay rutas separadas del tipo
-`/api/payments/aplazo/online/{paymentAttemptId}/status`. Usa el endpoint comun
-`GET /api/payments/{paymentAttemptId}/status`.
+Todas las llamadas administrativas deben enviar:
 
-## Crear pago online
+```http
+Authorization: Bearer <firebase_id_token>
+Content-Type: application/json
+```
 
-Flujo para ecommerce web. Parte de una orden ya creada en backend con
-`metodoPago: "APLAZO"` y `estado: "PENDIENTE"`.
+Roles:
 
-`POST /api/payments/aplazo/online/create`
+- `cancel`: el endpoint está montado con middleware staff, pero el servicio exige `ADMIN`.
+- `refund`: exige `ADMIN`.
+- `refund/status`: permite `ADMIN` o `EMPLEADO`.
 
-Headers:
-
-- `Authorization: Bearer <token usuario>`
-- `Idempotency-Key: <opcional>`
-
-Body minimo recomendado:
+Formato de error estándar:
 
 ```json
 {
-  "orderId": "orden_123",
-  "successUrl": "https://frontend.com/payments/aplazo/success",
-  "cancelUrl": "https://frontend.com/payments/aplazo/cancel",
-  "failureUrl": "https://frontend.com/payments/aplazo/failure",
-  "cartUrl": "https://frontend.com/cart"
+  "ok": false,
+  "error": {
+    "code": "PAYMENT_NOT_PAID_USE_CANCEL",
+    "message": "Mensaje legible",
+    "details": {}
+  }
 }
 ```
 
-Reglas:
+## Cliente vs Administración
 
-- `orderId` es requerido.
-- `customer.name`, `customer.email`, `customer.phone` son opcionales en schema,
-  pero el backend debe poder resolver los tres desde body, JWT o `usuariosApp`.
-- `successUrl` debe venir en body o configuracion.
-- `failureUrl` debe venir en body o configuracion; si no viene, se usa
-  `cancelUrl`.
-- `metadata.cartId` es opcional. Si no viene, el backend usa `orderId` como
-  referencia Aplazo.
-- `total` es opcional. Si se envia, debe coincidir con el total recalculado en
-  backend desde la orden.
-- `currency` es opcional. Si se envia, solo se acepta `MXN`.
-- `items`, `subtotal`, `tax`, `shipping` se aceptan por contrato, pero la fuente
-  de verdad para online es la orden persistida.
+### Cliente del e-commerce
 
-Respuesta `201` si se creo, `200` si fue reintento idempotente o ya habia un
-intento no terminal:
+El cliente no debe cancelar ni reembolsar directamente con estos endpoints.
 
-```json
-{
-  "ok": true,
-  "paymentAttemptId": "pay_attempt_123",
-  "provider": "aplazo",
-  "flowType": "online",
-  "status": "pending_customer",
-  "redirectUrl": "https://checkout.aplazo.net/...",
-  "checkoutUrl": "https://checkout.aplazo.net/...",
-  "expiresAt": "2026-04-30T18:30:00.000Z"
-}
+Flujo recomendado:
+
+1. Cliente inicia checkout Aplazo desde el flujo normal de compra.
+2. Cliente puede volver a páginas públicas de éxito, fallo o cancelación.
+3. Si abandona el checkout, el frontend puede mostrar la orden como pendiente y seguir consultando el estado normal del pago.
+4. La cancelación real en Aplazo debe ejecutarla backend/admin/cron cuando se determine que el intento venció o ya no debe completarse.
+
+Para soporte, el frontend del cliente puede mostrar textos como:
+
+- `pending_customer`: pago pendiente en Aplazo.
+- `canceled`: pago cancelado.
+- `paid`: pago confirmado.
+- `partially_refunded`: reembolso parcial aplicado.
+- `refunded`: reembolso total aplicado.
+
+### Administración del e-commerce
+
+El panel admin sí puede usar estos endpoints para operar pagos:
+
+- Cancelar intentos Aplazo todavía no confirmados.
+- Solicitar reembolsos sobre pagos confirmados/ACTIVO.
+- Consultar estado de reembolsos.
+
+Regla operativa:
+
+- Si el pago está `NO CONFIRMADO` / `pending_customer`, usar cancelación.
+- Si el pago está `ACTIVO` / `paid`, usar reembolso.
+- Si está `canceled`, `expired`, `failed`, `refunded` o no pagado, no intentar reembolso.
+
+## 1. Cancelar un pago Aplazo
+
+Cancela un intento Aplazo online solo cuando todavía está `NO CONFIRMADO`.
+
+```http
+POST /api/admin/payments/aplazo/{paymentAttemptId}/cancel
 ```
-
-Uso storefront:
-
-1. Crear orden con `metodoPago: "APLAZO"`.
-2. Crear intento online.
-3. Guardar `paymentAttemptId`.
-4. Redirigir a `checkoutUrl` o `redirectUrl`.
-5. Al volver de Aplazo, consultar status en backend.
-6. Mostrar pago exitoso solo con `status: "paid"`.
-
-## Consulta estado de pago
-
-`GET /api/payments/{paymentAttemptId}/status`
-
-Headers:
-
-- `Authorization: Bearer <token usuario o backoffice>`
-
-Respuesta:
-
-```json
-{
-  "ok": true,
-  "paymentAttemptId": "pay_attempt_123",
-  "provider": "aplazo",
-  "status": "pending_customer",
-  "providerStatus": "No confirmado",
-  "amount": 1299,
-  "currency": "MXN",
-  "paidAt": null,
-  "expiresAt": "2026-04-30T18:30:00.000Z",
-  "isTerminal": false,
-  "nextPollAfterMs": 3000
-}
-```
-
-Regla de polling:
-
-- Si `isTerminal` es `false`, reintenta despues de `nextPollAfterMs`.
-- Si `isTerminal` es `true`, detente.
-- `paid` confirma pago.
-- `failed`, `canceled` y `expired` cierran sin pago.
-- `refunded` y `partially_refunded` son estados post-pago.
-
-## Cancela un pago
-
-`POST /api/admin/payments/aplazo/{paymentAttemptId}/cancel`
-
-Headers:
-
-- `Authorization: Bearer <token ADMIN>`
 
 Body:
 
 ```json
 {
-  "reason": "Cliente solicito cancelacion"
+  "reason": "checkout abandoned"
 }
 ```
 
-Respuesta:
+Ejemplo frontend admin:
+
+```ts
+type AplazoCancelResponse = {
+  ok: true;
+  paymentAttemptId: string;
+  provider: "aplazo";
+  status: string;
+  providerStatus?: string;
+};
+
+export async function cancelAplazoPayment(params: {
+  apiUrl: string;
+  idToken: string;
+  paymentAttemptId: string;
+  reason?: string;
+}) {
+  const res = await fetch(
+    `${params.apiUrl}/api/admin/payments/aplazo/${params.paymentAttemptId}/cancel`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ reason: params.reason }),
+    },
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw data;
+  }
+
+  return data as AplazoCancelResponse;
+}
+```
+
+Respuesta exitosa:
 
 ```json
 {
@@ -167,36 +139,91 @@ Respuesta:
   "paymentAttemptId": "pay_attempt_123",
   "provider": "aplazo",
   "status": "canceled",
-  "providerStatus": "canceled"
+  "providerStatus": "cancelado"
 }
 ```
 
-## Solicita un reembolso
+Errores esperados:
 
-`POST /api/admin/payments/aplazo/{paymentAttemptId}/refund`
+- `PAYMENT_FORBIDDEN`: el usuario no es `ADMIN`.
+- `PAYMENT_CANCEL_NOT_ALLOWED`: el pago ya está ACTIVO/pagado o no está en estado cancelable.
+- `PAYMENT_VALIDATION_ERROR`: el intento no es Aplazo o faltan datos de referencia.
 
-Headers:
+UX recomendada:
 
-- `Authorization: Bearer <token ADMIN>`
+- Mostrar acción "Cancelar intento" solo si el pago está pendiente/no confirmado.
+- Si el backend responde que ya está pagado, ocultar cancelar y ofrecer reembolso.
 
-Body:
+## 2. Solicitar un reembolso Aplazo
+
+Solicita un reembolso parcial o total. Solo aplica a pagos confirmados localmente y ACTIVO en Aplazo.
+
+```http
+POST /api/admin/payments/aplazo/{paymentAttemptId}/refund
+```
+
+Body para parcial:
 
 ```json
 {
-  "reason": "Devolucion parcial",
-  "refundAmountMinor": 1000
+  "refundAmountMinor": 10000,
+  "reason": "Wrong size"
 }
 ```
 
-Notas:
+Body para total por saldo disponible:
 
-- `refundAmountMinor` esta en centavos. `1000` equivale a `$10.00`.
-- Si se omite, el proveedor/servicio puede tratarlo como refund total segun el
-  contrato configurado.
-- Si `APLAZO_REFUNDS_ENABLED=false`, el backend registra solicitud manual con
-  `refundState: "requested"` sin llamar al proveedor.
+```json
+{
+  "reason": "Customer requested full refund"
+}
+```
 
-Respuesta:
+`refundAmountMinor` usa centavos. Ejemplo: `10000` = `$100.00 MXN`.
+
+Ejemplo frontend admin:
+
+```ts
+type AplazoRefundResponse = {
+  ok: true;
+  paymentAttemptId: string;
+  provider: "aplazo";
+  status: "partially_refunded" | "refunded" | string;
+  refundState?: string;
+};
+
+export async function refundAplazoPayment(params: {
+  apiUrl: string;
+  idToken: string;
+  paymentAttemptId: string;
+  refundAmountMinor?: number;
+  reason?: string;
+}) {
+  const res = await fetch(
+    `${params.apiUrl}/api/admin/payments/aplazo/${params.paymentAttemptId}/refund`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.idToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        refundAmountMinor: params.refundAmountMinor,
+        reason: params.reason,
+      }),
+    },
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw data;
+  }
+
+  return data as AplazoRefundResponse;
+}
+```
+
+Respuesta exitosa:
 
 ```json
 {
@@ -204,23 +231,105 @@ Respuesta:
   "paymentAttemptId": "pay_attempt_123",
   "provider": "aplazo",
   "status": "partially_refunded",
-  "refundState": "processing"
+  "refundState": "succeeded"
 }
 ```
 
-## Consulta estado de reembolso
+Restricciones aplicadas por backend:
 
-`GET /api/admin/payments/aplazo/{paymentAttemptId}/refund/status`
+- El pago local debe estar `paid`.
+- Aplazo debe responder estado ACTIVO/pagado antes de ejecutar el refund.
+- Si Aplazo responde NO CONFIRMADO, se rechaza y debe usarse cancelación.
+- `refundAmountMinor` debe ser mayor a `0`.
+- El monto no puede exceder el saldo reembolsable.
+- Si no se manda `refundAmountMinor`, se toma el saldo disponible completo.
+- Si ya hay un refund `processing`, se rechaza para evitar doble refund.
+- Si el pago ya está completamente reembolsado, no se manda otro refund a Aplazo.
 
-Headers:
+Errores esperados:
 
-- `Authorization: Bearer <token ADMIN|EMPLEADO>`
+- `PAYMENT_NOT_PAID_USE_CANCEL`: pago no confirmado; usar cancelación.
+- `REFUND_AMOUNT_INVALID`: monto inválido o `<= 0`.
+- `REFUND_AMOUNT_EXCEEDS_AVAILABLE`: monto mayor al saldo disponible.
+- `REFUND_ALREADY_PROCESSING`: ya hay un refund en proceso para el pago.
+- `PAYMENT_ALREADY_REFUNDED`: el pago ya está totalmente reembolsado.
+- `APLAZO_REFUND_FAILED`: Aplazo falló; el pago local no fue marcado como reembolsado.
+- `PAYMENT_FORBIDDEN`: usuario sin rol `ADMIN`.
+
+UX recomendada:
+
+- Mostrar botón "Reembolsar" solo cuando `status === "paid"` o `partially_refunded` con saldo disponible, si el backend expone ese dato en la vista admin.
+- Pedir motivo obligatorio en UI aunque el backend lo acepte opcional.
+- Para refund total, permitir dejar vacío el monto y enviar solo `reason`.
+- Después de un refund exitoso, refrescar el detalle del pago y consultar estado de refund.
+
+## 3. Consultar estado de un reembolso
+
+Sincroniza el estado de refunds con Aplazo y devuelve el refund seleccionado o el más reciente.
+
+```http
+GET /api/admin/payments/aplazo/{paymentAttemptId}/refund/status
+```
 
 Query opcional:
 
-- `refundId=<id de Aplazo>`
+```http
+?refundId=25083
+```
 
-Respuesta:
+Ejemplo frontend admin:
+
+```ts
+type AplazoRefundStatusResponse = {
+  ok: true;
+  paymentAttemptId: string;
+  provider: "aplazo";
+  status: string;
+  refundState?: string;
+  providerStatus?: string;
+  refundId?: string;
+  refundAmount?: number;
+  totalRefundedAmount: number;
+  currency: string;
+  refunds: Array<{
+    id?: string;
+    status?: string;
+    refundState?: string;
+    refundDate?: string;
+    amount?: number;
+  }>;
+};
+
+export async function getAplazoRefundStatus(params: {
+  apiUrl: string;
+  idToken: string;
+  paymentAttemptId: string;
+  refundId?: string;
+}) {
+  const url = new URL(
+    `${params.apiUrl}/api/admin/payments/aplazo/${params.paymentAttemptId}/refund/status`,
+  );
+  if (params.refundId) {
+    url.searchParams.set("refundId", params.refundId);
+  }
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+    },
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw data;
+  }
+
+  return data as AplazoRefundStatusResponse;
+}
+```
+
+Respuesta exitosa:
 
 ```json
 {
@@ -236,110 +345,107 @@ Respuesta:
   "currency": "MXN",
   "refunds": [
     {
-      "id": "25079",
-      "status": "REFUNDED",
-      "refundState": "succeeded",
-      "refundDate": "2024-12-19T17:45:03.59153",
-      "amount": 120
+      "id": "25083",
+      "status": "PROCESSING",
+      "refundState": "processing",
+      "refundDate": "2024-12-19T17:49:33.910913",
+      "amount": 10
     }
   ]
 }
 ```
 
-## Return URLs
+Errores esperados:
 
-Estas rutas son para el navegador cuando Aplazo redirige de vuelta. No usan JWT.
+- `PAYMENT_FORBIDDEN`: usuario no es `ADMIN` ni `EMPLEADO`.
+- `PAYMENT_VALIDATION_ERROR`: intento no es Aplazo.
+- `PAYMENT_REFUND_UNSUPPORTED`: proveedor/config no soporta consulta.
+- `PAYMENT_ATTEMPT_NOT_FOUND`: intento no encontrado.
 
-- `GET /payments/aplazo/success`
-- `GET /payments/aplazo/failure`
-- `GET /payments/aplazo/cancel`
+UX recomendada:
 
-La return URL solo sirve para UX. El frontend siempre debe consultar
-`GET /api/payments/{paymentAttemptId}/status` antes de mostrar confirmacion.
+- En el panel admin, mostrar una tabla con `refunds`.
+- Usar `refundState` para badges:
+  - `processing`: en proceso.
+  - `succeeded`: completado.
+  - `failed`: fallido.
+  - `requested`: solicitado.
+- Permitir refrescar manualmente el estado.
 
-## Webhook Aplazo
+## Flujos Recomendados
 
-`POST /api/webhooks/aplazo`
+### Flujo de cliente: checkout abandonado
 
-El webhook es la fuente de verdad para confirmar pagos Aplazo Online.
+1. Cliente inicia pago Aplazo.
+2. Cliente cierra o abandona checkout.
+3. Frontend público muestra pago pendiente.
+4. Backend/cron o admin cancela cuando vence la ventana operativa.
+5. Cliente ve la orden como cancelada o pendiente según el estado sincronizado.
 
-Headers:
+El cliente no debe llamar `POST /cancel`.
 
-- `Authorization: Bearer <APLAZO_ONLINE_WEBHOOK_SECRET>` si esta configurado.
+### Flujo de admin: cancelar pago no confirmado
 
-Procesamiento:
+1. Admin abre detalle de orden/pago.
+2. UI verifica que el estado no sea pagado.
+3. Admin elige "Cancelar intento Aplazo".
+4. Frontend llama `POST /cancel`.
+5. UI refresca el detalle y muestra `canceled`.
 
-- El evento se deduplica en `paymentEventLogs`.
-- La orden se finaliza de forma asincrona por trigger/reconciliacion.
-- `loanId` se guarda como referencia de prestamo Aplazo.
+### Flujo de admin: reembolso parcial
 
-## Reconciliacion manual
+1. Admin abre detalle de un pago `paid`.
+2. Admin captura monto en pesos; frontend convierte a centavos.
+3. Frontend llama `POST /refund`.
+4. UI muestra estado `partially_refunded`.
+5. Frontend llama `GET /refund/status` para confirmar seguimiento.
 
-`POST /api/admin/payments/aplazo/{paymentAttemptId}/reconcile`
+### Flujo de admin: reembolso total
 
-Headers:
+1. Admin abre detalle de un pago `paid` o parcialmente reembolsado con saldo.
+2. Admin elige "Reembolso total".
+3. Frontend manda solo `reason`, sin `refundAmountMinor`.
+4. Backend usa el saldo reembolsable restante.
+5. UI refresca y muestra `refunded`.
 
-- `Authorization: Bearer <token ADMIN|EMPLEADO>`
+## Helper de errores
 
-Sin body.
+```ts
+export function getAplazoAdminErrorMessage(error: unknown): string {
+  const code =
+    typeof error === "object" && error !== null
+      ? (error as { error?: { code?: string } }).error?.code
+      : undefined;
 
-Uso:
-
-- Boton manual de "sincronizar con Aplazo".
-- Recuperar intentos online en `pending_provider` por timeout.
-
-## Formatos de error
-
-Errores de pagos usan:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "PAYMENT_VALIDATION_ERROR",
-    "message": "Mensaje para UI/log",
-    "details": {}
+  switch (code) {
+    case "PAYMENT_NOT_PAID_USE_CANCEL":
+      return "Este pago aún no está confirmado. Usa cancelación, no reembolso.";
+    case "REFUND_AMOUNT_INVALID":
+      return "El monto del reembolso debe ser mayor a 0.";
+    case "REFUND_AMOUNT_EXCEEDS_AVAILABLE":
+      return "El monto excede el saldo disponible para reembolso.";
+    case "REFUND_ALREADY_PROCESSING":
+      return "Ya hay un reembolso en proceso para este pago.";
+    case "PAYMENT_ALREADY_REFUNDED":
+      return "Este pago ya fue reembolsado por completo.";
+    case "APLAZO_REFUND_FAILED":
+      return "Aplazo no pudo procesar el reembolso. Intenta más tarde o revisa soporte.";
+    case "PAYMENT_CANCEL_NOT_ALLOWED":
+      return "Este pago no puede cancelarse. Si ya está pagado, usa reembolso.";
+    case "PAYMENT_FORBIDDEN":
+      return "No tienes permisos para realizar esta operación.";
+    default:
+      return "No fue posible completar la operación de Aplazo.";
   }
 }
 ```
 
-Codigos frecuentes:
+## Checklist de integración frontend
 
-- `PAYMENT_AUTH_REQUIRED`
-- `PAYMENT_FORBIDDEN`
-- `PAYMENT_VALIDATION_ERROR`
-- `PAYMENT_ORDER_INVALID`
-- `PAYMENT_AMOUNT_MISMATCH`
-- `PAYMENT_PROVIDER_ERROR`
-- `PAYMENT_PROVIDER_TIMEOUT`
-- `PAYMENT_WEBHOOK_INVALID_SIGNATURE`
-- `PAYMENT_REFUND_UNSUPPORTED`
-- `PAYMENT_REFUND_NOT_FOUND`
-- `PAYMENT_FLOW_UNSUPPORTED`
-
-## Checklist frontend
-
-### Web ecommerce
-
-1. Crear orden con `metodoPago: "APLAZO"`.
-2. Llamar `POST /api/payments/aplazo/online/create`.
-3. Redirigir a `checkoutUrl`.
-4. Al volver a success/failure/cancel, resolver UX con la return URL.
-5. Consultar `GET /api/payments/{paymentAttemptId}/status`.
-
-### Backoffice refunds
-
-1. Solicitar refund con
-   `POST /api/admin/payments/aplazo/{paymentAttemptId}/refund`.
-2. Consultar estado con
-   `GET /api/admin/payments/aplazo/{paymentAttemptId}/refund/status`.
-3. Usar `totalRefundedAmount` como monto confirmado por backend.
-
-## Lo que no debe usarse
-
-- No usar estados en mayusculas (`PENDING_CUSTOMER`, `PAID`) en frontend nuevo.
-- No asumir que `success` significa pagado.
-- No llamar a APIs de Aplazo desde navegador.
-- No enviar secretos, merchant IDs privados o tokens Aplazo al frontend.
-- No usar endpoints admin desde storefront publico.
-- No usar endpoints Aplazo in-store/POS; ese flujo fue retirado de este backend.
+- Usar Firebase ID token vigente en panel admin.
+- No exponer estos endpoints en UI pública del cliente.
+- Convertir montos de pesos a centavos antes de enviar `refundAmountMinor`.
+- Deshabilitar botones mientras una request está en curso.
+- Manejar errores por `error.code`, no por texto.
+- Refrescar el detalle de pago después de cancelar o reembolsar.
+- Para refunds, consultar `GET /refund/status` después de solicitar el reembolso.
