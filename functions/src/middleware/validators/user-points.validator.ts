@@ -27,3 +27,27 @@ export const assignUserPointsSchema = z
       .optional(),
   })
   .strict();
+
+export const assignPointsBySaleSchema = z
+  .object({
+    dinero: z
+      .number({
+        required_error: "El monto de venta es requerido",
+        invalid_type_error: "El monto debe ser un número",
+      })
+      .positive("El monto debe ser mayor a cero")
+      .finite("El monto debe ser un número válido"),
+    descripcion: z
+      .string()
+      .trim()
+      .min(1, "La descripción no puede estar vacía")
+      .max(250, "La descripción no puede exceder 250 caracteres")
+      .optional(),
+    origenId: z
+      .string()
+      .trim()
+      .min(1, "El origenId no puede estar vacío")
+      .max(120, "El origenId no puede exceder 120 caracteres")
+      .optional(),
+  })
+  .strict();

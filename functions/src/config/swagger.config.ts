@@ -215,6 +215,10 @@ const swaggerDefinition = {
       description:
         "Endpoints de diagnóstico (solo desarrollo) - DEPRECATED en producción",
     },
+    {
+      name: "Banners",
+      description: "Gestión de banners dinámicos para el carrusel del home",
+    },
   ],
   components: {
     securitySchemes: {
@@ -843,54 +847,54 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
-      FavoritoProductSummary: {
-        type: "object",
-        properties: {
-          id: { type: "string", example: "prod_12345" },
-          clave: { type: "string", example: "JERSEY-2026-H" },
-          descripcion: {
-            type: "string",
-            example: "Jersey Oficial Local 2026",
+        FavoritoProductSummary: {
+          type: "object",
+          properties: {
+            id: { type: "string", example: "prod_12345" },
+            clave: { type: "string", example: "JERSEY-2026-H" },
+            descripcion: {
+              type: "string",
+              example: "Jersey Oficial Local 2026",
+            },
+            precioPublico: { type: "number", example: 1299.99 },
+            imagenes: {
+              type: "array",
+              items: { type: "string", format: "uri" },
+              example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
+            },
           },
-          precioPublico: { type: "number", example: 1299.99 },
-          imagenes: {
-            type: "array",
-            items: { type: "string", format: "uri" },
-            example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
-          },
+          required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
         },
-        required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
-      },
-      Favorito: {
-        type: "object",
-        properties: {
-          id: { type: "string", example: "uid_1__prod_12345" },
-          usuarioId: { type: "string", example: "uid_1" },
-          productoId: { type: "string", example: "prod_12345" },
-          createdAt: {
-            type: "string",
-            format: "date-time",
-            example: "2026-03-30T16:00:00Z",
+        Favorito: {
+          type: "object",
+          properties: {
+            id: { type: "string", example: "uid_1__prod_12345" },
+            usuarioId: { type: "string", example: "uid_1" },
+            productoId: { type: "string", example: "prod_12345" },
+            createdAt: {
+              type: "string",
+              format: "date-time",
+              example: "2026-03-30T16:00:00Z",
+            },
           },
+          required: ["id", "usuarioId", "productoId", "createdAt"],
         },
-        required: ["id", "usuarioId", "productoId", "createdAt"],
-      },
-      FavoritoConProducto: {
-        type: "object",
-        properties: {
-          id: { type: "string", example: "uid_1__prod_12345" },
-          usuarioId: { type: "string", example: "uid_1" },
-          createdAt: {
-            type: "string",
-            format: "date-time",
-            example: "2026-03-30T16:00:00Z",
+        FavoritoConProducto: {
+          type: "object",
+          properties: {
+            id: { type: "string", example: "uid_1__prod_12345" },
+            usuarioId: { type: "string", example: "uid_1" },
+            createdAt: {
+              type: "string",
+              format: "date-time",
+              example: "2026-03-30T16:00:00Z",
+            },
+            producto: {
+              $ref: "#/components/schemas/FavoritoProductSummary",
+            },
           },
-          producto: {
-            $ref: "#/components/schemas/FavoritoProductSummary",
-          },
+          required: ["id", "usuarioId", "createdAt", "producto"],
         },
-        required: ["id", "usuarioId", "createdAt", "producto"],
-      },
       },
       DetalleProducto: {
         type: "object",
@@ -1045,6 +1049,85 @@ const swaggerDefinition = {
           activo: { type: "boolean", example: true },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      AssignPointsBySale: {
+        type: 'object',
+        required: ['dinero'],
+        properties: {
+          dinero: {
+            type: 'number',
+            description: 'Monto total de la venta (mayor a 0)',
+            example: 350.75,
+            minimum: 0.01,
+          },
+          descripcion: {
+            type: 'string',
+            description: 'Descripción opcional del movimiento',
+            maxLength: 250,
+            example: 'Venta en tienda física - orden #1234',
+          },
+          origenId: {
+            type: 'string',
+            description: 'Identificador del sistema o empleado que asigna los puntos',
+            maxLength: 120,
+            example: 'caja_01',
+          },
+        },
+        additionalProperties: false,
+      },
+      // ========== BANNERS ==========
+      BannerButton: {
+        type: "object",
+        properties: {
+          text: { type: "string", example: "Comprar ahora" },
+          url: { type: "string", example: "/tienda" },
+          style: { type: "string", enum: ["primary", "secondary", "outline"], example: "primary" },
+        },
+        required: ["text", "url"],
+      },
+      Banner: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "banner_abc123" },
+          title: { type: "string", example: "Ofertas de temporada" },
+          subtitle: { type: "string", example: "Hasta 50% de descuento" },
+          backgroundImage: { type: "string", format: "uri", example: "https://storage.googleapis.com/.../fondo.jpg" },
+          videoUrl: { type: "string", format: "uri", example: "https://www.youtube.com/watch?v=xxxx" },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" } },
+          productIds: { type: "array", items: { type: "string" }, example: ["prod_123", "prod_456"] },
+          active: { type: "boolean", example: true },
+          order: { type: "integer", example: 1 },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+        required: ["title", "backgroundImage", "buttons", "productIds", "active", "createdAt", "updatedAt"],
+      },
+      CreateBanner: {
+        type: "object",
+        required: ["title", "backgroundImage"],
+        properties: {
+          title: { type: "string", example: "Nuevos lanzamientos" },
+          subtitle: { type: "string", example: "Descubre la colección 2025" },
+          backgroundImage: { type: "string", format: "uri", example: "https://storage.googleapis.com/.../fondo.jpg" },
+          videoUrl: { type: "string", format: "uri", example: "https://youtu.be/..." },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" }, default: [] },
+          productIds: { type: "array", items: { type: "string" }, default: [] },
+          active: { type: "boolean", default: false },
+          order: { type: "integer", example: 2 },
+        },
+      },
+      UpdateBanner: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          subtitle: { type: "string" },
+          backgroundImage: { type: "string", format: "uri" },
+          videoUrl: { type: "string", format: "uri" },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" } },
+          productIds: { type: "array", items: { type: "string" } },
+          active: { type: "boolean" },
+          order: { type: "integer" },
         },
       },
       Orden: {
