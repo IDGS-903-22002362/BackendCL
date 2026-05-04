@@ -436,6 +436,8 @@ router.post("/", commandController.create);
  *           schema:
  *             type: object
  *             properties:
+ *               nombre:
+ *                 type: string
  *               telefono:
  *                 type: string
  *               fechaNacimiento:

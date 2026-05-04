@@ -51,8 +51,8 @@ import {
 } from "../middleware/validators/stripe.validator";
 import {
   aplazoAdminActionSchema,
-  aplazoInStoreCreateSchema,
   aplazoOnlineCreateSchema,
+  aplazoRefundStatusQuerySchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   listLowStockAlertsQuerySchema,
@@ -65,6 +65,10 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import {
+  createBeneficioSchema,
+  updateBeneficioSchema,
+} from "../middleware/validators/beneficio.validator";
 import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
 import {
@@ -156,6 +160,10 @@ const swaggerDefinition = {
     {
       name: "News",
       description: "Gestión de noticias del sistema",
+    },
+    {
+      name: "Beneficios",
+      description: "Gestión de publicaciones informativas de beneficios",
     },
     {
       name: "Gallery",
@@ -325,6 +333,8 @@ const swaggerDefinition = {
       CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+      CreateBenefit: zodToJsonSchema(createBeneficioSchema),
+      UpdateBenefit: zodToJsonSchema(updateBeneficioSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
       CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
@@ -449,8 +459,95 @@ const swaggerDefinition = {
       ),
       CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
       CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
-      CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
       AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
+      AplazoRefundStatusQuery: zodToJsonSchema(aplazoRefundStatusQuerySchema),
+      AplazoRefundStatusItem: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            example: "25079",
+            description: "Identificador del refund en Aplazo",
+          },
+          status: {
+            type: "string",
+            example: "PROCESSING",
+            description: "Estado crudo devuelto por Aplazo para ese refund",
+          },
+          refundState: {
+            type: "string",
+            enum: ["none", "requested", "processing", "succeeded", "failed"],
+            example: "processing",
+            description: "Estado canónico del refund en backend",
+          },
+          refundDate: {
+            type: "string",
+            format: "date-time",
+            example: "2024-12-19T17:45:03.59153",
+          },
+          amount: {
+            type: "number",
+            example: 120,
+            description: "Monto del refund en moneda mayor",
+          },
+        },
+      },
+      AplazoRefundStatusResponse: {
+        type: "object",
+        properties: {
+          ok: {
+            type: "boolean",
+            example: true,
+          },
+          paymentAttemptId: {
+            type: "string",
+            example: "pay_attempt_123",
+          },
+          provider: {
+            type: "string",
+            example: "aplazo",
+          },
+          status: {
+            type: "string",
+            example: "partially_refunded",
+            description: "Estado canónico del intento de pago después de sincronizar refunds confirmados",
+          },
+          refundState: {
+            type: "string",
+            enum: ["none", "requested", "processing", "succeeded", "failed"],
+            example: "processing",
+            description: "Estado del refund seleccionado o más reciente",
+          },
+          providerStatus: {
+            type: "string",
+            example: "PROCESSING",
+          },
+          refundId: {
+            type: "string",
+            example: "25083",
+          },
+          refundAmount: {
+            type: "number",
+            example: 10,
+            description: "Monto del refund seleccionado",
+          },
+          totalRefundedAmount: {
+            type: "number",
+            example: 120,
+            description: "Monto acumulado confirmado como reembolsado",
+          },
+          currency: {
+            type: "string",
+            example: "MXN",
+          },
+          refunds: {
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/AplazoRefundStatusItem",
+            },
+          },
+        },
+      },
 
       RegisterInventoryMovement: zodToJsonSchema(
         registerInventoryMovementSchema,
@@ -847,54 +944,79 @@ const swaggerDefinition = {
             example: "2026-02-23T15:10:00Z",
           },
         },
-        FavoritoProductSummary: {
-          type: "object",
-          properties: {
-            id: { type: "string", example: "prod_12345" },
-            clave: { type: "string", example: "JERSEY-2026-H" },
-            descripcion: {
-              type: "string",
-              example: "Jersey Oficial Local 2026",
-            },
-            precioPublico: { type: "number", example: 1299.99 },
-            imagenes: {
-              type: "array",
-              items: { type: "string", format: "uri" },
-              example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
-            },
+      },
+      Benefit: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "benefit_12345" },
+          titulo: {
+            type: "string",
+            example: "Descuento especial en taquilla",
           },
-          required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
-        },
-        Favorito: {
-          type: "object",
-          properties: {
-            id: { type: "string", example: "uid_1__prod_12345" },
-            usuarioId: { type: "string", example: "uid_1" },
-            productoId: { type: "string", example: "prod_12345" },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-              example: "2026-03-30T16:00:00Z",
-            },
+          descripcion: {
+            type: "string",
+            example: "Presenta tu membresia y recibe un beneficio exclusivo.",
           },
-          required: ["id", "usuarioId", "productoId", "createdAt"],
-        },
-        FavoritoConProducto: {
-          type: "object",
-          properties: {
-            id: { type: "string", example: "uid_1__prod_12345" },
-            usuarioId: { type: "string", example: "uid_1" },
-            createdAt: {
-              type: "string",
-              format: "date-time",
-              example: "2026-03-30T16:00:00Z",
-            },
-            producto: {
-              $ref: "#/components/schemas/FavoritoProductSummary",
-            },
+          estatus: { type: "boolean", example: true },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:00:00Z",
           },
-          required: ["id", "usuarioId", "createdAt", "producto"],
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:30:00Z",
+          },
         },
+      },
+      FavoritoProductSummary: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "prod_12345" },
+          clave: { type: "string", example: "JERSEY-2026-H" },
+          descripcion: {
+            type: "string",
+            example: "Jersey Oficial Local 2026",
+          },
+          precioPublico: { type: "number", example: 1299.99 },
+          imagenes: {
+            type: "array",
+            items: { type: "string", format: "uri" },
+            example: ["https://storage.googleapis.com/bucket/productos/jersey.jpg"],
+          },
+        },
+        required: ["id", "clave", "descripcion", "precioPublico", "imagenes"],
+      },
+      Favorito: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          productoId: { type: "string", example: "prod_12345" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+        },
+        required: ["id", "usuarioId", "productoId", "createdAt"],
+      },
+      FavoritoConProducto: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "uid_1__prod_12345" },
+          usuarioId: { type: "string", example: "uid_1" },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-03-30T16:00:00Z",
+          },
+          producto: {
+            $ref: "#/components/schemas/FavoritoProductSummary",
+          },
+        },
+        required: ["id", "usuarioId", "createdAt", "producto"],
       },
       DetalleProducto: {
         type: "object",
