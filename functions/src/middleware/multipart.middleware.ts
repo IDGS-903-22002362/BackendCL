@@ -116,11 +116,11 @@ export const parseMultipartImages = ({
       const hasAllowedMimeTypes =
         Array.isArray(allowedMimeTypes) && allowedMimeTypes.length > 0;
 
-      if (
-        !normalizedMimeType.startsWith("image/") ||
-        (hasAllowedMimeTypes &&
-          !allowedMimeTypes.includes(normalizedMimeType))
-      ) {
+      const isAllowed = hasAllowedMimeTypes
+        ? allowedMimeTypes.includes(normalizedMimeType)
+        : normalizedMimeType.startsWith("image/");
+
+      if (!isAllowed) {
         setParsingError(
           new ApiError(
             400,
@@ -239,7 +239,7 @@ export const parseMultipartImages = ({
           await cleanupTempFiles();
           next(
             parsingError ||
-              new ApiError(400, "No se pudieron procesar los archivos enviados"),
+            new ApiError(400, "No se pudieron procesar los archivos enviados"),
           );
           return;
         }

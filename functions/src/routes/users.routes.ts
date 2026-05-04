@@ -14,11 +14,14 @@ import {
   validateBody,
   validateParams,
   validateQuery,
+  verifyRole,
 } from "../middleware/validation.middleware";
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
-import { assignUserPointsSchema } from "../middleware/validators/user-points.validator";
+import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/validators/user-points.validator";
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
+import { RolUsuario } from "../models/usuario.model";
+import { assignPointsBySale } from "../controllers/users/users.points.controller";
 const router = Router();
 
 // ==========================================
@@ -712,6 +715,224 @@ router.post(
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
+
+
+/**
+ * @swagger
+ * /api/usuarios/puntos/asignaciones:
+ *   get:
+ *     summary: Historial global de asignaciones de puntos (admin/empleado)
+ *     description: |
+ *       Obtiene el historial de asignaciones manuales de puntos.
+ *
+ *       - ADMIN: puede ver todas las asignaciones
+ *       - EMPLEADO: solo puede ver las que él creó
+ *
+ *       Soporta paginación mediante cursor.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: usuarioId
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Filtrar por usuario destino
+ *       - in: query
+ *         name: origenId
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Filtrar por admin/empleado que asignó puntos (solo admin)
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - in: query
+ *         name: cursor
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Cursor de paginación (Firestore doc path)
+ *     responses:
+ *       200:
+ *         description: Historial obtenido correctamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       usuarioId:
+ *                         type: string
+ *                       usuarioNombre:
+ *                         type: string
+ *                       usuarioEmail:
+ *                         type: string
+ *                       adminNombre:
+ *                         type: string
+ *                       adminEmail:
+ *                         type: string
+ *                       puntos:
+ *                         type: number
+ *                       descripcion:
+ *                         type: string
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     nextCursor:
+ *                       type: string
+ *                       nullable: true
+ *                     hasMore:
+ *                       type: boolean
+ *       403:
+ *         description: Sin permisos
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ */
+router.get(
+  "/puntos/asignaciones",
+  authMiddleware,
+  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
+  pointsController.getHistorialAsignaciones
+);
+
+/**
+ * @swagger
+ * /api/usuarios/{id}/puntos/asignar-por-venta:
+ *   post:
+ *     summary: Asignar puntos automáticamente según monto de venta
+ *     description: |
+ *       Calcula los puntos a partir del monto de venta: **puntos = round(monto * 0.10)**
+ *       (redondeo tradicional: 0.5 hacia arriba, ≤0.4 hacia abajo).
+ *
+ *       Los puntos se asignan al usuario indicado por su ID.
+ *
+ *       **Autorización:** Requiere autenticación (Bearer token) con rol ADMIN o EMPLEADO.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: ID del usuario en la colección `usuariosApp` (Firebase UID)
+ *         schema:
+ *           type: string
+ *           example: "abc123xyz"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AssignPointsBySale'
+ *           examples:
+ *             ventaTienda:
+ *               summary: Venta en tienda física
+ *               value:
+ *                 dinero: 350.75
+ *                 descripcion: "Venta de productos en tienda física"
+ *                 origenId: "caja_01"
+ *             ventaOnline:
+ *               summary: Venta por e-commerce
+ *               value:
+ *                 dinero: 1299.99
+ *                 descripcion: "Compra web - orden #ORD-1234"
+ *                 origenId: "web_admin"
+ *     responses:
+ *       200:
+ *         description: Puntos asignados exitosamente
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Puntos asignados exitosamente por monto de venta"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "uid_usuario_123"
+ *                     montoVenta:
+ *                       type: number
+ *                       example: 350.75
+ *                     puntosAsignados:
+ *                       type: integer
+ *                       description: Puntos calculados (redondeados)
+ *                       example: 35
+ *                     puntosActuales:
+ *                       type: integer
+ *                       description: Saldo de puntos del usuario después de la asignación
+ *                       example: 1250
+ *                     descripcion:
+ *                       type: string
+ *                       example: "Venta de productos en tienda física"
+ *                     origenId:
+ *                       type: string
+ *                       example: "caja_01"
+ *             examples:
+ *               redondeoArriba:
+ *                 summary: Redondeo hacia arriba (0.5+)
+ *                 value:
+ *                   success: true
+ *                   message: "Puntos asignados exitosamente por monto de venta"
+ *                   data:
+ *                     id: "user_456"
+ *                     montoVenta: 95
+ *                     puntosAsignados: 10
+ *                     puntosActuales: 210
+ *                     descripcion: "Venta promocional"
+ *                     origenId: "admin_xyz"
+ *               redondeoAbajo:
+ *                 summary: Redondeo hacia abajo (≤0.4)
+ *                 value:
+ *                   success: true
+ *                   message: "Puntos asignados exitosamente por monto de venta"
+ *                   data:
+ *                     id: "user_789"
+ *                     montoVenta: 94
+ *                     puntosAsignados: 9
+ *                     puntosActuales: 540
+ *                     descripcion: "Compra en tienda"
+ *                     origenId: "caja_02"
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       404:
+ *         description: Usuario no encontrado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/:id/puntos/asignar-por-venta",
+  authMiddleware,
+  validateParams(idParamSchema),
+  validateBody(assignPointsBySaleSchema),
+  assignPointsBySale
+);
 
 
 
