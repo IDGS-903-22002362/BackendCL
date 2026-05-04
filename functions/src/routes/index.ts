@@ -34,6 +34,7 @@ import ligaMxRoutes from "./liga-mx.routes";
 import paymentsV2Routes from "./payments-v2.routes";
 import adminPaymentsRoutes from "./admin-payments.routes";
 import webhooksRoutes from "./webhooks.routes";
+import bannerRoutes from "./banner.routes";
 
 const router = Router();
 
@@ -64,6 +65,7 @@ router.use("/notificaciones", notificationsRoutes);
 router.use("/favoritos", favoritosRoutes);
 router.use("/beneficios", beneficiosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
+router.use("/banners", bannerRoutes);
 
 // Futuros módulos:
 

@@ -5,7 +5,7 @@ import instagramService from "./services/instagram.service";
 import { firestoreApp } from "./config/app.firebase";
 
 const SCHEDULE_CONFIG = {
-  schedule: "every 1 hours",
+  schedule: "every 6 hours",
   timeZone: "America/Mexico_City",
 } as const;
 
