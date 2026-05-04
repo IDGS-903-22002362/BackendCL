@@ -23,6 +23,7 @@ const CONFIGURACION_COLLECTION = "configuracion";
 const CONFIGURACION_PUNTOS_DOC = "puntos";
 const MOVIMIENTOS_PUNTOS_SUBCOLECCION = "movimientos_puntos";
 const HISTORIAL_PUNTOS_SUBCOLECCION = "historial_puntos_anual";
+const ASIGNACIONES_HECHAS_SUBCOLECCION = "asignaciones_hechas"; // ← Subcollection del admin/empleado
 const PUNTOS_BIENVENIDA_REGISTRO = 40;
 
 interface RegistrarMovimientoOptions {
@@ -33,7 +34,7 @@ interface RegistrarMovimientoOptions {
   descripcion?: string;
 }
 
-interface AddPointsOptions extends Partial<RegistrarMovimientoOptions> {}
+interface AddPointsOptions extends Partial<RegistrarMovimientoOptions> { }
 
 interface ResumenExpiracionVencida {
   usuariosRevisados: number;
@@ -363,6 +364,17 @@ class PointsService {
         createdAt: now,
       };
 
+      // Si es un movimiento admin, guardarlo también en la subcollection del admin/empleado
+      if (options.origen === "admin" && options.origenId) {
+        const adminUserRef = firestoreApp
+          .collection(USUARIOS_COLLECTION)
+          .doc(options.origenId);
+        const asignacionRef = adminUserRef
+          .collection(ASIGNACIONES_HECHAS_SUBCOLECCION)
+          .doc(movimientoRef.id);
+        tx.set(asignacionRef, movimiento);
+      }
+
       const historialActualizado = this.actualizarHistorialUsuario(
         historialActual,
         resumenActualizado,
@@ -444,7 +456,7 @@ class PointsService {
         if (
           historialActual.cicloActual !== cicloActual.numero ||
           historialActual.proximaExpiracionProgramada.toMillis() !==
-            cicloActual.fechaFinProgramada.toMillis()
+          cicloActual.fechaFinProgramada.toMillis()
         ) {
           tx.set(
             userRef,
@@ -601,6 +613,45 @@ class PointsService {
     }
 
     return configuracionExpiracionPuntos.diasExpiracionPorDefecto;
+  }
+
+  // Obtener asignaciones hechas por un admin/empleado específico
+  async getAsignacionesHechas(origenId: string, filtros: {
+    usuarioId?: string;
+    limit?: number;
+    startAfterDoc?: FirebaseFirestore.QueryDocumentSnapshot;
+  }) {
+    const adminUserRef = firestoreApp
+      .collection(USUARIOS_COLLECTION)
+      .doc(origenId);
+
+    // Query desde la subcollection del admin/empleado
+    let query = adminUserRef
+      .collection(ASIGNACIONES_HECHAS_SUBCOLECCION)
+      .orderBy("createdAt", "desc");
+
+    // Filtro opcional por usuarioId si se pasa
+    if (filtros.usuarioId) {
+      query = query.where("usuarioId", "==", filtros.usuarioId);
+    }
+
+    const limit = Math.min(filtros.limit || 50, 100);
+    query = query.limit(limit);
+
+    if (filtros.startAfterDoc) {
+      query = query.startAfter(filtros.startAfterDoc);
+    }
+
+    const snapshot = await query.get();
+    const movimientos = snapshot.docs.map((doc) => {
+      const data = doc.data() as MovimientoPuntos;
+      return { id: doc.id, ...data };
+    });
+
+    const lastDoc = snapshot.docs[snapshot.docs.length - 1];
+    const nextCursor = lastDoc ? lastDoc.ref.path : null;
+
+    return { movimientos, nextCursor };
   }
 }
 
