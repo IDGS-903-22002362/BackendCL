@@ -34,6 +34,7 @@ export const remove = async (req: Request, res: Response) => {
     }
 };
 
+//reactiva un banner previamente eliminado con softdelete.
 export const reactivate = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
