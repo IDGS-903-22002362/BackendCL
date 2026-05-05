@@ -6,9 +6,13 @@ import {
   validateQuery,
 } from "../middleware/validation.middleware";
 import {
+  aplazoRefundRequestParamSchema,
   aplazoAdminActionSchema,
   aplazoRefundStatusQuerySchema,
+  approveAplazoRefundRequestSchema,
+  listAdminAplazoRefundRequestsQuerySchema,
   paymentAttemptStatusParamSchema,
+  rejectAplazoRefundRequestSchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   paymentAuthMiddleware,
@@ -16,6 +20,101 @@ import {
 } from "../middleware/payments-auth.middleware";
 
 const router = Router();
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests:
+ *   get:
+ *     summary: Listar solicitudes de devolución Aplazo para admin
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [pending, approved, rejected, processed]
+ *     responses:
+ *       200:
+ *         description: Solicitudes de devolución Aplazo
+ */
+router.get(
+  "/aplazo/refund-requests",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateQuery(listAdminAplazoRefundRequestsQuerySchema),
+  paymentsController.listAdminAplazoRefundRequests,
+);
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests/{refundRequestId}/approve:
+ *   post:
+ *     summary: Aprobar y procesar devolución Aplazo
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: refundRequestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ApproveAplazoRefundRequest'
+ *     responses:
+ *       200:
+ *         description: Solicitud procesada
+ *       502:
+ *         description: Aplazo no pudo procesar el refund
+ */
+router.post(
+  "/aplazo/refund-requests/:refundRequestId/approve",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateParams(aplazoRefundRequestParamSchema),
+  validateBody(approveAplazoRefundRequestSchema),
+  paymentsController.approveAplazoRefundRequest,
+);
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests/{refundRequestId}/reject:
+ *   post:
+ *     summary: Rechazar solicitud de devolución Aplazo
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: refundRequestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RejectAplazoRefundRequest'
+ *     responses:
+ *       200:
+ *         description: Solicitud rechazada
+ */
+router.post(
+  "/aplazo/refund-requests/:refundRequestId/reject",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateParams(aplazoRefundRequestParamSchema),
+  validateBody(rejectAplazoRefundRequestSchema),
+  paymentsController.rejectAplazoRefundRequest,
+);
 
 /**
  * @swagger

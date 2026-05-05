@@ -53,6 +53,11 @@ import {
   aplazoAdminActionSchema,
   aplazoOnlineCreateSchema,
   aplazoRefundStatusQuerySchema,
+  approveAplazoRefundRequestSchema,
+  createAplazoRefundRequestSchema,
+  listAdminAplazoRefundRequestsQuerySchema,
+  listAplazoRefundRequestsQuerySchema,
+  rejectAplazoRefundRequestSchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   listLowStockAlertsQuerySchema,
@@ -461,6 +466,47 @@ const swaggerDefinition = {
       CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
       AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
       AplazoRefundStatusQuery: zodToJsonSchema(aplazoRefundStatusQuerySchema),
+      CreateAplazoRefundRequest: zodToJsonSchema(
+        createAplazoRefundRequestSchema,
+      ),
+      ListAplazoRefundRequestsQuery: zodToJsonSchema(
+        listAplazoRefundRequestsQuerySchema,
+      ),
+      ListAdminAplazoRefundRequestsQuery: zodToJsonSchema(
+        listAdminAplazoRefundRequestsQuerySchema,
+      ),
+      ApproveAplazoRefundRequest: zodToJsonSchema(
+        approveAplazoRefundRequestSchema,
+      ),
+      RejectAplazoRefundRequest: zodToJsonSchema(
+        rejectAplazoRefundRequestSchema,
+      ),
+      AplazoRefundRequest: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "refund_req_123" },
+          provider: { type: "string", example: "aplazo" },
+          orderId: { type: "string", example: "orden_123" },
+          paymentAttemptId: { type: "string", example: "pago_123" },
+          userId: { type: "string", example: "uid_123" },
+          reason: { type: "string", example: "No era la talla correcta" },
+          status: {
+            type: "string",
+            enum: ["pending", "approved", "rejected", "processed"],
+            example: "pending",
+          },
+          refundAmountMinor: { type: "integer", example: 10000 },
+          refundAmount: { type: "number", example: 100 },
+          providerRefundId: { type: "string", example: "25083" },
+          providerStatus: { type: "string", example: "REQUESTED" },
+          rejectionReason: { type: "string", example: "Fuera de política" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          approvedAt: { type: "string", format: "date-time" },
+          processedAt: { type: "string", format: "date-time" },
+          rejectedAt: { type: "string", format: "date-time" },
+        },
+      },
       AplazoRefundStatusItem: {
         type: "object",
         properties: {
