@@ -80,6 +80,7 @@ import paymentReconciliationService, {
   PaymentReconciliationService,
 } from "../src/services/payments/payment-reconciliation.service";
 import { PaymentRefundRepository } from "../src/services/payments/payment-refund.repository";
+import { PaymentRefundRequestRepository } from "../src/services/payments/payment-refund-request.repository";
 import productService from "../src/services/product.service";
 
 function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
@@ -352,6 +353,7 @@ describe("Aplazo payments service", () => {
       finalizer,
       reconciliation,
       new PaymentRefundRepository(),
+      new PaymentRefundRequestRepository(),
     );
   };
 
@@ -661,6 +663,7 @@ describe("Aplazo payments service", () => {
       ventasPos: {},
       paymentEventLogs: {},
       paymentRefunds: {},
+      paymentRefundRequests: {},
     });
   };
 
@@ -899,6 +902,208 @@ describe("Aplazo payments service", () => {
     expect(refundRecords[0]).toMatchObject({
       status: "failed",
       failedReason: "Aplazo refund failed",
+    });
+  });
+
+  it("creates a pending Aplazo refund request by orderId", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    expect(request).toMatchObject({
+      provider: "aplazo",
+      orderId: "orden_refund",
+      paymentAttemptId: "pago_refund",
+      userId: "user_1",
+      reason: "No era la talla correcta",
+      status: "pending",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(1);
+  });
+
+  it("blocks customer Aplazo refund requests for another user's order", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    await expect(
+      service.createAplazoRefundRequest(
+        { uid: "user_2", rol: RolUsuario.CLIENTE },
+        {
+          orderId: "orden_refund",
+          reason: "No era la talla correcta",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_FORBIDDEN",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(0);
+  });
+
+  it("rejects duplicate open Aplazo refund requests for the same payment", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "Primer motivo",
+      },
+    );
+
+    await expect(
+      service.createAplazoRefundRequest(
+        { uid: "user_1", rol: RolUsuario.CLIENTE },
+        {
+          orderId: "orden_refund",
+          reason: "Segundo motivo",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "REFUND_REQUEST_ALREADY_OPEN",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(1);
+  });
+
+  it("lists pending Aplazo refund requests for admin", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+    await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const requests = await service.listAplazoRefundRequestsForAdmin(
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { status: "pending" },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      status: "pending",
+      orderId: "orden_refund",
+    });
+  });
+
+  it("rejects an Aplazo refund request without calling Aplazo", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const rejected = await service.rejectAplazoRefundRequest(
+      request.id!,
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { reason: "Fuera de política" },
+    );
+
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      rejectionReason: "Fuera de política",
+      rejectedBy: "admin_1",
+    });
+    expect(aplazoProviderMocks.getStatus).not.toHaveBeenCalled();
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("approves an Aplazo refund request and processes the provider refund", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    mockAplazoRefundSuccess("777");
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const processed = await service.approveAplazoRefundRequest(
+      request.id!,
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      {
+        refundAmountMinor: 10000,
+        reason: "Aprobado por soporte",
+      },
+    );
+
+    expect(aplazoProviderMocks.refund).toHaveBeenCalledWith({
+      paymentAttempt: expect.objectContaining({
+        id: "pago_refund",
+        providerReference: "cart_refund",
+      }),
+      refundAmountMinor: 10000,
+      reason: "Aprobado por soporte",
+    });
+    expect(processed).toMatchObject({
+      status: "processed",
+      refundAmountMinor: 10000,
+      providerRefundId: "777",
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_refund")).toMatchObject({
+      status: PaymentStatus.PARTIALLY_REFUNDED,
+      refundTotalMinor: 10000,
+    });
+  });
+
+  it("keeps an Aplazo refund request approved when provider refund fails", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    aplazoProviderMocks.refund.mockRejectedValue(
+      Object.assign(new Error("Aplazo refund failed"), {
+        statusCode: 502,
+        code: "PAYMENT_PROVIDER_ERROR",
+      }),
+    );
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    await expect(
+      service.approveAplazoRefundRequest(
+        request.id!,
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        {
+          refundAmountMinor: 10000,
+          reason: "Aprobado por soporte",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "APLAZO_REFUND_FAILED",
+    });
+
+    expect(fakeFirestore.getDoc("paymentRefundRequests", request.id!)).toMatchObject({
+      status: "approved",
+      refundAmountMinor: 10000,
+      lastProcessingError: expect.objectContaining({
+        code: "APLAZO_REFUND_FAILED",
+      }),
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_refund")).toMatchObject({
+      status: PaymentStatus.PAID,
     });
   });
 
