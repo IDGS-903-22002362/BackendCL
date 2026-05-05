@@ -34,6 +34,16 @@ export const remove = async (req: Request, res: Response) => {
     }
 };
 
+export const reactivate = async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        await bannerService.reactivateBanner(id);
+        return res.json({ success: true, message: "Banner reactivado" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Error al reactivar banner" });
+    }
+};
+
 export const uploadBackgroundImage = async (req: Request, res: Response) => {
     const file = req.file;
     if (!file) {
