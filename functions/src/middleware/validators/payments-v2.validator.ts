@@ -49,6 +49,44 @@ export const paymentAttemptStatusParamSchema = z.object({
   paymentAttemptId: z.string().trim().min(1).max(120),
 });
 
+export const aplazoRefundRequestParamSchema = z.object({
+  refundRequestId: z.string().trim().min(1).max(120),
+});
+
+export const createAplazoRefundRequestSchema = z
+  .object({
+    orderId: z.string().trim().min(1).max(120),
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const listAplazoRefundRequestsQuerySchema = z
+  .object({
+    orderId: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+
+export const listAdminAplazoRefundRequestsQuerySchema = z
+  .object({
+    status: z
+      .enum(["pending", "approved", "rejected", "processed"])
+      .optional(),
+  })
+  .strict();
+
+export const approveAplazoRefundRequestSchema = z
+  .object({
+    refundAmountMinor: z.number().int().positive(),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict();
+
+export const rejectAplazoRefundRequestSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
 export const aplazoAdminActionSchema = z
   .object({
     reason: z.string().trim().max(500).optional(),

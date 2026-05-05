@@ -27,6 +27,11 @@ import paymentReconciliationService from "./payment-reconciliation.service";
 import paymentRefundRepository, {
   PaymentRefundRepository,
 } from "./payment-refund.repository";
+import paymentRefundRequestRepository, {
+  PaymentRefundRequestRecord,
+  PaymentRefundRequestRepository,
+  PaymentRefundRequestStatus,
+} from "./payment-refund-request.repository";
 import aplazoProvider from "./providers/aplazo.provider";
 import {
   isValidEmail,
@@ -214,6 +219,8 @@ export class PaymentsService {
     private readonly finalizer = paymentFinalizerService,
     private readonly reconciliationService = paymentReconciliationService,
     private readonly refundRepo: PaymentRefundRepository = paymentRefundRepository,
+    private readonly refundRequestRepo: PaymentRefundRequestRepository =
+      paymentRefundRequestRepository,
   ) {}
 
   async createAplazoOnline(
@@ -854,6 +861,203 @@ export class PaymentsService {
     };
   }
 
+  async createAplazoRefundRequest(
+    actor: AuthActor,
+    input: { orderId: string; reason: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    const order = await this.requireOrderForRefundRequest(input.orderId, user);
+    const attempt = await this.requireAplazoRefundableAttemptForOrder(order.id);
+    await this.assertActorCanAccessAttempt(attempt, user);
+
+    const openRequest = await this.refundRequestRepo.findOpenByPaymentAttempt(
+      attempt.id!,
+    );
+    if (openRequest) {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_ALREADY_OPEN",
+        "Ya existe una solicitud de devolución pendiente o aprobada para este pago",
+        {
+          refundRequestId: openRequest.id,
+          paymentAttemptId: attempt.id,
+        },
+      );
+    }
+
+    return this.refundRequestRepo.create({
+      orderId: order.id,
+      paymentAttemptId: attempt.id!,
+      userId: user.uid,
+      reason: input.reason,
+    });
+  }
+
+  async listAplazoRefundRequestsForActor(
+    actor: AuthActor,
+    input: { orderId?: string } = {},
+  ): Promise<PaymentRefundRequestRecord[]> {
+    const user = await this.requireAuthenticatedActor(actor);
+    return this.refundRequestRepo.listByUser(user.uid, input);
+  }
+
+  async getAplazoRefundRequestForActor(
+    refundRequestId: string,
+    actor: AuthActor,
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.userId !== user.uid && !isPrivileged(user.rol)) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "No tienes permisos para consultar esta solicitud de devolución",
+      );
+    }
+
+    return request;
+  }
+
+  async listAplazoRefundRequestsForAdmin(
+    actor: AuthActor,
+    input: { status?: PaymentRefundRequestStatus } = {},
+  ): Promise<PaymentRefundRequestRecord[]> {
+    const user = await this.requireAuthenticatedActor(actor);
+    this.assertPrivilegedPosActor(user);
+    return this.refundRequestRepo.listForAdmin(input);
+  }
+
+  async approveAplazoRefundRequest(
+    refundRequestId: string,
+    actor: AuthActor,
+    input: { refundAmountMinor: number; reason?: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (user.rol !== RolUsuario.ADMIN) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN puede aprobar solicitudes de devolución Aplazo",
+      );
+    }
+
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.status !== "pending" && request.status !== "approved") {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_NOT_APPROVABLE",
+        "Solo solicitudes pendientes o aprobadas con error se pueden aprobar/procesar",
+        {
+          refundRequestId,
+          status: request.status,
+        },
+      );
+    }
+
+    const config = getAplazoConfig();
+    if (!config.refundsEnabled) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_REFUND_UNSUPPORTED",
+        "Refund Aplazo deshabilitado por feature flag",
+      );
+    }
+
+    const attempt = await this.requirePaymentAttempt(request.paymentAttemptId);
+    if (attempt.provider !== ProveedorPago.APLAZO) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "La solicitud no corresponde a un pago Aplazo",
+      );
+    }
+    this.assertAplazoOnlineAttempt(attempt);
+    this.assertAplazoRefundLocalStatus(attempt);
+    this.resolveAplazoRefundAmounts(attempt, input.refundAmountMinor);
+
+    await this.refundRequestRepo.markApproved({
+      id: refundRequestId,
+      approvedBy: user.uid,
+      refundAmountMinor: input.refundAmountMinor,
+      reason: input.reason,
+    });
+
+    try {
+      const updatedAttempt = await this.refundAplazoPaymentAttempt(
+        request.paymentAttemptId,
+        user,
+        {
+          refundAmountMinor: input.refundAmountMinor,
+          reason: input.reason || request.reason,
+        },
+      );
+
+      return this.refundRequestRepo.markProcessed({
+        id: refundRequestId,
+        providerRefundId: updatedAttempt.refundId,
+        providerStatus: updatedAttempt.providerStatus,
+        providerResponse: {
+          paymentAttemptId: updatedAttempt.id,
+          refundState: updatedAttempt.refundState,
+          refundTotalMinor: updatedAttempt.refundTotalMinor,
+          refundRemainingMinor: updatedAttempt.refundRemainingMinor,
+        },
+      });
+    } catch (error) {
+      await this.refundRequestRepo.markProcessingFailed(
+        refundRequestId,
+        sanitizeForStorage({
+          code:
+            error instanceof PaymentApiError
+              ? error.code
+              : "UNKNOWN_REFUND_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Error desconocido al procesar refund Aplazo",
+          details: error instanceof PaymentApiError ? error.details : undefined,
+          failedAt: Timestamp.now(),
+        }),
+      );
+
+      throw error;
+    }
+  }
+
+  async rejectAplazoRefundRequest(
+    refundRequestId: string,
+    actor: AuthActor,
+    input: { reason: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (user.rol !== RolUsuario.ADMIN) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN puede rechazar solicitudes de devolución Aplazo",
+      );
+    }
+
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.status !== "pending") {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_NOT_REJECTABLE",
+        "Solo solicitudes pendientes se pueden rechazar",
+        {
+          refundRequestId,
+          status: request.status,
+        },
+      );
+    }
+
+    return this.refundRequestRepo.markRejected({
+      id: refundRequestId,
+      rejectedBy: user.uid,
+      reason: input.reason,
+    });
+  }
+
   async resolveBrowserReturnState(
     lookup: BrowserReturnLookup,
   ): Promise<{
@@ -1023,6 +1227,77 @@ export class PaymentsService {
     return order;
   }
 
+  private async requireOrderForRefundRequest(
+    orderId: string,
+    actor: AuthActor,
+  ): Promise<Orden & { id: string }> {
+    const snapshot = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(orderId)
+      .get();
+    if (!snapshot.exists) {
+      throw new PaymentApiError(
+        404,
+        "PAYMENT_ORDER_INVALID",
+        `Orden ${orderId} no encontrada`,
+      );
+    }
+
+    const order = {
+      id: snapshot.id,
+      ...(snapshot.data() as Orden),
+    };
+
+    if (order.usuarioId !== actor.uid) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "No puedes solicitar devolución de una orden ajena",
+      );
+    }
+
+    return order;
+  }
+
+  private async requireAplazoRefundableAttemptForOrder(
+    orderId: string,
+  ): Promise<PaymentAttempt> {
+    const attempt = await this.paymentAttemptRepo.findLatestByOrderAndFlow(
+      ProveedorPago.APLAZO,
+      orderId,
+      PaymentFlowType.ONLINE,
+    );
+    if (!attempt) {
+      throw new PaymentApiError(
+        404,
+        "PAYMENT_ATTEMPT_NOT_FOUND",
+        "No se encontró un pago Aplazo online para esta orden",
+        {
+          orderId,
+        },
+      );
+    }
+
+    this.assertAplazoRefundLocalStatus(attempt);
+    this.resolveAplazoRefundAmounts(attempt);
+    return attempt;
+  }
+
+  private async requireRefundRequest(
+    refundRequestId: string,
+  ): Promise<PaymentRefundRequestRecord> {
+    const request = await this.refundRequestRepo.getById(refundRequestId);
+    if (!request) {
+      throw new PaymentApiError(
+        404,
+        "REFUND_REQUEST_NOT_FOUND",
+        `Solicitud de devolución ${refundRequestId} no encontrada`,
+      );
+    }
+
+    return request;
+  }
+
   private async resolveOnlineCustomer(
     actor: AuthActor,
     input?: PaymentCustomerInput,
@@ -1190,7 +1465,10 @@ export class PaymentsService {
 
   private assertAplazoRefundLocalStatus(attempt: PaymentAttempt): void {
     const currentStatus = toPaymentStatus(attempt);
-    if (currentStatus === PaymentStatus.PAID) {
+    if (
+      currentStatus === PaymentStatus.PAID ||
+      currentStatus === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
       return;
     }
 
@@ -1232,7 +1510,10 @@ export class PaymentsService {
   }
 
   private assertAplazoRefundProviderStatus(status: PaymentStatus): void {
-    if (status === PaymentStatus.PAID) {
+    if (
+      status === PaymentStatus.PAID ||
+      status === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
       return;
     }
 
