@@ -294,6 +294,28 @@ router.put("/:id", authMiddleware, requireAdmin, validateParams(idParamSchema), 
  */
 router.delete("/:id", authMiddleware, requireAdmin, validateParams(idParamSchema), commandController.remove);
 
+
+
+/**
+ * @swagger
+ * /api/banners/{id}/reactivate:
+ *   patch:
+ *     summary: Reactivar un banner eliminado
+ *     tags: [Banners]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Banner reactivado exitosamente
+ */
+router.patch("/:id/reactivate", authMiddleware, requireAdmin, validateParams(idParamSchema), commandController.reactivate);
+
 /**
  * @swagger
  * /api/banners/{id}/imagen:

@@ -94,6 +94,11 @@ class BannerService {
         await docRef.update({ active: false, updatedAt: admin.firestore.Timestamp.now() });
     }
 
+    async reactivateBanner(id: string): Promise<void> {
+        const docRef = firestoreTienda.collection(BANNERS_COLLECTION).doc(id);
+        await docRef.update({ active: true, updatedAt: admin.firestore.Timestamp.now() });
+    }
+
 
 
     async resolveProductsForBanner(config: BannerContentConfig): Promise<Producto[]> {
