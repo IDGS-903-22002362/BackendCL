@@ -5,6 +5,7 @@ import instagramService from "./services/instagram.service";
 import { firestoreApp } from "./config/app.firebase";
 
 const SCHEDULE_CONFIG = {
+  //Cambio de consumo de api por 6 horas, para evitar bloqueos por parte de la API de Insta.
   schedule: "every 6 hours",
   timeZone: "America/Mexico_City",
 } as const;
