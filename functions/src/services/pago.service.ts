@@ -19,6 +19,7 @@ import {
   getStripePublishableKey,
   getStripeWebhookSecret,
 } from "../lib/stripe";
+import pickupOrderService from "./pickup-order.service";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
@@ -742,9 +743,13 @@ class PagoService {
             ? (ordenData.paymentMetadata.cartId as string)
             : undefined;
 
-        const paymentMetadata = cartId
-          ? { orderId, userId, cartId }
-          : { orderId, userId };
+        const paymentMetadata = {
+          ...(cartId ? { cartId } : {}),
+          orderId,
+          userId,
+          fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+          pickupLocationId: ordenData.pickupLocationId || "",
+        };
 
         const pagoDraft: Omit<Pago, "id"> = {
           ordenId: orderId,
@@ -782,6 +787,8 @@ class PagoService {
                 metodoPago: MetodoPago.TARJETA,
                 pagoId: pagoRef.id,
                 cartId: cartId || "",
+                fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+                pickupLocationId: ordenData.pickupLocationId || "",
               },
             },
             { idempotencyKey: resolvedIdempotencyKey },
@@ -1021,9 +1028,13 @@ class PagoService {
           ? (ordenData.paymentMetadata.cartId as string)
           : undefined;
 
-      const paymentMetadata = cartId
-        ? { orderId, userId, cartId }
-        : { orderId, userId };
+      const paymentMetadata = {
+        ...(cartId ? { cartId } : {}),
+        orderId,
+        userId,
+        fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+        pickupLocationId: ordenData.pickupLocationId || "",
+      };
 
       const pagoDraft: Omit<Pago, "id"> = {
         ordenId: orderId,
@@ -1077,6 +1088,8 @@ class PagoService {
             userId,
             pagoId: pagoRef.id,
             cartId: cartId || "",
+            fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+            pickupLocationId: ordenData.pickupLocationId || "",
           },
           payment_intent_data: {
             metadata: {
@@ -1084,6 +1097,8 @@ class PagoService {
               userId,
               pagoId: pagoRef.id,
               cartId: cartId || "",
+              fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+              pickupLocationId: ordenData.pickupLocationId || "",
             },
           },
         },
@@ -1739,6 +1754,11 @@ class PagoService {
 
     const orderSnapshot = await pagoMatch.ordenRef.get();
     const orderData = orderSnapshot.data() as Orden | undefined;
+    await pickupOrderService.finalizePaidPickupOrder({
+      orderId: pagoMatch.ordenId,
+      source: "stripe",
+      sourceEventId: event.id,
+    });
     if (orderData?.usuarioId) {
       await this.enqueueOrderConfirmedNotification(
         pagoMatch.ordenId,
@@ -1894,6 +1914,11 @@ class PagoService {
 
     const orderSnapshot = await pagoMatch.ordenRef.get();
     const orderData = orderSnapshot.data() as Orden | undefined;
+    await pickupOrderService.finalizePaidPickupOrder({
+      orderId: pagoMatch.ordenId,
+      source: "stripe",
+      sourceEventId: event.id,
+    });
     if (orderData?.usuarioId) {
       await this.enqueueOrderConfirmedNotification(
         pagoMatch.ordenId,

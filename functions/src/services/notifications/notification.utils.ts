@@ -26,6 +26,11 @@ export const resolveNotificationCategory = (
     case "order_confirmed":
     case "order_shipped":
     case "order_delivered":
+    case "pickup_paid_pending_preparation":
+    case "pickup_ready_for_pickup":
+    case "pickup_picked_up":
+    case "pickup_expired":
+    case "pickup_reminder":
       return "order";
     case "cart_abandoned":
       return "cart";
@@ -57,6 +62,8 @@ export const resolveNotificationPriority = (
     case "order_confirmed":
     case "order_shipped":
     case "order_delivered":
+    case "pickup_ready_for_pickup":
+    case "pickup_picked_up":
       return "high";
     default:
       return "normal";
@@ -79,6 +86,11 @@ export const resolveNotificationEntity = (
     case "order_confirmed":
     case "order_shipped":
     case "order_delivered":
+    case "pickup_paid_pending_preparation":
+    case "pickup_ready_for_pickup":
+    case "pickup_picked_up":
+    case "pickup_expired":
+    case "pickup_reminder":
       if (!input.orderId) {
         throw new Error("orderId es requerido para eventos de orden");
       }
@@ -223,4 +235,9 @@ export const isTransactionalNotification = (
   eventType === "order_created" ||
   eventType === "order_confirmed" ||
   eventType === "order_shipped" ||
-  eventType === "order_delivered";
+  eventType === "order_delivered" ||
+  eventType === "pickup_paid_pending_preparation" ||
+  eventType === "pickup_ready_for_pickup" ||
+  eventType === "pickup_picked_up" ||
+  eventType === "pickup_expired" ||
+  eventType === "pickup_reminder";

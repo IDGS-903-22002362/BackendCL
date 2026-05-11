@@ -10,7 +10,12 @@
  */
 
 import { z } from "zod";
-import { EstadoOrden, MetodoPago } from "../../models/orden.model";
+import {
+  EstadoOrden,
+  FulfillmentMethod,
+  FulfillmentStatus,
+  MetodoPago,
+} from "../../models/orden.model";
 
 /**
  * Schema para validar items individuales de la orden
@@ -137,6 +142,14 @@ export const direccionEnvioSchema = z
   })
   .strict();
 
+export const pickupContactSchema = z
+  .object({
+    name: z.string().trim().min(1, "El nombre de contacto es requerido").max(120),
+    phone: z.string().trim().max(30).optional(),
+    email: z.string().trim().email("El correo de contacto debe ser válido").optional(),
+  })
+  .strict();
+
 /**
  * Schema para crear una nueva orden
  * Valida todos los campos requeridos con strict mode
@@ -188,7 +201,16 @@ export const createOrdenSchema = z
       .optional()
       .default(EstadoOrden.PENDIENTE),
 
-    direccionEnvio: direccionEnvioSchema,
+    fulfillmentMethod: z
+      .nativeEnum(FulfillmentMethod)
+      .optional()
+      .default(FulfillmentMethod.DELIVERY),
+
+    direccionEnvio: direccionEnvioSchema.optional(),
+
+    pickupLocationId: z.string().trim().min(1).max(160).optional(),
+
+    pickupContact: pickupContactSchema.optional(),
 
     metodoPago: z.nativeEnum(MetodoPago, {
       errorMap: () => ({
@@ -207,7 +229,41 @@ export const createOrdenSchema = z
       .max(1000, "Las notas no pueden exceder 1000 caracteres")
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    const method = data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+    if (method === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["direccionEnvio"],
+        message: "La dirección de envío es requerida para DELIVERY",
+      });
+    }
+
+    if (method === FulfillmentMethod.PICKUP) {
+      if (!data.pickupLocationId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickupLocationId"],
+          message: "La sucursal de pickup es requerida para PICKUP",
+        });
+      }
+      if (!data.pickupContact) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickupContact"],
+          message: "El contacto de pickup es requerido para PICKUP",
+        });
+      }
+      if (typeof data.costoEnvio === "number" && data.costoEnvio > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["costoEnvio"],
+          message: "PICKUP no permite costo de envío",
+        });
+      }
+    }
+  });
 
 /**
  * Schema para actualizar una orden existente
@@ -245,6 +301,8 @@ export const updateOrdenSchema = z
       .trim()
       .max(1000, "Las notas no pueden exceder 1000 caracteres")
       .optional(),
+
+    fulfillmentStatus: z.nativeEnum(FulfillmentStatus).optional(),
   })
   .strict();
 

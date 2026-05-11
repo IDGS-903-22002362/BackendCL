@@ -30,6 +30,8 @@ import {
   ItemOrden,
   DireccionEnvio,
   MetodoPago,
+  FulfillmentMethod,
+  PickupContact,
 } from "../models/orden.model";
 import ordenService from "./orden.service";
 import {
@@ -886,7 +888,10 @@ export class CarritoService {
   async checkout(
     usuarioId: string,
     checkoutData: {
-      direccionEnvio: DireccionEnvio;
+      fulfillmentMethod?: FulfillmentMethod;
+      direccionEnvio?: DireccionEnvio;
+      pickupLocationId?: string;
+      pickupContact?: PickupContact;
       metodoPago: MetodoPago;
       costoEnvio?: number;
       notas?: string;
@@ -927,7 +932,11 @@ export class CarritoService {
       subtotal: carrito.subtotal,
       impuestos: 0,
       total: carrito.total,
+      fulfillmentMethod:
+        checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY,
       direccionEnvio: checkoutData.direccionEnvio,
+      pickupLocationId: checkoutData.pickupLocationId,
+      pickupContact: checkoutData.pickupContact,
       metodoPago: checkoutData.metodoPago,
       costoEnvio: checkoutData.costoEnvio,
       notas: checkoutData.notas,

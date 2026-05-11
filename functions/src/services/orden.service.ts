@@ -17,6 +17,8 @@ import {
   Orden,
   CrearOrdenDTO,
   EstadoOrden,
+  FulfillmentMethod,
+  FulfillmentStatus,
   ItemOrden,
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
@@ -27,6 +29,7 @@ import {
   completeInventarioPorTalla,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
+import pickupLocationService from "./pickup-location.service";
 
 /**
  * Colección de órdenes en Firestore
@@ -145,6 +148,43 @@ export class OrdenService {
       const itemsValidados: ItemOrden[] = [];
       let subtotalCalculado = 0;
       const requestedByVariant = new Map<string, number>();
+      const fulfillmentMethod =
+        data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+
+      if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+        throw new Error("La dirección de envío es requerida para DELIVERY");
+      }
+
+      let pickupLocationSnapshot: Orden["pickupLocation"] | undefined;
+      if (fulfillmentMethod === FulfillmentMethod.PICKUP) {
+        if (!data.pickupLocationId) {
+          throw new Error("La sucursal de pickup es requerida para PICKUP");
+        }
+        if (!data.pickupContact) {
+          throw new Error("El contacto de pickup es requerido para PICKUP");
+        }
+        if (typeof data.costoEnvio === "number" && data.costoEnvio > 0) {
+          throw new Error("PICKUP no permite costo de envío");
+        }
+        const pickupLocation = await pickupLocationService.requireActivePickupLocation(
+          data.pickupLocationId,
+        );
+        pickupLocationSnapshot = {
+          id: pickupLocation.id!,
+          name: pickupLocation.name,
+          address: pickupLocation.address,
+          city: pickupLocation.city,
+          state: pickupLocation.state,
+          postalCode: pickupLocation.postalCode,
+          country: pickupLocation.country,
+          phone: pickupLocation.phone,
+          pickupInstructions: pickupLocation.pickupInstructions,
+          businessHours: pickupLocation.businessHours,
+          preparationCutoffTime: pickupLocation.preparationCutoffTime,
+          estimatedPreparationMinutes:
+            pickupLocation.estimatedPreparationMinutes,
+        };
+      }
 
       for (const item of data.items) {
         // Obtener producto desde Firestore
@@ -206,7 +246,8 @@ export class OrdenService {
 
       // PASO 2: Calcular totales
       const impuestosCalculados = subtotalCalculado * TASA_IVA; // 0% por ahora
-      const costoEnvioCalculado = data.costoEnvio ?? 0;
+      const costoEnvioCalculado =
+        fulfillmentMethod === FulfillmentMethod.PICKUP ? 0 : data.costoEnvio ?? 0;
       const totalCalculado =
         subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
 
@@ -227,8 +268,18 @@ export class OrdenService {
         impuestos: impuestosCalculados, // Calculado por servidor
         total: totalCalculado, // Calculado por servidor
         estado: EstadoOrden.PENDIENTE, // Siempre PENDIENTE al crear
-        direccionEnvio: data.direccionEnvio,
+        ...(data.direccionEnvio ? { direccionEnvio: data.direccionEnvio } : {}),
         metodoPago: data.metodoPago,
+        fulfillmentMethod,
+        fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT,
+        ...(fulfillmentMethod === FulfillmentMethod.PICKUP
+          ? {
+              pickupLocationId: data.pickupLocationId,
+              pickupLocation: pickupLocationSnapshot,
+              pickupInstructions: pickupLocationSnapshot?.pickupInstructions,
+              pickupContact: data.pickupContact,
+            }
+          : {}),
         costoEnvio: costoEnvioCalculado,
         notas: data.notas,
         createdAt: now,
@@ -487,6 +538,19 @@ export class OrdenService {
           costoEnvio: data.costoEnvio,
           notas: data.notas,
           deliveredAt: data.deliveredAt,
+          fulfillmentMethod: data.fulfillmentMethod,
+          fulfillmentStatus: data.fulfillmentStatus,
+          pickupLocationId: data.pickupLocationId,
+          pickupLocation: data.pickupLocation,
+          pickupInstructions: data.pickupInstructions,
+          pickupContact: data.pickupContact,
+          pickupCodeLast4: data.pickupCodeLast4,
+          pickupQrPayload: data.pickupQrPayload,
+          readyForPickupAt: data.readyForPickupAt,
+          pickedUpAt: data.pickedUpAt,
+          pickedUpBy: data.pickedUpBy,
+          deliveredByStaffUid: data.deliveredByStaffUid,
+          pickupExpiresAt: data.pickupExpiresAt,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };
@@ -580,6 +644,19 @@ export class OrdenService {
         costoEnvio: data.costoEnvio,
         notas: data.notas,
         deliveredAt: data.deliveredAt,
+        fulfillmentMethod: data.fulfillmentMethod,
+        fulfillmentStatus: data.fulfillmentStatus,
+        pickupLocationId: data.pickupLocationId,
+        pickupLocation: data.pickupLocation,
+        pickupInstructions: data.pickupInstructions,
+        pickupContact: data.pickupContact,
+        pickupCodeLast4: data.pickupCodeLast4,
+        pickupQrPayload: data.pickupQrPayload,
+        readyForPickupAt: data.readyForPickupAt,
+        pickedUpAt: data.pickedUpAt,
+        pickedUpBy: data.pickedUpBy,
+        deliveredByStaffUid: data.deliveredByStaffUid,
+        pickupExpiresAt: data.pickupExpiresAt,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       };
@@ -967,6 +1044,19 @@ export class OrdenService {
           costoEnvio: data.costoEnvio,
           notas: data.notas,
           deliveredAt: data.deliveredAt,
+          fulfillmentMethod: data.fulfillmentMethod,
+          fulfillmentStatus: data.fulfillmentStatus,
+          pickupLocationId: data.pickupLocationId,
+          pickupLocation: data.pickupLocation,
+          pickupInstructions: data.pickupInstructions,
+          pickupContact: data.pickupContact,
+          pickupCodeLast4: data.pickupCodeLast4,
+          pickupQrPayload: data.pickupQrPayload,
+          readyForPickupAt: data.readyForPickupAt,
+          pickedUpAt: data.pickedUpAt,
+          pickedUpBy: data.pickedUpBy,
+          deliveredByStaffUid: data.deliveredByStaffUid,
+          pickupExpiresAt: data.pickupExpiresAt,
           createdAt: data.createdAt,
           updatedAt: data.updatedAt,
         };

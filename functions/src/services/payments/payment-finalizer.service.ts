@@ -21,6 +21,7 @@ import paymentAttemptRepository from "./payment-attempt.repository";
 import posSaleRepository from "./pos-sale.repository";
 import inventoryService from "../inventory.service";
 import ordenService from "../orden.service";
+import pickupOrderService from "../pickup-order.service";
 
 const ORDENES_COLLECTION = "ordenes";
 
@@ -145,6 +146,12 @@ export class PaymentFinalizerService {
       if (attempt.ordenId) {
         if (targetStatus === PaymentStatus.PAID) {
           await this.confirmOrderPayment(attempt, context);
+          await pickupOrderService.finalizePaidPickupOrder({
+            orderId: attempt.ordenId,
+            source: "aplazo",
+            sourceEventId: context.eventId,
+            paymentAttemptId: attempt.id,
+          });
         } else {
           await this.cancelOrderReservation(attempt, targetStatus, context);
         }
