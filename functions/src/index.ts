@@ -18,6 +18,7 @@ import { sendLowStockDailyDigest } from "./stock-alert.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
 import { reconcileAplazoPayments } from "./aplazo-payments.cron";
+import { expirePickupOrders } from "./pickup-orders.cron";
 import {
   enqueueAbandonedCartNotifications,
   enqueueCampaignNotifications,
@@ -136,6 +137,7 @@ export const processTryOnJob = processTryOnJobTrigger;
 export const processNotificationEvent = processNotificationEventTrigger;
 export const processPaymentEvent = processPaymentEventTrigger;
 export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;
+export const expirePickupOrdersFunction = expirePickupOrders;
 export const abandonedCartNotifications = enqueueAbandonedCartNotifications;
 export const inactiveUserNotifications = enqueueInactiveUserNotifications;
 export const campaignNotifications = enqueueCampaignNotifications;

@@ -100,6 +100,14 @@ import {
   updateDetalleProductoSchema,
 } from "../middleware/validators/detalleProducto.validator";
 import { createFavoritoSchema } from "../middleware/validators/favorito.validator";
+import {
+  completePickupSchema,
+  createPickupLocationSchema,
+  pickupAvailabilitySchema,
+  pickupOrdersQuerySchema,
+  updatePickupLocationSchema,
+  verifyPickupCodeSchema,
+} from "../middleware/validators/pickup-location.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -231,6 +239,14 @@ const swaggerDefinition = {
     {
       name: "Banners",
       description: "Gestión de banners dinámicos para el carrusel del home",
+    },
+    {
+      name: "Pickup Locations",
+      description: "Sucursales y disponibilidad para recoger en tienda",
+    },
+    {
+      name: "Pickup Orders",
+      description: "Operación staff/admin de pedidos para recoger en tienda",
     },
   ],
   components: {
@@ -450,6 +466,42 @@ const swaggerDefinition = {
       UpdateEstadoOrden: zodToJsonSchema(updateEstadoOrdenSchema),
       ListOrdenesQuery: zodToJsonSchema(listOrdenesQuerySchema),
       HistorialOrdenesQuery: zodToJsonSchema(historialOrdenesQuerySchema),
+      CreatePickupLocation: zodToJsonSchema(createPickupLocationSchema),
+      UpdatePickupLocation: zodToJsonSchema(updatePickupLocationSchema),
+      PickupAvailabilityRequest: zodToJsonSchema(pickupAvailabilitySchema),
+      PickupOrdersQuery: zodToJsonSchema(pickupOrdersQuerySchema),
+      VerifyPickupCode: zodToJsonSchema(verifyPickupCodeSchema),
+      CompletePickup: zodToJsonSchema(completePickupSchema),
+      PickupLocation: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "loc_123" },
+          name: { type: "string", example: "Tienda Estadio León" },
+          address: { type: "string", example: "Blvd. Adolfo López Mateos 1810" },
+          city: { type: "string", example: "León" },
+          state: { type: "string", example: "Guanajuato" },
+          postalCode: { type: "string", example: "37500" },
+          country: { type: "string", example: "MX" },
+          phone: { type: "string", example: "4771234567" },
+          active: { type: "boolean", example: true },
+          pickupEnabled: { type: "boolean", example: true },
+          pickupInstructions: {
+            type: "string",
+            example: "Presenta tu código en mostrador.",
+          },
+          estimatedPreparationMinutes: { type: "integer", example: 120 },
+        },
+      },
+      PickupAvailabilityResponse: {
+        type: "object",
+        properties: {
+          canPickup: { type: "boolean", example: true },
+          pickupLocationId: { type: "string", example: "loc_123" },
+          inventoryScope: { type: "string", enum: ["global"], example: "global" },
+          availableItems: { type: "array", items: { type: "object" } },
+          unavailableItems: { type: "array", items: { type: "object" } },
+        },
+      },
 
       IniciarPago: zodToJsonSchema(iniciarPagoSchema),
       UpdateEstadoPago: zodToJsonSchema(updateEstadoPagoSchema),
@@ -1331,6 +1383,24 @@ const swaggerDefinition = {
             ],
             example: "PENDIENTE",
           },
+          fulfillmentMethod: {
+            type: "string",
+            enum: ["DELIVERY", "PICKUP"],
+            example: "PICKUP",
+          },
+          fulfillmentStatus: {
+            type: "string",
+            enum: [
+              "PENDING_PAYMENT",
+              "PAID",
+              "PREPARING",
+              "READY_FOR_PICKUP",
+              "PICKED_UP",
+              "EXPIRED",
+              "CANCELED",
+            ],
+            example: "READY_FOR_PICKUP",
+          },
           direccionEnvio: {
             type: "object",
             properties: {
@@ -1365,6 +1435,23 @@ const swaggerDefinition = {
           numeroGuia: { type: "string", example: "FEDEX-123456789" },
           transportista: { type: "string", example: "FedEx" },
           costoEnvio: { type: "number", example: 150.0 },
+          pickupLocationId: { type: "string", example: "loc_123" },
+          pickupLocation: { $ref: "#/components/schemas/PickupLocation" },
+          pickupContact: {
+            type: "object",
+            properties: {
+              name: { type: "string", example: "Juan Pérez" },
+              phone: { type: "string", example: "4771234567" },
+              email: { type: "string", example: "juan@example.com" },
+            },
+          },
+          pickupCodeLast4: { type: "string", example: "7K2Q" },
+          pickupQrPayload: { type: "string", example: "eyJ0eXBlIjoicGlja3VwX29yZGVyIn0" },
+          readyForPickupAt: { type: "string", format: "date-time" },
+          pickedUpAt: { type: "string", format: "date-time" },
+          pickedUpBy: { type: "string", example: "Juan Pérez" },
+          deliveredByStaffUid: { type: "string", example: "staff_uid" },
+          pickupExpiresAt: { type: "string", format: "date-time" },
           notas: { type: "string", example: "Entregar en horario laboral" },
           createdAt: {
             type: "string",

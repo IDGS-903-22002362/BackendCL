@@ -12,7 +12,11 @@
 import { z } from "zod";
 import { MAX_CANTIDAD_POR_ITEM } from "../../models/carrito.model";
 import { direccionEnvioSchema } from "./orden.validator";
-import { MetodoPago } from "../../models/orden.model";
+import {
+  FulfillmentMethod,
+  MetodoPago,
+} from "../../models/orden.model";
+import { pickupContactSchema } from "./orden.validator";
 
 /**
  * Schema para agregar un item al carrito
@@ -115,7 +119,16 @@ export const mergeCarritoSchema = z
  */
 export const checkoutCarritoSchema = z
   .object({
-    direccionEnvio: direccionEnvioSchema,
+    fulfillmentMethod: z
+      .nativeEnum(FulfillmentMethod)
+      .optional()
+      .default(FulfillmentMethod.DELIVERY),
+
+    direccionEnvio: direccionEnvioSchema.optional(),
+
+    pickupLocationId: z.string().trim().min(1).max(160).optional(),
+
+    pickupContact: pickupContactSchema.optional(),
 
     metodoPago: z.nativeEnum(MetodoPago, {
       errorMap: () => ({
@@ -134,4 +147,38 @@ export const checkoutCarritoSchema = z
       .max(1000, "Las notas no pueden exceder 1000 caracteres")
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    const method = data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+    if (method === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["direccionEnvio"],
+        message: "La dirección de envío es requerida para DELIVERY",
+      });
+    }
+
+    if (method === FulfillmentMethod.PICKUP) {
+      if (!data.pickupLocationId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickupLocationId"],
+          message: "La sucursal de pickup es requerida para PICKUP",
+        });
+      }
+      if (!data.pickupContact) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["pickupContact"],
+          message: "El contacto de pickup es requerido para PICKUP",
+        });
+      }
+      if (typeof data.costoEnvio === "number" && data.costoEnvio > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["costoEnvio"],
+          message: "PICKUP no permite costo de envío",
+        });
+      }
+    }
+  });

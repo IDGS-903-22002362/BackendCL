@@ -47,6 +47,11 @@ class NotificationEventService {
       case "order_confirmed":
       case "order_shipped":
       case "order_delivered":
+      case "pickup_paid_pending_preparation":
+      case "pickup_ready_for_pickup":
+      case "pickup_picked_up":
+      case "pickup_expired":
+      case "pickup_reminder":
         return buildNotificationFingerprint(
           input.eventType,
           input.userId,

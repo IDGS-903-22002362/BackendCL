@@ -333,7 +333,10 @@ export const checkout = async (req: Request, res: Response) => {
         msg.includes("carrito está vacío") ||
         msg.includes("no existe") ||
         msg.includes("no está disponible") ||
-        msg.includes("stock insuficiente")
+        msg.includes("stock insuficiente") ||
+        msg.includes("pickup") ||
+        msg.includes("envío") ||
+        msg.includes("sucursal")
       ) {
         statusCode = 400;
       }
