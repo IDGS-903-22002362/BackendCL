@@ -2,7 +2,6 @@ import { Timestamp } from "firebase-admin/firestore";
 import { MetodoPago, EstadoOrden } from "../src/models/orden.model";
 import {
   PaymentFlowType,
-  PaymentMethodCode,
   PaymentStatus,
   ProveedorPago,
 } from "../src/models/pago.model";
@@ -22,7 +21,6 @@ const increment = (value: number) => ({ __op: "increment" as const, value });
 
 const aplazoProviderMocks = {
   createOnline: jest.fn(),
-  createInStore: jest.fn(),
   parseWebhook: jest.fn(),
   getStatus: jest.fn(),
   cancelOrVoid: jest.fn(),
@@ -61,6 +59,8 @@ jest.mock("../src/services/product.service", () => ({
   __esModule: true,
   default: {
     getProductById: jest.fn(),
+    getStockBySize: jest.fn(),
+    updateStock: jest.fn(),
   },
 }));
 
@@ -71,12 +71,16 @@ jest.mock("../src/services/payments/providers/aplazo.provider", () => ({
 
 import { PaymentAttemptRepository } from "../src/services/payments/payment-attempt.repository";
 import { PaymentEventLogRepository } from "../src/services/payments/payment-event-log.repository";
-import { PosSaleRepository } from "../src/services/payments/pos-sale.repository";
-import { PosSessionRepository } from "../src/services/payments/pos-session.repository";
 import { PaymentsService } from "../src/services/payments/payments.service";
 import { PaymentEventProcessingService } from "../src/services/payments/payment-event-processing.service";
-import paymentFinalizerService from "../src/services/payments/payment-finalizer.service";
-import paymentReconciliationService from "../src/services/payments/payment-reconciliation.service";
+import paymentFinalizerService, {
+  PaymentFinalizerService,
+} from "../src/services/payments/payment-finalizer.service";
+import paymentReconciliationService, {
+  PaymentReconciliationService,
+} from "../src/services/payments/payment-reconciliation.service";
+import { PaymentRefundRepository } from "../src/services/payments/payment-refund.repository";
+import { PaymentRefundRequestRepository } from "../src/services/payments/payment-refund-request.repository";
 import productService from "../src/services/product.service";
 
 function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
@@ -304,11 +308,55 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
     getDoc: (collectionName: string, id: string) => {
       return getCollection(collectionName).get(id);
     },
+    getCollectionDocs: (collectionName: string) => {
+      return [...getCollection(collectionName).values()];
+    },
     countDocs: (collectionName: string) => getCollection(collectionName).size,
   };
 }
 
 describe("Aplazo payments service", () => {
+  const buildReconciliationService = () => {
+    const paymentRepo = new PaymentAttemptRepository();
+    const eventRepo = new PaymentEventLogRepository();
+    const finalizer = new PaymentFinalizerService(paymentRepo);
+    const processor = new PaymentEventProcessingService(
+      eventRepo,
+      paymentRepo,
+      finalizer,
+    );
+    return new PaymentReconciliationService(
+      paymentRepo,
+      eventRepo,
+      finalizer,
+      processor,
+    );
+  };
+
+  const buildPaymentsService = () => {
+    const paymentRepo = new PaymentAttemptRepository();
+    const eventRepo = new PaymentEventLogRepository();
+    const finalizer = new PaymentFinalizerService(paymentRepo);
+    const reconciliation = new PaymentReconciliationService(
+      paymentRepo,
+      eventRepo,
+      finalizer,
+      new PaymentEventProcessingService(
+        eventRepo,
+        paymentRepo,
+        finalizer,
+      ),
+    );
+    return new PaymentsService(
+      paymentRepo,
+      eventRepo,
+      finalizer,
+      reconciliation,
+      new PaymentRefundRepository(),
+      new PaymentRefundRequestRepository(),
+    );
+  };
+
   beforeEach(() => {
     fakeFirestore = createFakeFirestore({
       ordenes: {},
@@ -323,7 +371,6 @@ describe("Aplazo payments service", () => {
     process.env.BACKEND_PUBLIC_URL = "http://localhost:3000";
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
-    process.env.APLAZO_INSTORE_ENABLED = "true";
     process.env.APLAZO_RECONCILE_ENABLED = "true";
     process.env.APLAZO_REFUNDS_ENABLED = "false";
     process.env.APLAZO_ONLINE_SUCCESS_URL = "https://app.test/success";
@@ -332,6 +379,732 @@ describe("Aplazo payments service", () => {
 
     Object.values(aplazoProviderMocks).forEach((mock) => mock.mockReset());
     (productService.getProductById as jest.Mock).mockReset();
+    (productService.getStockBySize as jest.Mock).mockReset();
+    (productService.updateStock as jest.Mock).mockReset();
+  });
+
+  it("cancels expired Aplazo attempts in provider before closing them locally", async () => {
+    const expiredAt = Timestamp.fromDate(new Date(Date.now() - 60_000));
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_expired_cancel: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          items: [],
+          total: 1000,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      pagos: {
+        pago_expired_cancel: {
+          ordenId: "orden_expired_cancel",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.ONLINE,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_expired_cancel",
+          providerReference: "cart_expired_cancel",
+          expiresAt: expiredAt,
+          createdAt: Timestamp.fromDate(new Date(Date.now() - 120_000)),
+          updatedAt: Timestamp.now(),
+          metadata: {},
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.getStatus.mockResolvedValue({
+      status: PaymentStatus.PENDING_CUSTOMER,
+      providerStatus: "No confirmado",
+      providerReference: "cart_expired_cancel",
+    });
+    aplazoProviderMocks.cancelOrVoid.mockResolvedValue({
+      status: PaymentStatus.CANCELED,
+      providerStatus: "cancelado",
+      providerReference: "cart_expired_cancel",
+      rawResponseSanitized: { status: "cancelado" },
+    });
+
+    await buildReconciliationService().runScheduledReconciliation();
+
+    expect(aplazoProviderMocks.cancelOrVoid).toHaveBeenCalledWith({
+      paymentAttempt: expect.objectContaining({
+        id: "pago_expired_cancel",
+        providerReference: "cart_expired_cancel",
+      }),
+      reason: "expired_by_timeout",
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_expired_cancel")).toMatchObject({
+      status: PaymentStatus.CANCELED,
+      cancelReason: "expired_by_timeout",
+      canceledBy: "scheduler",
+      providerStatus: "cancelado",
+      metadata: expect.objectContaining({
+        cancelReason: "expired_by_timeout",
+        canceledBy: "scheduler",
+        providerCancelResponse: { status: "cancelado" },
+      }),
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_expired_cancel")?.canceledAt)
+      .toBeDefined();
+    expect(fakeFirestore.getDoc("ordenes", "orden_expired_cancel")).toMatchObject({
+      estado: EstadoOrden.CANCELADA,
+    });
+  });
+
+  it("does not cancel an expired attempt when Aplazo already reports it as active", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_expired_paid: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          items: [],
+          total: 1000,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      pagos: {
+        pago_expired_paid: {
+          ordenId: "orden_expired_paid",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.ONLINE,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_expired_paid",
+          providerReference: "cart_expired_paid",
+          expiresAt: Timestamp.fromDate(new Date(Date.now() - 60_000)),
+          createdAt: Timestamp.fromDate(new Date(Date.now() - 120_000)),
+          updatedAt: Timestamp.now(),
+          metadata: {},
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.getStatus.mockResolvedValue({
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      providerReference: "cart_expired_paid",
+    });
+
+    await buildReconciliationService().runScheduledReconciliation();
+
+    expect(aplazoProviderMocks.cancelOrVoid).not.toHaveBeenCalled();
+    expect(fakeFirestore.getDoc("pagos", "pago_expired_paid")).toMatchObject({
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+    });
+    expect(fakeFirestore.getDoc("ordenes", "orden_expired_paid")).toMatchObject({
+      estado: EstadoOrden.CONFIRMADA,
+    });
+  });
+
+  it("blocks manual Aplazo cancellation when provider reports the payment as paid", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_manual_paid: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.PENDIENTE,
+          items: [],
+          total: 1000,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      pagos: {
+        pago_manual_paid: {
+          ordenId: "orden_manual_paid",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.ONLINE,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_manual_paid",
+          providerReference: "cart_manual_paid",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.getStatus.mockResolvedValue({
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      providerReference: "cart_manual_paid",
+    });
+
+    const service = buildPaymentsService();
+
+    await expect(
+      service.cancelAplazoPaymentAttempt(
+        "pago_manual_paid",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        "manual cancel",
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_CANCEL_NOT_ALLOWED",
+      message:
+        "El pago Aplazo ya está ACTIVO/pagado; usa el flujo de refund para devolverlo",
+    });
+    expect(aplazoProviderMocks.cancelOrVoid).not.toHaveBeenCalled();
+    expect(fakeFirestore.getDoc("pagos", "pago_manual_paid")).toMatchObject({
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+    });
+  });
+
+  it("returns canceled Aplazo attempts idempotently without calling provider cancel again", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_manual_canceled: {
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.ONLINE,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "FALLIDO",
+          status: PaymentStatus.CANCELED,
+          idempotencyKey: "idem_manual_canceled",
+          providerReference: "cart_manual_canceled",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    const service = buildPaymentsService();
+    const result = await service.cancelAplazoPaymentAttempt(
+      "pago_manual_canceled",
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      "retry cancel",
+    );
+
+    expect(result.status).toBe(PaymentStatus.CANCELED);
+    expect(aplazoProviderMocks.getStatus).not.toHaveBeenCalled();
+    expect(aplazoProviderMocks.cancelOrVoid).not.toHaveBeenCalled();
+  });
+
+  const seedAplazoRefundAttempt = (
+    overrides: Record<string, unknown> = {},
+    orderOverrides: Record<string, unknown> = {},
+  ) => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_refund: {
+          usuarioId: "user_1",
+          estado: EstadoOrden.CONFIRMADA,
+          items: [],
+          total: 1000,
+          subtotal: 1000,
+          impuestos: 0,
+          metodoPago: MetodoPago.APLAZO,
+          paymentMetadata: {},
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          ...orderOverrides,
+        },
+      },
+      pagos: {
+        pago_refund: {
+          ordenId: "orden_refund",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.ONLINE,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "COMPLETADO",
+          status: PaymentStatus.PAID,
+          idempotencyKey: "idem_refund",
+          providerReference: "cart_refund",
+          providerStatus: "Activo",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          metadata: {},
+          ...overrides,
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+      paymentRefunds: {},
+      paymentRefundRequests: {},
+    });
+  };
+
+  const mockAplazoPaidStatus = () => {
+    aplazoProviderMocks.getStatus.mockResolvedValue({
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      providerReference: "cart_refund",
+    });
+  };
+
+  const mockAplazoRefundSuccess = (refundId = "665") => {
+    aplazoProviderMocks.refund.mockResolvedValue({
+      refundState: "processing",
+      providerStatus: "REQUESTED",
+      refundId,
+      refundAmountMinor: 10000,
+      rawResponseSanitized: {
+        refundId,
+        refundStatus: "REQUESTED",
+      },
+    });
+  };
+
+  it.each([
+    [PaymentStatus.PENDING_CUSTOMER, "PAYMENT_NOT_PAID_USE_CANCEL"],
+    [PaymentStatus.CANCELED, "PAYMENT_NOT_PAID_USE_CANCEL"],
+    [PaymentStatus.EXPIRED, "PAYMENT_NOT_PAID_USE_CANCEL"],
+    [PaymentStatus.REFUNDED, "PAYMENT_ALREADY_REFUNDED"],
+  ])(
+    "blocks Aplazo refund when local payment status is %s",
+    async (status, expectedCode) => {
+      process.env.APLAZO_REFUNDS_ENABLED = "true";
+      seedAplazoRefundAttempt({
+        status,
+        estado:
+          status === PaymentStatus.REFUNDED ? "REEMBOLSADO" : "PENDIENTE",
+      });
+      const service = buildPaymentsService();
+
+      await expect(
+        service.refundAplazoPaymentAttempt(
+          "pago_refund",
+          { uid: "admin_1", rol: RolUsuario.ADMIN },
+          { refundAmountMinor: 10000, reason: "Wrong size" },
+        ),
+      ).rejects.toMatchObject({
+        code: expectedCode,
+      });
+      expect(aplazoProviderMocks.getStatus).not.toHaveBeenCalled();
+      expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+    },
+  );
+
+  it("allows partial Aplazo refund when local and provider status are paid", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    mockAplazoRefundSuccess("665");
+    const service = buildPaymentsService();
+
+    const result = await service.refundAplazoPaymentAttempt(
+      "pago_refund",
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { refundAmountMinor: 10000, reason: "Wrong size" },
+    );
+
+    expect(aplazoProviderMocks.refund).toHaveBeenCalledWith({
+      paymentAttempt: expect.objectContaining({
+        id: "pago_refund",
+        providerReference: "cart_refund",
+      }),
+      refundAmountMinor: 10000,
+      reason: "Wrong size",
+    });
+    expect(result.status).toBe(PaymentStatus.PARTIALLY_REFUNDED);
+    expect(result.refundTotalMinor).toBe(10000);
+    expect(result.refundRemainingMinor).toBe(90000);
+    expect(result.refundsCount).toBe(1);
+    expect(fakeFirestore.getDoc("ordenes", "orden_refund")).toMatchObject({
+      paymentMetadata: expect.objectContaining({
+        paymentStatus: PaymentStatus.PARTIALLY_REFUNDED,
+        lastRefundAmountMinor: 10000,
+        lastRefundId: "665",
+      }),
+    });
+    expect([...Array(fakeFirestore.countDocs("paymentRefunds")).keys()].length).toBe(1);
+  });
+
+  it("rejects Aplazo refund when provider reports NO CONFIRMADO", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    aplazoProviderMocks.getStatus.mockResolvedValue({
+      status: PaymentStatus.PENDING_CUSTOMER,
+      providerStatus: "No confirmado",
+    });
+    const service = buildPaymentsService();
+
+    await expect(
+      service.refundAplazoPaymentAttempt(
+        "pago_refund",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        { refundAmountMinor: 10000, reason: "Wrong size" },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_NOT_PAID_USE_CANCEL",
+    });
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid Aplazo refund amount", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    const service = buildPaymentsService();
+
+    await expect(
+      service.refundAplazoPaymentAttempt(
+        "pago_refund",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        { refundAmountMinor: 0, reason: "Wrong size" },
+      ),
+    ).rejects.toMatchObject({
+      code: "REFUND_AMOUNT_INVALID",
+    });
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("rejects Aplazo refund amount greater than remaining balance", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt({
+      refundTotalMinor: 95000,
+      refundAmount: 950,
+    });
+    mockAplazoPaidStatus();
+    const service = buildPaymentsService();
+
+    await expect(
+      service.refundAplazoPaymentAttempt(
+        "pago_refund",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        { refundAmountMinor: 6000, reason: "Wrong size" },
+      ),
+    ).rejects.toMatchObject({
+      code: "REFUND_AMOUNT_EXCEEDS_AVAILABLE",
+    });
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("marks Aplazo payment as refunded when refund completes remaining balance", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt({
+      refundTotalMinor: 90000,
+      refundRemainingMinor: 10000,
+      refundAmount: 900,
+      refundsCount: 2,
+    });
+    mockAplazoPaidStatus();
+    mockAplazoRefundSuccess("666");
+    const service = buildPaymentsService();
+
+    const result = await service.refundAplazoPaymentAttempt(
+      "pago_refund",
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { reason: "Remaining refund" },
+    );
+
+    expect(aplazoProviderMocks.refund).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refundAmountMinor: 10000,
+      }),
+    );
+    expect(result.status).toBe(PaymentStatus.REFUNDED);
+    expect(result.refundTotalMinor).toBe(100000);
+    expect(result.refundRemainingMinor).toBe(0);
+    expect(result.refundsCount).toBe(3);
+    expect(fakeFirestore.getDoc("ordenes", "orden_refund")).toMatchObject({
+      paymentMetadata: expect.objectContaining({
+        paymentStatus: PaymentStatus.REFUNDED,
+      }),
+    });
+  });
+
+  it("prevents double Aplazo refund while a refund is processing", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt({
+      currentRefundOperationId: "existing_refund_operation",
+    });
+    mockAplazoPaidStatus();
+    const service = buildPaymentsService();
+
+    await expect(
+      service.refundAplazoPaymentAttempt(
+        "pago_refund",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        { refundAmountMinor: 10000, reason: "Wrong size" },
+      ),
+    ).rejects.toMatchObject({
+      code: "REFUND_ALREADY_PROCESSING",
+    });
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("marks refund operation failed when Aplazo refund fails without changing payment or order refund status", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    aplazoProviderMocks.refund.mockRejectedValue(
+      Object.assign(new Error("Aplazo refund failed"), {
+        statusCode: 502,
+        code: "PAYMENT_PROVIDER_ERROR",
+      }),
+    );
+    const service = buildPaymentsService();
+
+    await expect(
+      service.refundAplazoPaymentAttempt(
+        "pago_refund",
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        { refundAmountMinor: 10000, reason: "Wrong size" },
+      ),
+    ).rejects.toMatchObject({
+      code: "APLAZO_REFUND_FAILED",
+    });
+
+    expect(fakeFirestore.getDoc("pagos", "pago_refund")).toMatchObject({
+      status: PaymentStatus.PAID,
+      refundState: "failed",
+      currentRefundOperationId: null,
+    });
+    expect(fakeFirestore.getDoc("ordenes", "orden_refund")).toMatchObject({
+      paymentMetadata: {},
+    });
+    const refundRecords = fakeFirestore.getCollectionDocs("paymentRefunds");
+    expect(refundRecords).toHaveLength(1);
+    expect(refundRecords[0]).toMatchObject({
+      status: "failed",
+      failedReason: "Aplazo refund failed",
+    });
+  });
+
+  it("creates a pending Aplazo refund request by orderId", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    expect(request).toMatchObject({
+      provider: "aplazo",
+      orderId: "orden_refund",
+      paymentAttemptId: "pago_refund",
+      userId: "user_1",
+      reason: "No era la talla correcta",
+      status: "pending",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(1);
+  });
+
+  it("blocks customer Aplazo refund requests for another user's order", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    await expect(
+      service.createAplazoRefundRequest(
+        { uid: "user_2", rol: RolUsuario.CLIENTE },
+        {
+          orderId: "orden_refund",
+          reason: "No era la talla correcta",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_FORBIDDEN",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(0);
+  });
+
+  it("rejects duplicate open Aplazo refund requests for the same payment", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+
+    await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "Primer motivo",
+      },
+    );
+
+    await expect(
+      service.createAplazoRefundRequest(
+        { uid: "user_1", rol: RolUsuario.CLIENTE },
+        {
+          orderId: "orden_refund",
+          reason: "Segundo motivo",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "REFUND_REQUEST_ALREADY_OPEN",
+    });
+    expect(fakeFirestore.getCollectionDocs("paymentRefundRequests")).toHaveLength(1);
+  });
+
+  it("lists pending Aplazo refund requests for admin", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+    await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const requests = await service.listAplazoRefundRequestsForAdmin(
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { status: "pending" },
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      status: "pending",
+      orderId: "orden_refund",
+    });
+  });
+
+  it("rejects an Aplazo refund request without calling Aplazo", async () => {
+    seedAplazoRefundAttempt();
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const rejected = await service.rejectAplazoRefundRequest(
+      request.id!,
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      { reason: "Fuera de política" },
+    );
+
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      rejectionReason: "Fuera de política",
+      rejectedBy: "admin_1",
+    });
+    expect(aplazoProviderMocks.getStatus).not.toHaveBeenCalled();
+    expect(aplazoProviderMocks.refund).not.toHaveBeenCalled();
+  });
+
+  it("approves an Aplazo refund request and processes the provider refund", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    mockAplazoRefundSuccess("777");
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    const processed = await service.approveAplazoRefundRequest(
+      request.id!,
+      { uid: "admin_1", rol: RolUsuario.ADMIN },
+      {
+        refundAmountMinor: 10000,
+        reason: "Aprobado por soporte",
+      },
+    );
+
+    expect(aplazoProviderMocks.refund).toHaveBeenCalledWith({
+      paymentAttempt: expect.objectContaining({
+        id: "pago_refund",
+        providerReference: "cart_refund",
+      }),
+      refundAmountMinor: 10000,
+      reason: "Aprobado por soporte",
+    });
+    expect(processed).toMatchObject({
+      status: "processed",
+      refundAmountMinor: 10000,
+      providerRefundId: "777",
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_refund")).toMatchObject({
+      status: PaymentStatus.PARTIALLY_REFUNDED,
+      refundTotalMinor: 10000,
+    });
+  });
+
+  it("keeps an Aplazo refund request approved when provider refund fails", async () => {
+    process.env.APLAZO_REFUNDS_ENABLED = "true";
+    seedAplazoRefundAttempt();
+    mockAplazoPaidStatus();
+    aplazoProviderMocks.refund.mockRejectedValue(
+      Object.assign(new Error("Aplazo refund failed"), {
+        statusCode: 502,
+        code: "PAYMENT_PROVIDER_ERROR",
+      }),
+    );
+    const service = buildPaymentsService();
+    const request = await service.createAplazoRefundRequest(
+      { uid: "user_1", rol: RolUsuario.CLIENTE },
+      {
+        orderId: "orden_refund",
+        reason: "No era la talla correcta",
+      },
+    );
+
+    await expect(
+      service.approveAplazoRefundRequest(
+        request.id!,
+        { uid: "admin_1", rol: RolUsuario.ADMIN },
+        {
+          refundAmountMinor: 10000,
+          reason: "Aprobado por soporte",
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "APLAZO_REFUND_FAILED",
+    });
+
+    expect(fakeFirestore.getDoc("paymentRefundRequests", request.id!)).toMatchObject({
+      status: "approved",
+      refundAmountMinor: 10000,
+      lastProcessingError: expect.objectContaining({
+        code: "APLAZO_REFUND_FAILED",
+      }),
+    });
+    expect(fakeFirestore.getDoc("pagos", "pago_refund")).toMatchObject({
+      status: PaymentStatus.PAID,
+    });
   });
 
   it("returns the same online payment attempt on safe retries without a client key", async () => {
@@ -387,15 +1160,11 @@ describe("Aplazo payments service", () => {
 
     const paymentAttemptRepo = new PaymentAttemptRepository();
     const eventLogRepo = new PaymentEventLogRepository();
-    const posSaleRepo = new PosSaleRepository();
-    const posSessionRepo = new PosSessionRepository();
     const service = new PaymentsService(
       paymentAttemptRepo,
       eventLogRepo,
       paymentFinalizerService,
       paymentReconciliationService,
-      posSaleRepo,
-      posSessionRepo,
     );
 
     const first = await service.createAplazoOnline(
@@ -447,91 +1216,6 @@ describe("Aplazo payments service", () => {
     );
     expect(aplazoProviderMocks.createOnline).toHaveBeenCalledTimes(1);
     expect(fakeFirestore.countDocs("pagos")).toBe(1);
-  });
-
-  it("creates an in-store attempt and returns link plus QR metadata", async () => {
-    fakeFirestore = createFakeFirestore({
-      ordenes: {},
-      pagos: {},
-      usuariosApp: {},
-      posSessions: {
-        pos_session_1: {
-          deviceId: "device-1",
-          cajaId: "caja-1",
-          sucursalId: "sucursal-1",
-          vendedorUid: "empleado_1",
-          status: "OPEN",
-          openedAt: Timestamp.now(),
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-        },
-      },
-      ventasPos: {},
-      paymentEventLogs: {},
-    });
-
-    (productService.getProductById as jest.Mock).mockResolvedValue({
-      id: "prod_1",
-      descripcion: "Jersey Oficial",
-      precioPublico: 850,
-      activo: true,
-      existencias: 10,
-      tallaIds: [],
-      inventarioPorTalla: [],
-    });
-
-    aplazoProviderMocks.createInStore.mockResolvedValue({
-      status: PaymentStatus.PENDING_CUSTOMER,
-      providerStatus: "pending",
-      providerPaymentId: "instore_1",
-      providerReference: "instore_ref_1",
-      paymentLink: "https://aplazo.example/pay/instore_ref_1",
-      qrString: "qr_payload",
-      qrImageUrl: "https://aplazo.example/qr/instore_ref_1.png",
-      rawRequestSanitized: {},
-      rawResponseSanitized: {},
-    });
-
-    const service = new PaymentsService(
-      new PaymentAttemptRepository(),
-      new PaymentEventLogRepository(),
-      paymentFinalizerService,
-      paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
-    );
-
-    const result = await service.createAplazoInStore(
-      {
-        uid: "empleado_1",
-        rol: RolUsuario.EMPLEADO,
-      },
-      {
-        posSessionId: "pos_session_1",
-        deviceId: "device-1",
-        cajaId: "caja-1",
-        sucursalId: "sucursal-1",
-        vendedorUid: "empleado_1",
-        items: [{ productoId: "prod_1", cantidad: 1 }],
-        currency: "mxn",
-      },
-    );
-
-    expect(result.created).toBe(true);
-    expect(result.paymentAttempt.flowType).toBe(PaymentFlowType.IN_STORE);
-    expect(result.paymentAttempt.paymentMethodCode).toBe(
-      PaymentMethodCode.APLAZO,
-    );
-    expect(aplazoProviderMocks.createInStore).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerReference: expect.any(String),
-        webhookUrl: "http://localhost:3000/api/webhooks/aplazo",
-      }),
-    );
-    expect(result.paymentAttempt.metadata?.paymentLink).toBe(
-      "https://aplazo.example/pay/instore_ref_1",
-    );
-    expect(result.sale.paymentAttemptId).toBe(result.paymentAttempt.id);
   });
 
   it("reuses the same online attempt for the same order even with a different idempotency key", async () => {
@@ -589,8 +1273,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     const first = await service.createAplazoOnline(
@@ -621,6 +1303,55 @@ describe("Aplazo payments service", () => {
     expect(second.created).toBe(false);
     expect(second.paymentAttempt.id).toBe(first.paymentAttempt.id);
     expect(aplazoProviderMocks.createOnline).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks provider sync for legacy Aplazo in-store attempts", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_instore_legacy: {
+          ordenId: "",
+          userId: "empleado_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          flowType: PaymentFlowType.IN_STORE,
+          monto: 850,
+          amountMinor: 85000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_aplazo_instore_legacy",
+          providerReference: "cart-pos-legacy",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      paymentFinalizerService,
+      paymentReconciliationService,
+    );
+
+    await expect(
+      service.getPaymentStatusForActor(
+        "pago_aplazo_instore_legacy",
+        {
+          uid: "empleado_1",
+          rol: RolUsuario.EMPLEADO,
+        },
+        { syncWithProvider: true },
+      ),
+    ).rejects.toMatchObject({
+      code: "PAYMENT_FLOW_UNSUPPORTED",
+    });
+    expect(aplazoProviderMocks.getStatus).not.toHaveBeenCalled();
   });
 
   it("rejects orders with total <= 0 as PAYMENT_ORDER_INVALID", async () => {
@@ -656,8 +1387,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     await expect(
@@ -725,8 +1454,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     await service
@@ -800,8 +1527,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     await service
@@ -889,8 +1614,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     await service.createAplazoOnline(
@@ -953,8 +1676,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     const first = await service.handleAplazoWebhook({
@@ -972,6 +1693,112 @@ describe("Aplazo payments service", () => {
     expect(first.duplicate).toBe(false);
     expect(second.duplicate).toBe(true);
     expect(fakeFirestore.countDocs("paymentEventLogs")).toBe(1);
+  });
+
+  it("queues and processes the Aplazo confirmation webhook as a paid payment", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {},
+      pagos: {
+        pago_aplazo_confirmed: {
+          ordenId: "orden_aplazo_confirmed",
+          userId: "user_1",
+          provider: ProveedorPago.APLAZO,
+          metodoPago: MetodoPago.APLAZO,
+          monto: 1000,
+          amountMinor: 100000,
+          currency: "mxn",
+          estado: "PENDIENTE",
+          status: PaymentStatus.PENDING_CUSTOMER,
+          idempotencyKey: "idem_aplazo_confirmed",
+          providerReference: "cart-123-abc",
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        },
+      },
+      usuariosApp: {},
+      posSessions: {},
+      ventasPos: {},
+      paymentEventLogs: {},
+    });
+
+    aplazoProviderMocks.parseWebhook.mockResolvedValue({
+      provider: ProveedorPago.APLAZO,
+      eventType: "aplazo.status.activo",
+      dedupeKey: "aplazo-confirmation-1",
+      providerLoanId: "155789",
+      providerReference: "cart-123-abc",
+      merchantId: "1234",
+      channel: "online",
+      status: PaymentStatus.PAID,
+      providerStatus: "Activo",
+      payloadSanitized: {
+        status: "Activo",
+        loanId: 155789,
+        cartId: "cart-123-abc",
+        merchantId: 1234,
+      },
+    });
+
+    const finalizer = {
+      finalizeTerminalStatus: jest.fn().mockResolvedValue({
+        id: "pago_aplazo_confirmed",
+        provider: ProveedorPago.APLAZO,
+        status: PaymentStatus.PAID,
+      }),
+      recordLatePaidDivergence: jest.fn(),
+    } as unknown as typeof paymentFinalizerService;
+
+    const service = new PaymentsService(
+      new PaymentAttemptRepository(),
+      new PaymentEventLogRepository(),
+      finalizer,
+      paymentReconciliationService,
+    );
+
+    const queued = await service.handleAplazoWebhook({
+      rawBody: Buffer.from(
+        JSON.stringify({
+          status: "Activo",
+          loanId: 155789,
+          cartId: "cart-123-abc",
+          merchantId: 1234,
+        }),
+      ),
+      headers: {
+        authorization: "Bearer expected_secret",
+      },
+      requestId: "req-aplazo-confirmation",
+    });
+
+    const processor = new PaymentEventProcessingService(
+      new PaymentEventLogRepository(),
+      new PaymentAttemptRepository(),
+      finalizer,
+    );
+    await processor.processQueuedEvent(queued.eventLogId);
+
+    expect(finalizer.finalizeTerminalStatus).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pago_aplazo_confirmed",
+        providerReference: "cart-123-abc",
+      }),
+      PaymentStatus.PAID,
+      expect.objectContaining({
+        source: "webhook",
+        requestedBy: "aplazo-webhook",
+        providerResult: expect.objectContaining({
+          providerLoanId: "155789",
+          providerReference: "cart-123-abc",
+          providerStatus: "Activo",
+          status: PaymentStatus.PAID,
+        }),
+      }),
+    );
+    expect(fakeFirestore.getDoc("paymentEventLogs", queued.eventLogId)).toMatchObject({
+      status: "processed",
+      paymentAttemptId: "pago_aplazo_confirmed",
+      merchantId: "1234",
+    });
   });
 
   it("syncs aplazo refund status and recalculates the confirmed refunded amount", async () => {
@@ -1031,8 +1858,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     const result = await service.getAplazoRefundStatus(
@@ -1095,8 +1920,6 @@ describe("Aplazo payments service", () => {
       new PaymentEventLogRepository(),
       paymentFinalizerService,
       paymentReconciliationService,
-      new PosSaleRepository(),
-      new PosSessionRepository(),
     );
 
     await expect(

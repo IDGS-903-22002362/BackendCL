@@ -29,11 +29,16 @@ import aiRoutes from "./ai.routes";
 import notificationsRoutes from "./notifications.routes";
 import galeriaRoutes from "./galeria.routes";
 import favoritosRoutes from "./favorito.routes";
+import beneficiosRoutes from "./beneficios.routes";
 import ligaMxRoutes from "./liga-mx.routes";
 import paymentsV2Routes from "./payments-v2.routes";
 import adminPaymentsRoutes from "./admin-payments.routes";
 import webhooksRoutes from "./webhooks.routes";
 import ofertasRoutes from "./ofertas.routes";
+import bannerRoutes from "./banner.routes";
+import pickupLocationsRoutes from "./pickup-locations.routes";
+import adminPickupLocationsRoutes from "./admin-pickup-locations.routes";
+import adminPickupOrdersRoutes from "./admin-pickup-orders.routes";
 
 const router = Router();
 
@@ -62,8 +67,12 @@ router.use("/galeria", galeriaRoutes);
 router.use("/ai", aiRoutes);
 router.use("/notificaciones", notificationsRoutes);
 router.use("/favoritos", favoritosRoutes);
+router.use("/beneficios", beneficiosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
-router.use("/ofertas", ofertasRoutes);
+router.use("/banners", bannerRoutes);
+router.use("/pickup-locations", pickupLocationsRoutes);
+router.use("/admin/pickup-locations", adminPickupLocationsRoutes);
+router.use("/admin/pickup-orders", adminPickupOrdersRoutes);
 
 // Futuros módulos:
 

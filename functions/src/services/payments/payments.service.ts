@@ -11,13 +11,6 @@ import {
   PaymentStatus,
   ProveedorPago,
 } from "../../models/pago.model";
-import { Producto } from "../../models/producto.model";
-import { PosSession } from "../../models/pos-session.model";
-import {
-  EstadoVentaPos,
-  VentaPos,
-  VentaPosItem,
-} from "../../models/venta-pos.model";
 import { RolUsuario } from "../../models/usuario.model";
 import logger from "../../utils/logger";
 import productService from "../product.service";
@@ -31,8 +24,14 @@ import paymentAttemptRepository, {
 import paymentEventLogRepository from "./payment-event-log.repository";
 import paymentFinalizerService from "./payment-finalizer.service";
 import paymentReconciliationService from "./payment-reconciliation.service";
-import posSaleRepository from "./pos-sale.repository";
-import posSessionRepository from "./pos-session.repository";
+import paymentRefundRepository, {
+  PaymentRefundRepository,
+} from "./payment-refund.repository";
+import paymentRefundRequestRepository, {
+  PaymentRefundRequestRecord,
+  PaymentRefundRequestRepository,
+  PaymentRefundRequestStatus,
+} from "./payment-refund-request.repository";
 import aplazoProvider from "./providers/aplazo.provider";
 import {
   isValidEmail,
@@ -49,7 +48,6 @@ const USERS_APP_COLLECTION = "usuariosApp";
 const POLL_NEXT_PENDING_SHORT_MS = 3_000;
 const POLL_NEXT_PENDING_LONG_MS = 10_000;
 const ONLINE_FALLBACK_EXPIRATION_MINUTES = 30;
-const POS_FALLBACK_EXPIRATION_MINUTES = 15;
 const STATUS_SYNC_THROTTLE_MS = 30_000;
 const IDEMPOTENCY_KEY_MIN_LENGTH = 8;
 const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
@@ -87,24 +85,6 @@ type OnlineCreateRequest = {
   cancelUrl?: string;
   failureUrl?: string;
   cartUrl?: string;
-  metadata?: Record<string, unknown>;
-};
-
-type InStoreCreateRequest = {
-  ventaPosId?: string;
-  posSessionId: string;
-  deviceId: string;
-  cajaId: string;
-  sucursalId: string;
-  vendedorUid: string;
-  customer?: PaymentCustomerInput;
-  items?: PaymentItemInput[];
-  subtotal?: number;
-  tax?: number;
-  shipping?: number;
-  total?: number;
-  amount?: number;
-  currency?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -238,8 +218,9 @@ export class PaymentsService {
     private readonly paymentEventLogRepo = paymentEventLogRepository,
     private readonly finalizer = paymentFinalizerService,
     private readonly reconciliationService = paymentReconciliationService,
-    private readonly posSaleRepo = posSaleRepository,
-    private readonly posSessionRepo = posSessionRepository,
+    private readonly refundRepo: PaymentRefundRepository = paymentRefundRepository,
+    private readonly refundRequestRepo: PaymentRefundRequestRepository =
+      paymentRefundRequestRepository,
   ) {}
 
   async createAplazoOnline(
@@ -363,6 +344,8 @@ export class PaymentsService {
         cartId: metadataCartId,
         cartUrl: request.cartUrl || config.online.cartUrl,
         orderId: order.id,
+        fulfillmentMethod: order.fulfillmentMethod || "DELIVERY",
+        pickupLocationId: order.pickupLocationId || "",
         requestCurrency: requestCurrency || "MXN",
       },
       status: PaymentStatus.CREATED,
@@ -397,6 +380,8 @@ export class PaymentsService {
           orderId: order.id,
           userId: user.uid,
           cartId: metadataCartId,
+          fulfillmentMethod: order.fulfillmentMethod || "DELIVERY",
+          pickupLocationId: order.pickupLocationId || "",
           requestCurrency: requestCurrency || "MXN",
           ...(request.metadata || {}),
         },
@@ -461,191 +446,6 @@ export class PaymentsService {
               ? sanitizeForStorage(error.details || {})
               : {},
         },
-      });
-      throw error;
-    }
-  }
-
-  async createAplazoInStore(
-    actor: AuthActor,
-    request: InStoreCreateRequest,
-    headerIdempotencyKey?: string,
-  ): Promise<{ created: boolean; paymentAttempt: PaymentAttempt; sale: VentaPos }> {
-    const user = await this.requireAuthenticatedActor(actor);
-    this.assertPrivilegedPosActor(user);
-
-    const session = await this.requireOpenPosSession(request.posSessionId, user);
-    this.assertPosContextMatchesSession(request, session, user);
-
-    const sale = request.ventaPosId
-      ? await this.requireExistingPosSale(request.ventaPosId, session)
-      : await this.createDraftPosSale(request, session);
-
-    const pricingSnapshot = this.buildPosPricingSnapshot(sale);
-    const amountMinor = pricingSnapshot.totalMinor;
-
-    if (
-      typeof request.amount === "number" &&
-      roundToMinor(request.amount) !== amountMinor
-    ) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_AMOUNT_MISMATCH",
-        "El monto enviado por POS no coincide con el cálculo del backend",
-      );
-    }
-
-    const idempotencyKey =
-      validateIdempotencyKey(headerIdempotencyKey) ??
-      this.generateDeterministicIdempotencyKey(
-        "in_store",
-        sale.id!,
-        session.id!,
-        amountMinor,
-        pricingSnapshot,
-      );
-
-    const existing = await this.paymentAttemptRepo.findByIdempotencyKey(
-      ProveedorPago.APLAZO,
-      idempotencyKey,
-    );
-    if (existing) {
-      await this.assertActorCanAccessAttempt(existing, user);
-      return { created: false, paymentAttempt: existing, sale };
-    }
-
-    const providerReference =
-      sale.providerReference ||
-      getMetadataString(request.metadata, "cartId") ||
-      sale.id;
-    const webhookUrl = getBackendWebhookUrl();
-    const callbackUrl =
-      getAplazoConfig().inStore.callbackUrl ||
-      `${process.env.APP_URL || "http://localhost:3000"}/payments/aplazo/success`;
-    const expiresAt = Timestamp.fromDate(
-      new Date(Date.now() + POS_FALLBACK_EXPIRATION_MINUTES * 60 * 1000),
-    );
-    const customer = {
-      name: request.customer?.name || sale.customerName,
-      email: request.customer?.email || sale.customerEmail,
-      phone: request.customer?.phone || sale.customerPhone,
-    };
-
-    const attempt = await this.paymentAttemptRepo.create({
-      provider: ProveedorPago.APLAZO,
-      flowType: PaymentFlowType.IN_STORE,
-      paymentMethodCode: PaymentMethodCode.APLAZO,
-      metodoPago: MetodoPago.APLAZO,
-      ventaPosId: sale.id,
-      userId: user.uid,
-      customerId: user.uid,
-      customerName: customer.name,
-      customerEmail: customer.email,
-      customerPhone: customer.phone,
-      currency: pricingSnapshot.currency,
-      amount: pricingSnapshot.totalMinor / 100,
-      amountMinor,
-      idempotencyKey,
-      webhookUrl,
-      providerReference,
-      expiresAt,
-      pricingSnapshot,
-      metadata: {
-        ...(request.metadata || {}),
-        cartId: providerReference,
-        callbackUrl,
-      },
-      posSessionId: session.id,
-      deviceId: session.deviceId,
-      status: PaymentStatus.CREATED,
-      rawCreateRequestSanitized: sanitizeForStorage({
-        ventaPosId: sale.id,
-        posSessionId: request.posSessionId,
-        cartId: providerReference,
-        customer,
-      }),
-    });
-
-    await this.paymentAttemptRepo.update(attempt.id!, {
-      status: PaymentStatus.PENDING_PROVIDER,
-    });
-
-    try {
-      const providerResult = await aplazoProvider.createInStore({
-        paymentAttemptId: attempt.id!,
-        idempotencyKey,
-        amountMinor,
-        currency: pricingSnapshot.currency,
-        providerReference,
-        customerName: customer.name,
-        customerEmail: customer.email,
-        customerPhone: customer.phone,
-        webhookUrl,
-        callbackUrl,
-        metadata: {
-          ventaPosId: sale.id,
-          posSessionId: session.id,
-          cajaId: session.cajaId,
-          sucursalId: session.sucursalId,
-          vendedorUid: session.vendedorUid,
-          cartId: providerReference,
-          ...(request.metadata || {}),
-        },
-        pricingSnapshot,
-      });
-
-      const updated = await this.paymentAttemptRepo.update(attempt.id!, {
-        status: providerResult.status,
-        providerStatus: providerResult.providerStatus,
-        providerPaymentId: providerResult.providerPaymentId,
-        providerLoanId: providerResult.providerLoanId,
-        providerReference: providerResult.providerReference,
-        redirectUrl: providerResult.paymentLink,
-        expiresAt: providerResult.expiresAt
-          ? Timestamp.fromDate(providerResult.expiresAt)
-          : attempt.expiresAt,
-        rawCreateRequestSanitized: providerResult.rawRequestSanitized,
-        rawCreateResponseSanitized: providerResult.rawResponseSanitized,
-        metadata: {
-          ...(attempt.metadata || {}),
-          cartId: providerResult.providerReference || providerReference,
-          paymentLink: providerResult.paymentLink,
-          qrString: providerResult.qrString,
-          qrImageUrl: providerResult.qrImageUrl,
-        },
-      });
-
-      const updatedSale = await this.posSaleRepo.update(sale.id!, {
-        paymentAttemptId: updated.id,
-        providerReference: providerResult.providerReference,
-        status: EstadoVentaPos.PENDIENTE_PAGO,
-      });
-
-      return {
-        created: true,
-        paymentAttempt: updated,
-        sale: updatedSale,
-      };
-    } catch (error) {
-      if (
-        error instanceof PaymentApiError &&
-        error.code === "PAYMENT_PROVIDER_TIMEOUT"
-      ) {
-        const timeoutAttempt = await this.paymentAttemptRepo.update(attempt.id!, {
-          status: PaymentStatus.PENDING_PROVIDER,
-          providerStatus: "timeout",
-        });
-        return {
-          created: true,
-          paymentAttempt: timeoutAttempt,
-          sale,
-        };
-      }
-
-      await this.paymentAttemptRepo.update(attempt.id!, {
-        status: PaymentStatus.FAILED,
-        providerStatus: "create_failed",
-        failedAt: Timestamp.now(),
       });
       throw error;
     }
@@ -728,6 +528,7 @@ export class PaymentsService {
       !this.isTerminalStatus(currentStatus) &&
       this.shouldSyncStatus(effectiveAttempt)
     ) {
+      this.assertAplazoOnlineAttempt(effectiveAttempt);
       effectiveAttempt = await this.reconciliationService.reconcilePaymentAttempt(
         paymentAttemptId,
         user.uid,
@@ -752,6 +553,15 @@ export class PaymentsService {
   ): Promise<PaymentAttempt> {
     const user = await this.requireAuthenticatedActor(actor);
     this.assertPrivilegedPosActor(user);
+    const attempt = await this.requirePaymentAttempt(paymentAttemptId);
+    if (attempt.provider !== ProveedorPago.APLAZO) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "El endpoint de reconciliación manual solo soporta Aplazo",
+      );
+    }
+    this.assertAplazoOnlineAttempt(attempt);
     return this.reconciliationService.reconcilePaymentAttempt(
       paymentAttemptId,
       user.uid,
@@ -781,22 +591,92 @@ export class PaymentsService {
       );
     }
 
+    this.assertAplazoOnlineAttempt(attempt);
+
+    if (toPaymentStatus(attempt) === PaymentStatus.CANCELED) {
+      return attempt;
+    }
+
+    const reconciledAttempt = await this.reconciliationService.reconcilePaymentAttempt(
+      paymentAttemptId,
+      user.uid,
+    );
+    const currentStatus = toPaymentStatus(reconciledAttempt);
+
+    if (currentStatus === PaymentStatus.CANCELED) {
+      return reconciledAttempt;
+    }
+
+    if (currentStatus === PaymentStatus.PAID) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "El pago Aplazo ya está ACTIVO/pagado; usa el flujo de refund para devolverlo",
+      );
+    }
+
+    if (currentStatus !== PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "La cancelación Aplazo solo aplica a pagos NO CONFIRMADOS",
+        {
+          currentStatus,
+          providerStatus: reconciledAttempt.providerStatus,
+        },
+      );
+    }
+
     const providerStatus = await aplazoProvider.cancelOrVoid({
-      paymentAttempt: attempt,
+      paymentAttempt: reconciledAttempt,
       reason,
     });
 
-    if (providerStatus.status === PaymentStatus.CANCELED) {
-      return this.finalizer.finalizeTerminalStatus(attempt, PaymentStatus.CANCELED, {
-        source: "cancel",
-        requestedBy: user.uid,
-        providerResult: providerStatus,
-      });
+    if (
+      providerStatus.status === PaymentStatus.CANCELED ||
+      providerStatus.status === PaymentStatus.REFUNDED
+    ) {
+      return this.finalizer.finalizeTerminalStatus(
+        reconciledAttempt,
+        PaymentStatus.CANCELED,
+        {
+          source: "cancel",
+          requestedBy: user.uid,
+          cancelReason: reason || "manual_admin_cancel",
+          providerResult: providerStatus,
+        },
+      );
     }
 
-    return this.paymentAttemptRepo.update(attempt.id!, {
+    if (providerStatus.status === PaymentStatus.PAID) {
+      await this.finalizer.finalizeTerminalStatus(
+        reconciledAttempt,
+        PaymentStatus.PAID,
+        {
+          source: "reconcile",
+          requestedBy: user.uid,
+          providerResult: providerStatus,
+        },
+      );
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_CANCEL_NOT_ALLOWED",
+        "El pago Aplazo ya está ACTIVO/pagado; usa el flujo de refund para devolverlo",
+      );
+    }
+
+    return this.paymentAttemptRepo.update(reconciledAttempt.id!, {
       status: providerStatus.status,
-      providerStatus: providerStatus.providerStatus ?? attempt.providerStatus,
+      providerStatus:
+        providerStatus.providerStatus ?? reconciledAttempt.providerStatus,
+      metadata: {
+        ...(reconciledAttempt.metadata || {}),
+        lastCancelAttemptAt: Timestamp.now(),
+        ...(reason ? { lastCancelReason: reason } : {}),
+        ...(providerStatus.rawResponseSanitized
+          ? { lastCancelProviderResponse: providerStatus.rawResponseSanitized }
+          : {}),
+      },
     });
   }
 
@@ -823,6 +703,8 @@ export class PaymentsService {
       );
     }
 
+    this.assertAplazoOnlineAttempt(attempt);
+
     const config = getAplazoConfig();
     if (!config.refundsEnabled) {
       return this.finalizer.markManualRefundRequested(
@@ -832,29 +714,81 @@ export class PaymentsService {
       );
     }
 
+    this.assertAplazoRefundLocalStatus(attempt);
+    const providerStatus = await aplazoProvider.getStatus(attempt);
+    this.assertAplazoRefundProviderStatus(providerStatus.status);
+
+    const refundAmounts = this.resolveAplazoRefundAmounts(
+      attempt,
+      input.refundAmountMinor,
+    );
+    const refundOperation = await this.refundRepo.createProcessingRefund({
+      paymentAttemptId,
+      amountMinor: refundAmounts.requestedMinor,
+      reason: input.reason,
+      requestedBy: user.uid,
+    });
+
     try {
       const refundResult = await aplazoProvider.refund({
         paymentAttempt: attempt,
-        refundAmountMinor: input.refundAmountMinor,
+        refundAmountMinor: refundAmounts.requestedMinor,
         reason: input.reason,
       });
-      return this.finalizer.applyRefundResult(attempt, refundResult, {
-        requestedBy: user.uid,
-        refundAmountMinor: input.refundAmountMinor,
+
+      const nextRefundTotalMinor =
+        refundAmounts.alreadyRefundedMinor + refundAmounts.requestedMinor;
+      const nextRefundRemainingMinor = Math.max(
+        refundAmounts.totalPaidMinor - nextRefundTotalMinor,
+        0,
+      );
+      const nextStatus =
+        nextRefundRemainingMinor === 0
+          ? PaymentStatus.REFUNDED
+          : PaymentStatus.PARTIALLY_REFUNDED;
+      const nextRefundsCount = (attempt.refundsCount ?? 0) + 1;
+
+      await this.refundRepo.markSucceeded({
+        operationId: refundOperation.id!,
+        paymentAttemptId,
+        orderId: attempt.ordenId,
+        providerRefundId: refundResult.refundId,
+        providerResponse: refundResult.rawResponseSanitized,
+        nextPaymentStatus: nextStatus,
+        refundTotalMinor: nextRefundTotalMinor,
+        refundRemainingMinor: nextRefundRemainingMinor,
+        refundsCount: nextRefundsCount,
         reason: input.reason,
+        refundAmountMinor: refundAmounts.requestedMinor,
+        refundAmountMajor: nextRefundTotalMinor / 100,
+        providerStatus: refundResult.providerStatus,
       });
+
+      const updatedAttempt = await this.requirePaymentAttempt(paymentAttemptId);
+      return updatedAttempt;
     } catch (error) {
-      if (
-        error instanceof PaymentApiError &&
-        error.code === "PAYMENT_REFUND_UNSUPPORTED"
-      ) {
-        return this.finalizer.markManualRefundRequested(
-          attempt,
-          user.uid,
-          input.reason,
-        );
-      }
-      throw error;
+      await this.refundRepo.markFailed({
+        operationId: refundOperation.id!,
+        paymentAttemptId,
+        failedReason:
+          error instanceof Error ? error.message : "Error desconocido con Aplazo",
+        providerResponse:
+          error instanceof PaymentApiError ? error.details : undefined,
+      });
+
+      throw new PaymentApiError(
+        error instanceof PaymentApiError ? error.statusCode : 502,
+        "APLAZO_REFUND_FAILED",
+        "Aplazo no pudo procesar el refund; el pago local no fue marcado como reembolsado",
+        {
+          paymentAttemptId,
+          refundOperationId: refundOperation.id,
+          originalCode:
+            error instanceof PaymentApiError ? error.code : "UNKNOWN_ERROR",
+          originalMessage:
+            error instanceof Error ? error.message : "Error desconocido",
+        },
+      );
     }
   }
 
@@ -880,6 +814,8 @@ export class PaymentsService {
         "El endpoint de refund status solo soporta Aplazo",
       );
     }
+
+    this.assertAplazoOnlineAttempt(attempt);
 
     if (!aplazoProvider.getRefundStatus) {
       throw new PaymentApiError(
@@ -925,8 +861,205 @@ export class PaymentsService {
       totalRefundedAmount:
         typeof updatedAttempt.refundAmount === "number"
           ? updatedAttempt.refundAmount
-          : 0,
+        : 0,
     };
+  }
+
+  async createAplazoRefundRequest(
+    actor: AuthActor,
+    input: { orderId: string; reason: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    const order = await this.requireOrderForRefundRequest(input.orderId, user);
+    const attempt = await this.requireAplazoRefundableAttemptForOrder(order.id);
+    await this.assertActorCanAccessAttempt(attempt, user);
+
+    const openRequest = await this.refundRequestRepo.findOpenByPaymentAttempt(
+      attempt.id!,
+    );
+    if (openRequest) {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_ALREADY_OPEN",
+        "Ya existe una solicitud de devolución pendiente o aprobada para este pago",
+        {
+          refundRequestId: openRequest.id,
+          paymentAttemptId: attempt.id,
+        },
+      );
+    }
+
+    return this.refundRequestRepo.create({
+      orderId: order.id,
+      paymentAttemptId: attempt.id!,
+      userId: user.uid,
+      reason: input.reason,
+    });
+  }
+
+  async listAplazoRefundRequestsForActor(
+    actor: AuthActor,
+    input: { orderId?: string } = {},
+  ): Promise<PaymentRefundRequestRecord[]> {
+    const user = await this.requireAuthenticatedActor(actor);
+    return this.refundRequestRepo.listByUser(user.uid, input);
+  }
+
+  async getAplazoRefundRequestForActor(
+    refundRequestId: string,
+    actor: AuthActor,
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.userId !== user.uid && !isPrivileged(user.rol)) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "No tienes permisos para consultar esta solicitud de devolución",
+      );
+    }
+
+    return request;
+  }
+
+  async listAplazoRefundRequestsForAdmin(
+    actor: AuthActor,
+    input: { status?: PaymentRefundRequestStatus } = {},
+  ): Promise<PaymentRefundRequestRecord[]> {
+    const user = await this.requireAuthenticatedActor(actor);
+    this.assertPrivilegedPosActor(user);
+    return this.refundRequestRepo.listForAdmin(input);
+  }
+
+  async approveAplazoRefundRequest(
+    refundRequestId: string,
+    actor: AuthActor,
+    input: { refundAmountMinor: number; reason?: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (user.rol !== RolUsuario.ADMIN) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN puede aprobar solicitudes de devolución Aplazo",
+      );
+    }
+
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.status !== "pending" && request.status !== "approved") {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_NOT_APPROVABLE",
+        "Solo solicitudes pendientes o aprobadas con error se pueden aprobar/procesar",
+        {
+          refundRequestId,
+          status: request.status,
+        },
+      );
+    }
+
+    const config = getAplazoConfig();
+    if (!config.refundsEnabled) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_REFUND_UNSUPPORTED",
+        "Refund Aplazo deshabilitado por feature flag",
+      );
+    }
+
+    const attempt = await this.requirePaymentAttempt(request.paymentAttemptId);
+    if (attempt.provider !== ProveedorPago.APLAZO) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_VALIDATION_ERROR",
+        "La solicitud no corresponde a un pago Aplazo",
+      );
+    }
+    this.assertAplazoOnlineAttempt(attempt);
+    this.assertAplazoRefundLocalStatus(attempt);
+    this.resolveAplazoRefundAmounts(attempt, input.refundAmountMinor);
+
+    await this.refundRequestRepo.markApproved({
+      id: refundRequestId,
+      approvedBy: user.uid,
+      refundAmountMinor: input.refundAmountMinor,
+      reason: input.reason,
+    });
+
+    try {
+      const updatedAttempt = await this.refundAplazoPaymentAttempt(
+        request.paymentAttemptId,
+        user,
+        {
+          refundAmountMinor: input.refundAmountMinor,
+          reason: input.reason || request.reason,
+        },
+      );
+
+      return this.refundRequestRepo.markProcessed({
+        id: refundRequestId,
+        providerRefundId: updatedAttempt.refundId,
+        providerStatus: updatedAttempt.providerStatus,
+        providerResponse: {
+          paymentAttemptId: updatedAttempt.id,
+          refundState: updatedAttempt.refundState,
+          refundTotalMinor: updatedAttempt.refundTotalMinor,
+          refundRemainingMinor: updatedAttempt.refundRemainingMinor,
+        },
+      });
+    } catch (error) {
+      await this.refundRequestRepo.markProcessingFailed(
+        refundRequestId,
+        sanitizeForStorage({
+          code:
+            error instanceof PaymentApiError
+              ? error.code
+              : "UNKNOWN_REFUND_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Error desconocido al procesar refund Aplazo",
+          details: error instanceof PaymentApiError ? error.details : undefined,
+          failedAt: Timestamp.now(),
+        }),
+      );
+
+      throw error;
+    }
+  }
+
+  async rejectAplazoRefundRequest(
+    refundRequestId: string,
+    actor: AuthActor,
+    input: { reason: string },
+  ): Promise<PaymentRefundRequestRecord> {
+    const user = await this.requireAuthenticatedActor(actor);
+    if (user.rol !== RolUsuario.ADMIN) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "Solo ADMIN puede rechazar solicitudes de devolución Aplazo",
+      );
+    }
+
+    const request = await this.requireRefundRequest(refundRequestId);
+    if (request.status !== "pending") {
+      throw new PaymentApiError(
+        409,
+        "REFUND_REQUEST_NOT_REJECTABLE",
+        "Solo solicitudes pendientes se pueden rechazar",
+        {
+          refundRequestId,
+          status: request.status,
+        },
+      );
+    }
+
+    return this.refundRequestRepo.markRejected({
+      id: refundRequestId,
+      rejectedBy: user.uid,
+      reason: input.reason,
+    });
   }
 
   async resolveBrowserReturnState(
@@ -1098,6 +1231,77 @@ export class PaymentsService {
     return order;
   }
 
+  private async requireOrderForRefundRequest(
+    orderId: string,
+    actor: AuthActor,
+  ): Promise<Orden & { id: string }> {
+    const snapshot = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(orderId)
+      .get();
+    if (!snapshot.exists) {
+      throw new PaymentApiError(
+        404,
+        "PAYMENT_ORDER_INVALID",
+        `Orden ${orderId} no encontrada`,
+      );
+    }
+
+    const order = {
+      id: snapshot.id,
+      ...(snapshot.data() as Orden),
+    };
+
+    if (order.usuarioId !== actor.uid) {
+      throw new PaymentApiError(
+        403,
+        "PAYMENT_FORBIDDEN",
+        "No puedes solicitar devolución de una orden ajena",
+      );
+    }
+
+    return order;
+  }
+
+  private async requireAplazoRefundableAttemptForOrder(
+    orderId: string,
+  ): Promise<PaymentAttempt> {
+    const attempt = await this.paymentAttemptRepo.findLatestByOrderAndFlow(
+      ProveedorPago.APLAZO,
+      orderId,
+      PaymentFlowType.ONLINE,
+    );
+    if (!attempt) {
+      throw new PaymentApiError(
+        404,
+        "PAYMENT_ATTEMPT_NOT_FOUND",
+        "No se encontró un pago Aplazo online para esta orden",
+        {
+          orderId,
+        },
+      );
+    }
+
+    this.assertAplazoRefundLocalStatus(attempt);
+    this.resolveAplazoRefundAmounts(attempt);
+    return attempt;
+  }
+
+  private async requireRefundRequest(
+    refundRequestId: string,
+  ): Promise<PaymentRefundRequestRecord> {
+    const request = await this.refundRequestRepo.getById(refundRequestId);
+    if (!request) {
+      throw new PaymentApiError(
+        404,
+        "REFUND_REQUEST_NOT_FOUND",
+        `Solicitud de devolución ${refundRequestId} no encontrada`,
+      );
+    }
+
+    return request;
+  }
+
   private async resolveOnlineCustomer(
     actor: AuthActor,
     input?: PaymentCustomerInput,
@@ -1223,25 +1427,8 @@ export class PaymentsService {
     };
   }
 
-  private buildPosPricingSnapshot(sale: VentaPos): PaymentPricingSnapshot {
-    return {
-      subtotalMinor: sale.subtotalMinor,
-      taxMinor: sale.taxMinor,
-      shippingMinor: sale.shippingMinor,
-      totalMinor: sale.totalMinor,
-      currency: sale.currency,
-      items: sale.items.map((item) => ({
-        productoId: item.productoId,
-        cantidad: item.cantidad,
-        precioUnitarioMinor: roundToMinor(item.precioUnitario),
-        subtotalMinor: roundToMinor(item.subtotal),
-        tallaId: item.tallaId,
-      })),
-    };
-  }
-
   private generateDeterministicIdempotencyKey(
-    flow: "online" | "in_store",
+    flow: "online",
     primaryId: string,
     actorKey: string,
     amountMinor: number,
@@ -1261,9 +1448,176 @@ export class PaymentsService {
       throw new PaymentApiError(
         403,
         "PAYMENT_FORBIDDEN",
-        "El flujo in-store solo está disponible para personal autorizado",
+        "Solo personal autorizado puede operar pagos Aplazo",
       );
     }
+  }
+
+  private assertAplazoOnlineAttempt(attempt: PaymentAttempt): void {
+    if (attempt.flowType === PaymentFlowType.IN_STORE) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_FLOW_UNSUPPORTED",
+        "Las APIs Aplazo in-store ya no están disponibles; este endpoint solo soporta Aplazo online",
+        {
+          paymentAttemptId: attempt.id,
+          flowType: attempt.flowType,
+        },
+      );
+    }
+  }
+
+  private assertAplazoRefundLocalStatus(attempt: PaymentAttempt): void {
+    const currentStatus = toPaymentStatus(attempt);
+    if (
+      currentStatus === PaymentStatus.PAID ||
+      currentStatus === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
+      return;
+    }
+
+    if (currentStatus === PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_NOT_PAID_USE_CANCEL",
+        "El pago Aplazo sigue NO CONFIRMADO; usa cancelación en lugar de refund",
+        {
+          paymentAttemptId: attempt.id,
+          currentStatus,
+          providerStatus: attempt.providerStatus,
+        },
+      );
+    }
+
+    if (currentStatus === PaymentStatus.REFUNDED) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ALREADY_REFUNDED",
+        "El pago Aplazo ya está completamente reembolsado",
+        {
+          paymentAttemptId: attempt.id,
+          currentStatus,
+        },
+      );
+    }
+
+    throw new PaymentApiError(
+      409,
+      "PAYMENT_NOT_PAID_USE_CANCEL",
+      "Solo se pueden reembolsar pagos Aplazo confirmados/pagados",
+      {
+        paymentAttemptId: attempt.id,
+        currentStatus,
+        providerStatus: attempt.providerStatus,
+      },
+    );
+  }
+
+  private assertAplazoRefundProviderStatus(status: PaymentStatus): void {
+    if (
+      status === PaymentStatus.PAID ||
+      status === PaymentStatus.PARTIALLY_REFUNDED
+    ) {
+      return;
+    }
+
+    if (status === PaymentStatus.PENDING_CUSTOMER) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_NOT_PAID_USE_CANCEL",
+        "Aplazo reporta el pago como NO CONFIRMADO; usa cancelación en lugar de refund",
+        {
+          providerStatus: status,
+        },
+      );
+    }
+
+    throw new PaymentApiError(
+      409,
+      status === PaymentStatus.REFUNDED
+        ? "PAYMENT_ALREADY_REFUNDED"
+        : "PAYMENT_NOT_PAID_USE_CANCEL",
+      status === PaymentStatus.REFUNDED
+        ? "Aplazo reporta el pago como completamente reembolsado"
+        : "Aplazo no reporta el pago como ACTIVO/pagado; no se puede solicitar refund",
+      {
+        providerStatus: status,
+      },
+    );
+  }
+
+  private resolveAplazoRefundAmounts(
+    attempt: PaymentAttempt,
+    requestedMinor?: number,
+  ): {
+    totalPaidMinor: number;
+    alreadyRefundedMinor: number;
+    remainingMinor: number;
+    requestedMinor: number;
+  } {
+    const totalPaidMinor =
+      typeof attempt.amountMinor === "number" && Number.isFinite(attempt.amountMinor)
+        ? attempt.amountMinor
+        : Math.round((attempt.monto || 0) * 100);
+    const alreadyRefundedMinor =
+      typeof attempt.refundTotalMinor === "number" &&
+      Number.isFinite(attempt.refundTotalMinor)
+        ? attempt.refundTotalMinor
+        : typeof attempt.refundAmount === "number" &&
+            Number.isFinite(attempt.refundAmount)
+          ? Math.round(attempt.refundAmount * 100)
+          : 0;
+    const remainingMinor = Math.max(totalPaidMinor - alreadyRefundedMinor, 0);
+
+    if (remainingMinor <= 0) {
+      throw new PaymentApiError(
+        409,
+        "PAYMENT_ALREADY_REFUNDED",
+        "El pago Aplazo ya está completamente reembolsado",
+        {
+          paymentAttemptId: attempt.id,
+          totalPaidMinor,
+          alreadyRefundedMinor,
+        },
+      );
+    }
+
+    const effectiveRequestedMinor =
+      typeof requestedMinor === "number" ? requestedMinor : remainingMinor;
+
+    if (!Number.isFinite(effectiveRequestedMinor) || effectiveRequestedMinor <= 0) {
+      throw new PaymentApiError(
+        400,
+        "REFUND_AMOUNT_INVALID",
+        "refundAmountMinor debe ser mayor a 0",
+        {
+          paymentAttemptId: attempt.id,
+          refundAmountMinor: requestedMinor,
+        },
+      );
+    }
+
+    if (effectiveRequestedMinor > remainingMinor) {
+      throw new PaymentApiError(
+        409,
+        "REFUND_AMOUNT_EXCEEDS_AVAILABLE",
+        "El monto solicitado excede el saldo reembolsable disponible",
+        {
+          paymentAttemptId: attempt.id,
+          requestedMinor: effectiveRequestedMinor,
+          remainingMinor,
+          totalPaidMinor,
+          alreadyRefundedMinor,
+        },
+      );
+    }
+
+    return {
+      totalPaidMinor,
+      alreadyRefundedMinor,
+      remainingMinor,
+      requestedMinor: effectiveRequestedMinor,
+    };
   }
 
   private getConfirmedRefundTotalMinor(
@@ -1327,221 +1681,6 @@ export class PaymentsService {
 
       return Number(right.refundId || 0) - Number(left.refundId || 0);
     })[0];
-  }
-
-  private async requireOpenPosSession(
-    posSessionId: string,
-    actor: AuthActor,
-  ): Promise<PosSession & { id: string }> {
-    const session = await this.posSessionRepo.getOpenSession(posSessionId);
-    if (!session) {
-      throw new PaymentApiError(
-        404,
-        "PAYMENT_POS_SESSION_NOT_FOUND",
-        `La sesión POS ${posSessionId} no existe o no está abierta`,
-      );
-    }
-
-    if (actor.rol === RolUsuario.EMPLEADO && session.vendedorUid !== actor.uid) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "La sesión POS pertenece a otro vendedor",
-      );
-    }
-
-    return session as PosSession & { id: string };
-  }
-
-  private assertPosContextMatchesSession(
-    request: InStoreCreateRequest,
-    session: PosSession,
-    actor: AuthActor,
-  ): void {
-    if (request.deviceId !== session.deviceId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "deviceId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.cajaId !== session.cajaId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "cajaId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.sucursalId !== session.sucursalId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "sucursalId no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (request.vendedorUid !== session.vendedorUid) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "vendedorUid no coincide con la sesión POS abierta",
-      );
-    }
-
-    if (actor.rol === RolUsuario.EMPLEADO && request.vendedorUid !== actor.uid) {
-      throw new PaymentApiError(
-        403,
-        "PAYMENT_FORBIDDEN",
-        "No puedes crear intentos POS a nombre de otro vendedor",
-      );
-    }
-  }
-
-  private async requireExistingPosSale(
-    ventaPosId: string,
-    session: PosSession,
-  ): Promise<VentaPos> {
-    const sale = await this.posSaleRepo.getById(ventaPosId);
-    if (!sale) {
-      throw new PaymentApiError(
-        404,
-        "PAYMENT_POS_SALE_NOT_FOUND",
-        `Venta POS ${ventaPosId} no encontrada`,
-      );
-    }
-
-    if (sale.posSessionId !== session.id) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        "La venta POS no pertenece a la sesión de caja indicada",
-      );
-    }
-
-    return sale;
-  }
-
-  private async createDraftPosSale(
-    request: InStoreCreateRequest,
-    session: PosSession,
-  ): Promise<VentaPos> {
-    if (!request.items || request.items.length === 0) {
-      throw new PaymentApiError(
-        400,
-        "PAYMENT_VALIDATION_ERROR",
-        "Se requieren items o ventaPosId para crear un intento in-store",
-      );
-    }
-
-    const normalizedItems = await this.resolvePosItems(request.items);
-    const subtotalMinor = normalizedItems.reduce(
-      (acc, item) => acc + roundToMinor(item.subtotal),
-      0,
-    );
-    const taxMinor = 0;
-    const shippingMinor = 0;
-    const totalMinor = subtotalMinor + taxMinor + shippingMinor;
-
-    return this.posSaleRepo.create({
-      posSessionId: session.id!,
-      deviceId: session.deviceId,
-      cajaId: session.cajaId,
-      sucursalId: session.sucursalId,
-      vendedorUid: session.vendedorUid,
-      customerName: request.customer?.name,
-      customerEmail: request.customer?.email,
-      customerPhone: request.customer?.phone,
-      currency: (request.currency || "mxn").toLowerCase(),
-      subtotal: subtotalMinor / 100,
-      tax: taxMinor / 100,
-      shipping: shippingMinor / 100,
-      total: totalMinor / 100,
-      subtotalMinor,
-      taxMinor,
-      shippingMinor,
-      totalMinor,
-      status: EstadoVentaPos.BORRADOR,
-      items: normalizedItems,
-      metadata: request.metadata || {},
-    });
-  }
-
-  private async resolvePosItems(items: PaymentItemInput[]): Promise<VentaPosItem[]> {
-    const requestedByVariant = new Map<string, number>();
-    const normalizedItems: VentaPosItem[] = [];
-
-    for (const item of items) {
-      const product = await productService.getProductById(item.productoId);
-      if (!product || !product.activo) {
-        throw new PaymentApiError(
-          404,
-          "PAYMENT_VALIDATION_ERROR",
-          `Producto ${item.productoId} no encontrado o inactivo`,
-        );
-      }
-
-      const stockContext = this.resolveProductStock(product, item);
-      const variantKey = `${item.productoId}:${stockContext.tallaId || "_"}`;
-      const requestedTotal =
-        (requestedByVariant.get(variantKey) ?? 0) + item.cantidad;
-      if (requestedTotal > stockContext.available) {
-        throw new PaymentApiError(
-          409,
-          "PAYMENT_VALIDATION_ERROR",
-          `Stock insuficiente para ${product.descripcion}`,
-        );
-      }
-      requestedByVariant.set(variantKey, requestedTotal);
-
-      normalizedItems.push({
-        productoId: item.productoId,
-        cantidad: item.cantidad,
-        precioUnitario: product.precioPublico,
-        subtotal: Number((product.precioPublico * item.cantidad).toFixed(2)),
-        tallaId: stockContext.tallaId,
-      });
-    }
-
-    return normalizedItems;
-  }
-
-  private resolveProductStock(
-    product: Producto,
-    item: PaymentItemInput,
-  ): { available: number; tallaId?: string } {
-    const normalizedTallaId = item.tallaId?.trim();
-    if (!product.tallaIds.length) {
-      if (normalizedTallaId) {
-        throw new PaymentApiError(
-          409,
-          "PAYMENT_VALIDATION_ERROR",
-          `El producto ${item.productoId} no maneja inventario por talla`,
-        );
-      }
-
-      return {
-        available: Math.max(0, Math.floor(Number(product.existencias || 0))),
-      };
-    }
-
-    if (!normalizedTallaId) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_VALIDATION_ERROR",
-        `Se requiere tallaId para ${product.descripcion}`,
-      );
-    }
-
-    const variant = product.inventarioPorTalla.find(
-      (entry) => entry.tallaId === normalizedTallaId,
-    );
-
-    return {
-      available: Math.max(0, Math.floor(Number(variant?.cantidad || 0))),
-      tallaId: normalizedTallaId,
-    };
   }
 
   private async assertActorCanAccessAttempt(

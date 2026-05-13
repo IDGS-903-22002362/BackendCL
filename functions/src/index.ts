@@ -18,6 +18,7 @@ import { sendLowStockDailyDigest } from "./stock-alert.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
 import { reconcileAplazoPayments } from "./aplazo-payments.cron";
+import { expirePickupOrders } from "./pickup-orders.cron";
 import {
   enqueueAbandonedCartNotifications,
   enqueueCampaignNotifications,
@@ -57,7 +58,6 @@ export const api = onRequest(
       "APLAZO_ENV",
       "APLAZO_INTEGRATION_VERSION",
       "APLAZO_ONLINE_ENABLED",
-      "APLAZO_INSTORE_ENABLED",
       "APLAZO_REFUNDS_ENABLED",
       "APLAZO_RECONCILE_ENABLED",
       "APLAZO_ONLINE_BASE_URL",
@@ -78,21 +78,6 @@ export const api = onRequest(
       "APLAZO_ONLINE_CANCEL_PATH",
       "APLAZO_ONLINE_REFUND_PATH",
       "APLAZO_ONLINE_REFUND_STATUS_PATH",
-      "APLAZO_INSTORE_BASE_URL",
-      "APLAZO_INSTORE_MERCHANT_BASE_URL",
-      "APLAZO_INSTORE_MERCHANT_ID",
-      "APLAZO_INSTORE_API_TOKEN",
-      "APLAZO_INSTORE_WEBHOOK_SECRET",
-      "APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME",
-      "APLAZO_INSTORE_CALLBACK_URL",
-      "APLAZO_INSTORE_TIMEOUT_MS",
-      "APLAZO_INSTORE_CREATE_PATH",
-      "APLAZO_INSTORE_STATUS_PATH",
-      "APLAZO_INSTORE_CANCEL_PATH",
-      "APLAZO_INSTORE_REFUND_PATH",
-      "APLAZO_INSTORE_REFUND_STATUS_PATH",
-      "APLAZO_INSTORE_REGISTER_BRANCH_PATH",
-      "APLAZO_INSTORE_DEFAULT_COMM_CHANNEL",
       "JWT_SECRET",
       "WEB_API_KEY",
       "GEMINI_API_KEY",
@@ -152,6 +137,7 @@ export const processTryOnJob = processTryOnJobTrigger;
 export const processNotificationEvent = processNotificationEventTrigger;
 export const processPaymentEvent = processPaymentEventTrigger;
 export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;
+export const expirePickupOrdersFunction = expirePickupOrders;
 export const abandonedCartNotifications = enqueueAbandonedCartNotifications;
 export const inactiveUserNotifications = enqueueInactiveUserNotifications;
 export const campaignNotifications = enqueueCampaignNotifications;

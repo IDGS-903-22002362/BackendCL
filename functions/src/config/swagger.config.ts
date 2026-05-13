@@ -51,9 +51,13 @@ import {
 } from "../middleware/validators/stripe.validator";
 import {
   aplazoAdminActionSchema,
-  aplazoInStoreCreateSchema,
   aplazoOnlineCreateSchema,
   aplazoRefundStatusQuerySchema,
+  approveAplazoRefundRequestSchema,
+  createAplazoRefundRequestSchema,
+  listAdminAplazoRefundRequestsQuerySchema,
+  listAplazoRefundRequestsQuerySchema,
+  rejectAplazoRefundRequestSchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   listLowStockAlertsQuerySchema,
@@ -66,6 +70,10 @@ import {
   updateNewSchema,
   deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
+import {
+  createBeneficioSchema,
+  updateBeneficioSchema,
+} from "../middleware/validators/beneficio.validator";
 import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
 import {
@@ -92,6 +100,14 @@ import {
   updateDetalleProductoSchema,
 } from "../middleware/validators/detalleProducto.validator";
 import { createFavoritoSchema } from "../middleware/validators/favorito.validator";
+import {
+  completePickupSchema,
+  createPickupLocationSchema,
+  pickupAvailabilitySchema,
+  pickupOrdersQuerySchema,
+  updatePickupLocationSchema,
+  verifyPickupCodeSchema,
+} from "../middleware/validators/pickup-location.validator";
 import {
   calcularPreciosOfertaSchema,
   createOfertaSchema,
@@ -164,6 +180,10 @@ const swaggerDefinition = {
       description: "Gestión de noticias del sistema",
     },
     {
+      name: "Beneficios",
+      description: "Gestión de publicaciones informativas de beneficios",
+    },
+    {
       name: "Gallery",
       description: "Gestión de galería de fotos y reels",
     },
@@ -224,6 +244,18 @@ const swaggerDefinition = {
       name: "Debug",
       description:
         "Endpoints de diagnóstico (solo desarrollo) - DEPRECATED en producción",
+    },
+    {
+      name: "Banners",
+      description: "Gestión de banners dinámicos para el carrusel del home",
+    },
+    {
+      name: "Pickup Locations",
+      description: "Sucursales y disponibilidad para recoger en tienda",
+    },
+    {
+      name: "Pickup Orders",
+      description: "Operación staff/admin de pedidos para recoger en tienda",
     },
   ],
   components: {
@@ -456,6 +488,8 @@ ofertaTitulo: {
 CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
+      CreateBenefit: zodToJsonSchema(createBeneficioSchema),
+      UpdateBenefit: zodToJsonSchema(updateBeneficioSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
       CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
@@ -566,6 +600,42 @@ CreateNews: zodToJsonSchema(createNewSchema),
       UpdateEstadoOrden: zodToJsonSchema(updateEstadoOrdenSchema),
       ListOrdenesQuery: zodToJsonSchema(listOrdenesQuerySchema),
       HistorialOrdenesQuery: zodToJsonSchema(historialOrdenesQuerySchema),
+      CreatePickupLocation: zodToJsonSchema(createPickupLocationSchema),
+      UpdatePickupLocation: zodToJsonSchema(updatePickupLocationSchema),
+      PickupAvailabilityRequest: zodToJsonSchema(pickupAvailabilitySchema),
+      PickupOrdersQuery: zodToJsonSchema(pickupOrdersQuerySchema),
+      VerifyPickupCode: zodToJsonSchema(verifyPickupCodeSchema),
+      CompletePickup: zodToJsonSchema(completePickupSchema),
+      PickupLocation: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "loc_123" },
+          name: { type: "string", example: "Tienda Estadio León" },
+          address: { type: "string", example: "Blvd. Adolfo López Mateos 1810" },
+          city: { type: "string", example: "León" },
+          state: { type: "string", example: "Guanajuato" },
+          postalCode: { type: "string", example: "37500" },
+          country: { type: "string", example: "MX" },
+          phone: { type: "string", example: "4771234567" },
+          active: { type: "boolean", example: true },
+          pickupEnabled: { type: "boolean", example: true },
+          pickupInstructions: {
+            type: "string",
+            example: "Presenta tu código en mostrador.",
+          },
+          estimatedPreparationMinutes: { type: "integer", example: 120 },
+        },
+      },
+      PickupAvailabilityResponse: {
+        type: "object",
+        properties: {
+          canPickup: { type: "boolean", example: true },
+          pickupLocationId: { type: "string", example: "loc_123" },
+          inventoryScope: { type: "string", enum: ["global"], example: "global" },
+          availableItems: { type: "array", items: { type: "object" } },
+          unavailableItems: { type: "array", items: { type: "object" } },
+        },
+      },
 
       IniciarPago: zodToJsonSchema(iniciarPagoSchema),
       UpdateEstadoPago: zodToJsonSchema(updateEstadoPagoSchema),
@@ -580,9 +650,49 @@ CreateNews: zodToJsonSchema(createNewSchema),
       ),
       CreateStripeRefundByOrder: zodToJsonSchema(createStripeRefundByOrderSchema),
       CreateAplazoOnlinePayment: zodToJsonSchema(aplazoOnlineCreateSchema),
-      CreateAplazoInStorePayment: zodToJsonSchema(aplazoInStoreCreateSchema),
       AplazoAdminPaymentAction: zodToJsonSchema(aplazoAdminActionSchema),
       AplazoRefundStatusQuery: zodToJsonSchema(aplazoRefundStatusQuerySchema),
+      CreateAplazoRefundRequest: zodToJsonSchema(
+        createAplazoRefundRequestSchema,
+      ),
+      ListAplazoRefundRequestsQuery: zodToJsonSchema(
+        listAplazoRefundRequestsQuerySchema,
+      ),
+      ListAdminAplazoRefundRequestsQuery: zodToJsonSchema(
+        listAdminAplazoRefundRequestsQuerySchema,
+      ),
+      ApproveAplazoRefundRequest: zodToJsonSchema(
+        approveAplazoRefundRequestSchema,
+      ),
+      RejectAplazoRefundRequest: zodToJsonSchema(
+        rejectAplazoRefundRequestSchema,
+      ),
+      AplazoRefundRequest: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "refund_req_123" },
+          provider: { type: "string", example: "aplazo" },
+          orderId: { type: "string", example: "orden_123" },
+          paymentAttemptId: { type: "string", example: "pago_123" },
+          userId: { type: "string", example: "uid_123" },
+          reason: { type: "string", example: "No era la talla correcta" },
+          status: {
+            type: "string",
+            enum: ["pending", "approved", "rejected", "processed"],
+            example: "pending",
+          },
+          refundAmountMinor: { type: "integer", example: 10000 },
+          refundAmount: { type: "number", example: 100 },
+          providerRefundId: { type: "string", example: "25083" },
+          providerStatus: { type: "string", example: "REQUESTED" },
+          rejectionReason: { type: "string", example: "Fuera de política" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+          approvedAt: { type: "string", format: "date-time" },
+          processedAt: { type: "string", format: "date-time" },
+          rejectedAt: { type: "string", format: "date-time" },
+        },
+      },
       AplazoRefundStatusItem: {
         type: "object",
         properties: {
@@ -1076,6 +1186,32 @@ updatedBy: {
             example: "2026-02-23T15:10:00Z",
           },
         },
+      },
+      Benefit: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "benefit_12345" },
+          titulo: {
+            type: "string",
+            example: "Descuento especial en taquilla",
+          },
+          descripcion: {
+            type: "string",
+            example: "Presenta tu membresia y recibe un beneficio exclusivo.",
+          },
+          estatus: { type: "boolean", example: true },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:00:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-04-30T12:30:00Z",
+          },
+        },
+      },
       FavoritoProductSummary: {
         type: "object",
         properties: {
@@ -1123,7 +1259,6 @@ updatedBy: {
           },
         },
         required: ["id", "usuarioId", "createdAt", "producto"],
-      },
       },
       DetalleProducto: {
         type: "object",
@@ -1280,6 +1415,85 @@ updatedBy: {
           updatedAt: { type: "string", format: "date-time" },
         },
       },
+      AssignPointsBySale: {
+        type: 'object',
+        required: ['dinero'],
+        properties: {
+          dinero: {
+            type: 'number',
+            description: 'Monto total de la venta (mayor a 0)',
+            example: 350.75,
+            minimum: 0.01,
+          },
+          descripcion: {
+            type: 'string',
+            description: 'Descripción opcional del movimiento',
+            maxLength: 250,
+            example: 'Venta en tienda física - orden #1234',
+          },
+          origenId: {
+            type: 'string',
+            description: 'Identificador del sistema o empleado que asigna los puntos',
+            maxLength: 120,
+            example: 'caja_01',
+          },
+        },
+        additionalProperties: false,
+      },
+      // ========== BANNERS ==========
+      BannerButton: {
+        type: "object",
+        properties: {
+          text: { type: "string", example: "Comprar ahora" },
+          url: { type: "string", example: "/tienda" },
+          style: { type: "string", enum: ["primary", "secondary", "outline"], example: "primary" },
+        },
+        required: ["text", "url"],
+      },
+      Banner: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "banner_abc123" },
+          title: { type: "string", example: "Ofertas de temporada" },
+          subtitle: { type: "string", example: "Hasta 50% de descuento" },
+          backgroundImage: { type: "string", format: "uri", example: "https://storage.googleapis.com/.../fondo.jpg" },
+          videoUrl: { type: "string", format: "uri", example: "https://www.youtube.com/watch?v=xxxx" },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" } },
+          productIds: { type: "array", items: { type: "string" }, example: ["prod_123", "prod_456"] },
+          active: { type: "boolean", example: true },
+          order: { type: "integer", example: 1 },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+        required: ["title", "backgroundImage", "buttons", "productIds", "active", "createdAt", "updatedAt"],
+      },
+      CreateBanner: {
+        type: "object",
+        required: ["title", "backgroundImage"],
+        properties: {
+          title: { type: "string", example: "Nuevos lanzamientos" },
+          subtitle: { type: "string", example: "Descubre la colección 2025" },
+          backgroundImage: { type: "string", format: "uri", example: "https://storage.googleapis.com/.../fondo.jpg" },
+          videoUrl: { type: "string", format: "uri", example: "https://youtu.be/..." },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" }, default: [] },
+          productIds: { type: "array", items: { type: "string" }, default: [] },
+          active: { type: "boolean", default: false },
+          order: { type: "integer", example: 2 },
+        },
+      },
+      UpdateBanner: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          subtitle: { type: "string" },
+          backgroundImage: { type: "string", format: "uri" },
+          videoUrl: { type: "string", format: "uri" },
+          buttons: { type: "array", items: { $ref: "#/components/schemas/BannerButton" } },
+          productIds: { type: "array", items: { type: "string" } },
+          active: { type: "boolean" },
+          order: { type: "integer" },
+        },
+      },
       Orden: {
         type: "object",
         properties: {
@@ -1312,6 +1526,24 @@ updatedBy: {
               "CANCELADA",
             ],
             example: "PENDIENTE",
+          },
+          fulfillmentMethod: {
+            type: "string",
+            enum: ["DELIVERY", "PICKUP"],
+            example: "PICKUP",
+          },
+          fulfillmentStatus: {
+            type: "string",
+            enum: [
+              "PENDING_PAYMENT",
+              "PAID",
+              "PREPARING",
+              "READY_FOR_PICKUP",
+              "PICKED_UP",
+              "EXPIRED",
+              "CANCELED",
+            ],
+            example: "READY_FOR_PICKUP",
           },
           direccionEnvio: {
             type: "object",
@@ -1347,6 +1579,23 @@ updatedBy: {
           numeroGuia: { type: "string", example: "FEDEX-123456789" },
           transportista: { type: "string", example: "FedEx" },
           costoEnvio: { type: "number", example: 150.0 },
+          pickupLocationId: { type: "string", example: "loc_123" },
+          pickupLocation: { $ref: "#/components/schemas/PickupLocation" },
+          pickupContact: {
+            type: "object",
+            properties: {
+              name: { type: "string", example: "Juan Pérez" },
+              phone: { type: "string", example: "4771234567" },
+              email: { type: "string", example: "juan@example.com" },
+            },
+          },
+          pickupCodeLast4: { type: "string", example: "7K2Q" },
+          pickupQrPayload: { type: "string", example: "eyJ0eXBlIjoicGlja3VwX29yZGVyIn0" },
+          readyForPickupAt: { type: "string", format: "date-time" },
+          pickedUpAt: { type: "string", format: "date-time" },
+          pickedUpBy: { type: "string", example: "Juan Pérez" },
+          deliveredByStaffUid: { type: "string", example: "staff_uid" },
+          pickupExpiresAt: { type: "string", format: "date-time" },
           notas: { type: "string", example: "Entregar en horario laboral" },
           createdAt: {
             type: "string",

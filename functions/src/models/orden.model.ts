@@ -47,6 +47,21 @@ export enum MetodoPago {
   MERCADOPAGO = "MERCADOPAGO", // Mercado Pago
 }
 
+export enum FulfillmentMethod {
+  DELIVERY = "DELIVERY",
+  PICKUP = "PICKUP",
+}
+
+export enum FulfillmentStatus {
+  PENDING_PAYMENT = "PENDING_PAYMENT",
+  PAID = "PAID",
+  PREPARING = "PREPARING",
+  READY_FOR_PICKUP = "READY_FOR_PICKUP",
+  PICKED_UP = "PICKED_UP",
+  EXPIRED = "EXPIRED",
+  CANCELED = "CANCELED",
+}
+
 /**
  * Interface para items individuales de la orden
  * Representa cada producto incluido en la orden con su cantidad y precio
@@ -76,6 +91,27 @@ export interface DireccionEnvio {
   referencias?: string; // Referencias adicionales para encontrar la dirección
 }
 
+export interface PickupLocationSnapshot {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country: string;
+  phone?: string;
+  pickupInstructions?: string;
+  businessHours?: Record<string, unknown>;
+  preparationCutoffTime?: string;
+  estimatedPreparationMinutes?: number;
+}
+
+export interface PickupContact {
+  name: string;
+  phone?: string;
+  email?: string;
+}
+
 /**
  * Interface principal de Orden
  * Representa una orden de compra en la colección 'ordenes' de Firestore
@@ -88,8 +124,22 @@ export interface Orden {
   impuestos: number; // IVA u otros impuestos aplicables
   total: number; // subtotal + impuestos + envío (si aplica)
   estado: EstadoOrden; // Estado actual de la orden
-  direccionEnvio: DireccionEnvio; // Dirección de entrega
+  direccionEnvio?: DireccionEnvio; // Dirección de entrega (requerida para DELIVERY)
   metodoPago: MetodoPago; // Método de pago seleccionado
+  fulfillmentMethod?: FulfillmentMethod; // Default legacy: DELIVERY
+  fulfillmentStatus?: FulfillmentStatus;
+  pickupLocationId?: string;
+  pickupLocation?: PickupLocationSnapshot;
+  pickupInstructions?: string;
+  pickupContact?: PickupContact;
+  pickupCodeHash?: string;
+  pickupCodeLast4?: string;
+  pickupQrPayload?: string;
+  readyForPickupAt?: Timestamp;
+  pickedUpAt?: Timestamp;
+  pickedUpBy?: string;
+  deliveredByStaffUid?: string;
+  pickupExpiresAt?: Timestamp;
 
   // Campos opcionales para integración futura
   transaccionId?: string; // ID de transacción de la pasarela de pago
@@ -120,8 +170,11 @@ export interface CrearOrdenDTO {
   impuestos: number;
   total: number;
   estado?: EstadoOrden; // Opcional, por defecto PENDIENTE
-  direccionEnvio: DireccionEnvio;
+  direccionEnvio?: DireccionEnvio;
   metodoPago: MetodoPago;
+  fulfillmentMethod?: FulfillmentMethod;
+  pickupLocationId?: string;
+  pickupContact?: PickupContact;
   costoEnvio?: number;
   notas?: string;
 }
@@ -138,6 +191,7 @@ export interface ActualizarOrdenDTO {
   transportista?: string;
   costoEnvio?: number;
   notas?: string;
+  fulfillmentStatus?: FulfillmentStatus;
 }
 
 /**

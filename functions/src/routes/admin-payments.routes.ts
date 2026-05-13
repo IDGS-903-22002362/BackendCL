@@ -6,9 +6,13 @@ import {
   validateQuery,
 } from "../middleware/validation.middleware";
 import {
+  aplazoRefundRequestParamSchema,
   aplazoAdminActionSchema,
   aplazoRefundStatusQuerySchema,
+  approveAplazoRefundRequestSchema,
+  listAdminAplazoRefundRequestsQuerySchema,
   paymentAttemptStatusParamSchema,
+  rejectAplazoRefundRequestSchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   paymentAuthMiddleware,
@@ -16,6 +20,101 @@ import {
 } from "../middleware/payments-auth.middleware";
 
 const router = Router();
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests:
+ *   get:
+ *     summary: Listar solicitudes de devolución Aplazo para admin
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [pending, approved, rejected, processed]
+ *     responses:
+ *       200:
+ *         description: Solicitudes de devolución Aplazo
+ */
+router.get(
+  "/aplazo/refund-requests",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateQuery(listAdminAplazoRefundRequestsQuerySchema),
+  paymentsController.listAdminAplazoRefundRequests,
+);
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests/{refundRequestId}/approve:
+ *   post:
+ *     summary: Aprobar y procesar devolución Aplazo
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: refundRequestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ApproveAplazoRefundRequest'
+ *     responses:
+ *       200:
+ *         description: Solicitud procesada
+ *       502:
+ *         description: Aplazo no pudo procesar el refund
+ */
+router.post(
+  "/aplazo/refund-requests/:refundRequestId/approve",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateParams(aplazoRefundRequestParamSchema),
+  validateBody(approveAplazoRefundRequestSchema),
+  paymentsController.approveAplazoRefundRequest,
+);
+
+/**
+ * @swagger
+ * /api/admin/payments/aplazo/refund-requests/{refundRequestId}/reject:
+ *   post:
+ *     summary: Rechazar solicitud de devolución Aplazo
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: refundRequestId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RejectAplazoRefundRequest'
+ *     responses:
+ *       200:
+ *         description: Solicitud rechazada
+ */
+router.post(
+  "/aplazo/refund-requests/:refundRequestId/reject",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateParams(aplazoRefundRequestParamSchema),
+  validateBody(rejectAplazoRefundRequestSchema),
+  paymentsController.rejectAplazoRefundRequest,
+);
 
 /**
  * @swagger
@@ -42,12 +141,15 @@ router.post(
  * /api/admin/payments/aplazo/{paymentAttemptId}/cancel:
  *   post:
  *     summary: Cancelar o void de intento Aplazo
+ *     description: Solo aplica a pagos Aplazo online en estado NO CONFIRMADO. Si Aplazo ya reporta ACTIVO/pagado, la cancelación se bloquea y debe usarse el flujo de refund.
  *     tags: [Payments]
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Intento cancelado
+ *       409:
+ *         description: El pago no está NO CONFIRMADO o ya está ACTIVO/pagado
  */
 router.post(
   "/aplazo/:paymentAttemptId/cancel",
@@ -63,12 +165,36 @@ router.post(
  * /api/admin/payments/aplazo/{paymentAttemptId}/refund:
  *   post:
  *     summary: Solicitar refund de intento Aplazo
+ *     description: Solicita un refund Aplazo parcial o total solo para pagos confirmados/pagados localmente y ACTIVO en Aplazo. Los pagos NO CONFIRMADOS deben cancelarse, no reembolsarse. El monto debe ser mayor a 0 y menor o igual al saldo reembolsable disponible.
  *     tags: [Payments]
  *     security:
  *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: paymentAttemptId
+ *         required: true
+ *         description: ID interno del intento de pago Aplazo
+ *         schema:
+ *           type: string
+ *           example: "pay_attempt_123"
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/AplazoAdminPaymentAction'
+ *           example:
+ *             refundAmountMinor: 10000
+ *             reason: "Wrong size"
  *     responses:
  *       200:
- *         description: Refund solicitado
+ *         description: Refund solicitado y registrado correctamente
+ *       400:
+ *         description: REFUND_AMOUNT_INVALID
+ *       409:
+ *         description: PAYMENT_NOT_PAID_USE_CANCEL, REFUND_AMOUNT_EXCEEDS_AVAILABLE, REFUND_ALREADY_PROCESSING o PAYMENT_ALREADY_REFUNDED
+ *       502:
+ *         description: APLAZO_REFUND_FAILED
  */
 router.post(
   "/aplazo/:paymentAttemptId/refund",

@@ -16,6 +16,24 @@ export interface PaymentAttempt extends Pago {
   refundState?: RefundState;
 }
 
+export type PaymentRefundStatus = "processing" | "succeeded" | "failed";
+
+export interface PaymentRefundRecord {
+  id?: string;
+  paymentAttemptId: string;
+  amountMinor: number;
+  reason?: string;
+  requestedBy: string;
+  requestedAt: Timestamp;
+  status: PaymentRefundStatus;
+  provider: "aplazo";
+  providerResponse?: Record<string, unknown>;
+  providerRefundId?: string;
+  failedReason?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 export interface PaymentEventLogRecord {
   id?: string;
   provider: ProveedorPago;

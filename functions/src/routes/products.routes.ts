@@ -37,9 +37,7 @@ import { productoIdParamSchema } from "../middleware/validators/carrito.validato
 import { createDetalleProductoSchema } from "../middleware/validators/detalleProducto.validator";
 import * as detalleQueryController from "../controllers/detalleProducto/detalleProducto.query.controller";
 import * as detalleCommandController from "../controllers/detalleProducto/detalleProducto.command.controller";
-import {
-  updateDetalleProductoSchema,
-} from "../middleware/validators/detalleProducto.validator";
+import { updateDetalleProductoSchema } from "../middleware/validators/detalleProducto.validator";
 
 const router = Router();
 
@@ -743,9 +741,7 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
  * /api/productos/{id}/imagenes:
  *   post:
  *     summary: Subir imágenes del producto
-  *     description: >
- *       Sube hasta 5 imágenes al producto. Las imágenes se almacenan en Firebase Storage.
- *       Máximo 10MB por imagen. Tipos soportados: JPEG, PNG, WEBP y GIF.
+ *     description: "Sube hasta 5 imágenes al producto. Las imágenes se almacenan en Firebase Storage. Máximo 10MB por imagen. Tipos soportados: JPEG, PNG, WEBP y GIF."
  *     tags: [Products]
  *     parameters:
  *       - in: path
@@ -879,7 +875,6 @@ router.delete(
   commandController.deleteImage,
 );
 
-
 // ==========================================
 // DETALLES DEL PRODUCTO (Subcolección)
 // ==========================================
@@ -925,7 +920,7 @@ router.delete(
 router.get(
   "/:productoId/detalles",
   validateParams(productoIdParamSchema),
-  detalleQueryController.getDetallesByProducto
+  detalleQueryController.getDetallesByProducto,
 );
 
 /**
@@ -971,7 +966,7 @@ router.get(
 router.get(
   "/:productoId/detalles/:detalleId",
   validateParams(productoDetalleParamsSchema),
-  detalleQueryController.getDetalleById
+  detalleQueryController.getDetalleById,
 );
 
 /**
@@ -1039,7 +1034,7 @@ router.post(
   requireAdmin,
   validateParams(productoIdParamSchema),
   validateBody(createDetalleProductoSchema),
-  detalleCommandController.createDetalle
+  detalleCommandController.createDetalle,
 );
 
 /**
@@ -1107,7 +1102,7 @@ router.put(
   requireAdmin,
   validateParams(productoDetalleParamsSchema),
   validateBody(updateDetalleProductoSchema),
-  detalleCommandController.updateDetalle
+  detalleCommandController.updateDetalle,
 );
 
 /**
@@ -1162,7 +1157,7 @@ router.delete(
   authMiddleware,
   requireAdmin,
   validateParams(productoDetalleParamsSchema),
-  detalleCommandController.deleteDetalle
+  detalleCommandController.deleteDetalle,
 );
 
 export default router;

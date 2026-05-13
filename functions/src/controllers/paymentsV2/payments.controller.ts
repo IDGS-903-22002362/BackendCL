@@ -54,6 +54,48 @@ const serializeRefunds = (
       typeof refund.amountMinor === "number" ? refund.amountMinor / 100 : undefined,
   }));
 
+const serializeRefundRequest = (request: {
+  id?: string;
+  provider: string;
+  orderId: string;
+  paymentAttemptId: string;
+  userId: string;
+  reason: string;
+  status: string;
+  refundAmountMinor?: number;
+  providerRefundId?: string;
+  providerStatus?: string;
+  rejectionReason?: string;
+  lastProcessingError?: Record<string, unknown>;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  approvedAt?: unknown;
+  processedAt?: unknown;
+  rejectedAt?: unknown;
+}) => ({
+  id: request.id,
+  provider: request.provider,
+  orderId: request.orderId,
+  paymentAttemptId: request.paymentAttemptId,
+  userId: request.userId,
+  reason: request.reason,
+  status: request.status,
+  refundAmount:
+    typeof request.refundAmountMinor === "number"
+      ? request.refundAmountMinor / 100
+      : undefined,
+  refundAmountMinor: request.refundAmountMinor,
+  providerRefundId: request.providerRefundId,
+  providerStatus: request.providerStatus,
+  rejectionReason: request.rejectionReason,
+  lastProcessingError: request.lastProcessingError,
+  createdAt: serializeDateLike(request.createdAt),
+  updatedAt: serializeDateLike(request.updatedAt),
+  approvedAt: serializeDateLike(request.approvedAt),
+  processedAt: serializeDateLike(request.processedAt),
+  rejectedAt: serializeDateLike(request.rejectedAt),
+});
+
 const toStatusPayload = (
   paymentAttemptId: string,
   paymentAttempt: {
@@ -125,33 +167,6 @@ export const createAplazoOnline = async (req: Request, res: Response) => {
       status: result.paymentAttempt.status,
       redirectUrl: result.paymentAttempt.redirectUrl,
       checkoutUrl: result.paymentAttempt.redirectUrl,
-      expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
-    });
-  } catch (error) {
-    return respondPaymentError(res, error);
-  }
-};
-
-export const createAplazoInStore = async (req: Request, res: Response) => {
-  try {
-    const result = await paymentsService.createAplazoInStore(
-      getActorFromRequest(req),
-      req.body,
-      getOptionalIdempotencyKey(req),
-    );
-
-    const metadata = result.paymentAttempt.metadata || {};
-    return res.status(result.created ? 201 : 200).json({
-      ok: true,
-      paymentAttemptId: result.paymentAttempt.id,
-      provider: "aplazo",
-      flowType: "in_store",
-      status: result.paymentAttempt.status,
-      paymentLink:
-        typeof metadata.paymentLink === "string" ? metadata.paymentLink : undefined,
-      qrString: typeof metadata.qrString === "string" ? metadata.qrString : undefined,
-      qrImageUrl:
-        typeof metadata.qrImageUrl === "string" ? metadata.qrImageUrl : undefined,
       expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
     });
   } catch (error) {
@@ -297,6 +312,131 @@ export const getAplazoRefundStatus = async (req: Request, res: Response) => {
       totalRefundedAmount: result.totalRefundedAmount,
       currency: result.paymentAttempt.currency,
       refunds: serializeRefunds(result.refunds),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const createAplazoRefundRequest = async (req: Request, res: Response) => {
+  try {
+    const request = await paymentsService.createAplazoRefundRequest(
+      getActorFromRequest(req),
+      {
+        orderId: req.body.orderId,
+        reason: req.body.reason,
+      },
+    );
+
+    return res.status(201).json({
+      ok: true,
+      data: serializeRefundRequest(request),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const listAplazoRefundRequests = async (req: Request, res: Response) => {
+  try {
+    const requests = await paymentsService.listAplazoRefundRequestsForActor(
+      getActorFromRequest(req),
+      {
+        orderId:
+          typeof req.query.orderId === "string" ? req.query.orderId : undefined,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      count: requests.length,
+      data: requests.map(serializeRefundRequest),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const getAplazoRefundRequest = async (req: Request, res: Response) => {
+  try {
+    const request = await paymentsService.getAplazoRefundRequestForActor(
+      req.params.refundRequestId,
+      getActorFromRequest(req),
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: serializeRefundRequest(request),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const listAdminAplazoRefundRequests = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const requests = await paymentsService.listAplazoRefundRequestsForAdmin(
+      getActorFromRequest(req),
+      {
+        status:
+          typeof req.query.status === "string"
+            ? (req.query.status as "pending" | "approved" | "rejected" | "processed")
+            : undefined,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      count: requests.length,
+      data: requests.map(serializeRefundRequest),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const approveAplazoRefundRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const request = await paymentsService.approveAplazoRefundRequest(
+      req.params.refundRequestId,
+      getActorFromRequest(req),
+      {
+        refundAmountMinor: req.body.refundAmountMinor,
+        reason: req.body.reason,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: serializeRefundRequest(request),
+    });
+  } catch (error) {
+    return respondPaymentError(res, error);
+  }
+};
+
+export const rejectAplazoRefundRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const request = await paymentsService.rejectAplazoRefundRequest(
+      req.params.refundRequestId,
+      getActorFromRequest(req),
+      {
+        reason: req.body.reason,
+      },
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: serializeRefundRequest(request),
     });
   } catch (error) {
     return respondPaymentError(res, error);

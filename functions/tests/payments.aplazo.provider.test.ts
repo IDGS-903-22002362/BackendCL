@@ -62,7 +62,6 @@ describe("Aplazo provider", () => {
 
     process.env.APLAZO_ENABLED = "true";
     process.env.APLAZO_ONLINE_ENABLED = "true";
-    process.env.APLAZO_INSTORE_ENABLED = "true";
 
     process.env.APLAZO_ONLINE_BASE_URL = "https://api.aplazo.net/api";
     process.env.APLAZO_ONLINE_MERCHANT_BASE_URL =
@@ -82,21 +81,6 @@ describe("Aplazo provider", () => {
     process.env.APLAZO_ONLINE_WEBHOOK_AUTH_SCHEME = "Bearer";
     process.env.APLAZO_ONLINE_TIMEOUT_MS = "15000";
 
-    process.env.APLAZO_INSTORE_BASE_URL = "https://api.aplazo.net";
-    process.env.APLAZO_INSTORE_MERCHANT_BASE_URL =
-      "https://merchant.aplazo.net";
-    process.env.APLAZO_INSTORE_CREATE_PATH = "/api/pos/loan";
-    process.env.APLAZO_INSTORE_STATUS_PATH = "/api/pos/loan/{cartId}";
-    process.env.APLAZO_INSTORE_CANCEL_PATH = "/api/pos/loan/cancel";
-    process.env.APLAZO_INSTORE_REFUND_PATH = "/api/pos/loan/refund";
-    process.env.APLAZO_INSTORE_REFUND_STATUS_PATH =
-      "/api/pos/loan/refund/{cartId}";
-    process.env.APLAZO_INSTORE_MERCHANT_ID = "merchant_instore";
-    process.env.APLAZO_INSTORE_API_TOKEN = "token_instore";
-    process.env.APLAZO_INSTORE_WEBHOOK_SECRET = "secret_instore";
-    process.env.APLAZO_INSTORE_WEBHOOK_AUTH_SCHEME = "Bearer";
-    process.env.APLAZO_INSTORE_TIMEOUT_MS = "15000";
-    process.env.APLAZO_INSTORE_DEFAULT_COMM_CHANNEL = "q";
   });
 
   it("authenticates online and maps create response using loanId and cartId", async () => {
@@ -478,64 +462,6 @@ describe("Aplazo provider", () => {
     );
   });
 
-  it("creates in-store payments with api_token and merchant_id headers", async () => {
-    const createClient = buildClientMock();
-    createClient.request.mockResolvedValue({
-      data: {
-        loanId: "loan_pos_1",
-        cartId: "venta_pos_1",
-        link: "https://aplazo/pos/venta_pos_1",
-        qr: "qr_payload",
-        qrImageUrl: "https://aplazo/qr/venta_pos_1.png",
-        status: "No confirmado",
-      },
-    });
-    axiosCreate.mockReturnValueOnce(createClient);
-
-    const result = await aplazoProvider.createInStore({
-      paymentAttemptId: "attempt_pos_1",
-      idempotencyKey: "idem_pos_12345678",
-      amountMinor: 85000,
-      currency: "mxn",
-      providerReference: "venta_pos_1",
-      customerName: "Cliente POS",
-      customerPhone: "4771234567",
-      webhookUrl: "https://api/webhooks/aplazo",
-      callbackUrl: "https://app/payments/aplazo/success",
-      metadata: { sucursalId: "sucursal_1", commChannel: "q" },
-      pricingSnapshot: {
-        subtotalMinor: 85000,
-        taxMinor: 0,
-        shippingMinor: 0,
-        totalMinor: 85000,
-        currency: "mxn",
-        items: [
-          {
-            productoId: "prod_1",
-            cantidad: 1,
-            precioUnitarioMinor: 85000,
-            subtotalMinor: 85000,
-          },
-        ],
-      },
-    });
-
-    expect(createClient.request).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: "post",
-        url: "/api/pos/loan",
-        headers: {
-          api_token: "token_instore",
-          merchant_id: "merchant_instore",
-        },
-      }),
-    );
-    expect(result.providerLoanId).toBe("loan_pos_1");
-    expect(result.providerReference).toBe("venta_pos_1");
-    expect(result.paymentLink).toBe("https://aplazo/pos/venta_pos_1");
-    expect(result.qrString).toBe("qr_payload");
-  });
-
   it("queries online status by loan_id and not by cart_id when loanId exists", async () => {
     const authClient = buildClientMock();
     const merchantClient = buildClientMock();
@@ -622,6 +548,58 @@ describe("Aplazo provider", () => {
     expect(result.providerReference).toBe("orden_456");
   });
 
+  it("rejects legacy Aplazo in-store status sync without provider calls", async () => {
+    await expect(aplazoProvider.getStatus({
+      id: "attempt_pos_status",
+      ordenId: "",
+      userId: "empleado_1",
+      provider: "APLAZO" as any,
+      metodoPago: "APLAZO" as any,
+      monto: 1300,
+      amountMinor: 130000,
+      currency: "mxn",
+      estado: "PENDIENTE" as any,
+      flowType: "in_store" as any,
+      idempotencyKey: "idem_pos_status",
+      createdAt: {} as any,
+      updatedAt: {} as any,
+      providerReference: "venta_pos_1",
+    })).rejects.toMatchObject({
+      code: "PAYMENT_FLOW_UNSUPPORTED",
+    });
+    expect(axiosCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects legacy Aplazo in-store admin actions without provider calls", async () => {
+    const paymentAttempt = {
+      id: "attempt_pos_admin",
+      ordenId: "",
+      userId: "empleado_1",
+      provider: "APLAZO" as any,
+      metodoPago: "APLAZO" as any,
+      monto: 1300,
+      amountMinor: 130000,
+      currency: "mxn",
+      estado: "PENDIENTE" as any,
+      flowType: "in_store" as any,
+      idempotencyKey: "idem_pos_admin",
+      createdAt: {} as any,
+      updatedAt: {} as any,
+      providerReference: "venta_pos_1",
+    };
+
+    await expect(
+      aplazoProvider.cancelOrVoid({ paymentAttempt }),
+    ).rejects.toMatchObject({ code: "PAYMENT_FLOW_UNSUPPORTED" });
+    await expect(
+      aplazoProvider.refund({ paymentAttempt }),
+    ).rejects.toMatchObject({ code: "PAYMENT_FLOW_UNSUPPORTED" });
+    await expect(
+      aplazoProvider.getRefundStatus({ paymentAttempt }),
+    ).rejects.toMatchObject({ code: "PAYMENT_FLOW_UNSUPPORTED" });
+    expect(axiosCreate).not.toHaveBeenCalled();
+  });
+
   it("maps short provider status codes", () => {
     expect(aplazoProvider.mapProviderStatus("PE")).toBe(
       PaymentStatus.PENDING_CUSTOMER,
@@ -629,6 +607,12 @@ describe("Aplazo provider", () => {
     expect(aplazoProvider.mapProviderStatus("CO")).toBe(PaymentStatus.PAID);
     expect(aplazoProvider.mapProviderStatus("CA")).toBe(
       PaymentStatus.CANCELED,
+    );
+    expect(aplazoProvider.mapProviderStatus("REQUEST")).toBe(
+      PaymentStatus.PENDING_CUSTOMER,
+    );
+    expect(aplazoProvider.mapProviderStatus("OUTSTANDING")).toBe(
+      PaymentStatus.PAID,
     );
   });
 
@@ -996,7 +980,7 @@ describe("Aplazo provider", () => {
     expect(result.providerReference).toBe("cart-id-321");
   });
 
-  it("preserves LOAN_BAD_STATUS when online cancel is rejected by provider", async () => {
+  it("treats LOAN_BAD_STATUS with CANCELLED provider state as idempotent cancel", async () => {
     const authClient = buildClientMock();
     const refundsClient = buildClientMock();
     authClient.post.mockResolvedValue({
@@ -1026,8 +1010,7 @@ describe("Aplazo provider", () => {
       .mockReturnValueOnce(authClient)
       .mockReturnValueOnce(refundsClient);
 
-    await expect(
-      aplazoProvider.cancelOrVoid({
+    const result = await aplazoProvider.cancelOrVoid({
         paymentAttempt: {
           id: "attempt_cancel_bad_status",
           ordenId: "orden_123",
@@ -1044,25 +1027,18 @@ describe("Aplazo provider", () => {
           updatedAt: {} as any,
           providerReference: "cart-id-321",
         },
-      }),
-    ).rejects.toMatchObject({
-      code: "PAYMENT_PROVIDER_ERROR",
-      message: "LOAN BAD STATUS",
-      details: {
-        providerHttpStatus: 400,
-        providerCode: "LOAN_BAD_STATUS",
-        providerUrl: "/v1/merchant/loan/cancel",
-        providerResponse: {
-          code: "LOAN_BAD_STATUS",
-          data: {
-            status: "CANCELLED",
-          },
-          error: "LOAN BAD STATUS",
-          timestamp: 1734637318072,
-          message: "LOAN BAD STATUS",
-          path: "/api/v1/merchant/loan/cancel",
+    });
+
+    expect(result).toMatchObject({
+      status: PaymentStatus.CANCELED,
+      providerStatus: "CANCELLED",
+      providerReference: "cart-id-321",
+      rawResponseSanitized: expect.objectContaining({
+        code: "LOAN_BAD_STATUS",
+        data: {
+          status: "CANCELLED",
         },
-      },
+      }),
     });
   });
 
@@ -1899,9 +1875,9 @@ describe("Aplazo provider", () => {
       rawBody: Buffer.from(
         JSON.stringify({
           status: "Activo",
-          loanId: "loan_987",
+          loanId: 155789,
           cartId: "orden_123",
-          merchantId: "2639",
+          merchantId: 2639,
         }),
       ),
       headers: {
@@ -1910,8 +1886,9 @@ describe("Aplazo provider", () => {
     });
 
     expect(result.channel).toBe("online");
-    expect(result.providerLoanId).toBe("loan_987");
+    expect(result.providerLoanId).toBe("155789");
     expect(result.providerReference).toBe("orden_123");
+    expect(result.merchantId).toBe("2639");
     expect(result.status).toBe(PaymentStatus.PAID);
   });
 
