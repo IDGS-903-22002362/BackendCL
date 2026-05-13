@@ -70,6 +70,7 @@ router.use("/favoritos", favoritosRoutes);
 router.use("/beneficios", beneficiosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
 router.use("/banners", bannerRoutes);
+router.use("/ofertas", ofertasRoutes);
 router.use("/pickup-locations", pickupLocationsRoutes);
 router.use("/admin/pickup-locations", adminPickupLocationsRoutes);
 router.use("/admin/pickup-orders", adminPickupOrdersRoutes);
