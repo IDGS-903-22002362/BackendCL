@@ -33,6 +33,7 @@ import ligaMxRoutes from "./liga-mx.routes";
 import paymentsV2Routes from "./payments-v2.routes";
 import adminPaymentsRoutes from "./admin-payments.routes";
 import webhooksRoutes from "./webhooks.routes";
+import ofertasRoutes from "./ofertas.routes";
 
 const router = Router();
 
@@ -62,6 +63,7 @@ router.use("/ai", aiRoutes);
 router.use("/notificaciones", notificationsRoutes);
 router.use("/favoritos", favoritosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
+router.use("/ofertas", ofertasRoutes);
 
 // Futuros módulos:
 

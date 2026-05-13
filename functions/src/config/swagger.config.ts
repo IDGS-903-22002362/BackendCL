@@ -92,7 +92,12 @@ import {
   updateDetalleProductoSchema,
 } from "../middleware/validators/detalleProducto.validator";
 import { createFavoritoSchema } from "../middleware/validators/favorito.validator";
-
+import {
+  calcularPreciosOfertaSchema,
+  createOfertaSchema,
+  listarOfertasQuerySchema,
+  updateOfertaSchema,
+} from "../middleware/validators/ofertas.validator";
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
  * Genera documentación interactiva de la API con integración automática de schemas Zod
@@ -166,14 +171,18 @@ const swaggerDefinition = {
       name: "Users",
       description: "Gestión de usuarios de la aplicación",
     },
-    {
-      name: "Favoritos",
-      description: "Favoritos del usuario autenticado",
-    },
-    {
-      name: "Orders",
-      description: "Gestión de órdenes de compra",
-    },
+   {
+  name: "Favoritos",
+  description: "Favoritos del usuario autenticado",
+},
+{
+  name: "Ofertas",
+  description: "Gestión de ofertas, descuentos y cálculo de precios promocionales",
+},
+{
+  name: "Orders",
+  description: "Gestión de órdenes de compra",
+},
     {
       name: "Cart",
       description: "Carrito de compras (usuarios autenticados y anónimos)",
@@ -318,8 +327,133 @@ const swaggerDefinition = {
       RateProduct: zodToJsonSchema(rateProductSchema),
       CreateDetalleProducto: zodToJsonSchema(createDetalleProductoSchema),
       UpdateDetalleProducto: zodToJsonSchema(updateDetalleProductoSchema),
-      CreateFavorito: zodToJsonSchema(createFavoritoSchema),
-      CreateNews: zodToJsonSchema(createNewSchema),
+CreateFavorito: zodToJsonSchema(createFavoritoSchema),
+
+CreateOferta: zodToJsonSchema(createOfertaSchema),
+UpdateOferta: zodToJsonSchema(updateOfertaSchema),
+CalcularPreciosOferta: zodToJsonSchema(calcularPreciosOfertaSchema),
+ListarOfertasQuery: zodToJsonSchema(listarOfertasQuerySchema),
+
+Oferta: {
+  type: "object",
+  properties: {
+    id: { type: "string", example: "oferta_123" },
+    titulo: { type: "string", example: "20% de descuento en jerseys" },
+    descripcion: {
+      type: "string",
+      example: "Oferta especial por tiempo limitado",
+    },
+    estado: {
+  type: "boolean",
+  example: true,
+},
+tallaIds: {
+  type: "array",
+  items: {
+    type: "string",
+  },
+  example: ["s", "m", "xl"],
+},
+    tipoDescuento: {
+      type: "string",
+      enum: ["precio_fijo", "porcentaje", "monto"],
+      example: "porcentaje",
+    },
+    valorDescuento: { type: "number", example: 20 },
+    aplicaA: {
+      type: "string",
+      enum: ["productos", "categorias", "lineas", "todo"],
+      example: "productos",
+    },
+    productoIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["prod_123", "prod_456"],
+    },
+    categoriaIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["cat_jerseys"],
+    },
+    lineaIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["linea_ropa"],
+    },
+    fechaInicio: {
+      type: "string",
+      format: "date-time",
+      example: "2026-05-01T00:00:00.000Z",
+    },
+    fechaFin: {
+      type: "string",
+      format: "date-time",
+      example: "2026-05-31T23:59:59.000Z",
+    },
+    hastaAgotarExistencias: { type: "boolean", example: false },
+    stockLimiteOferta: {
+      type: "integer",
+      nullable: true,
+      example: 100,
+    },
+    stockVendidoOferta: { type: "integer", example: 0 },
+    prioridad: { type: "integer", example: 1 },
+    combinable: { type: "boolean", example: false },
+    badgeTexto: { type: "string", example: "Oferta especial" },
+    mostrarBadge: { type: "boolean", example: true },
+    deletedAt: {
+  type: "string",
+  format: "date-time",
+  nullable: true,
+  example: null,
+},
+    createdAt: {
+      type: "string",
+      format: "date-time",
+      example: "2026-04-29T16:00:00.000Z",
+    },
+    updatedAt: {
+      type: "string",
+      format: "date-time",
+      example: "2026-04-29T16:30:00.000Z",
+    },
+  },
+},
+
+ResultadoCalculoOfertas: {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          productoId: { type: "string", example: "prod_123" },
+          cantidad: { type: "integer", example: 2 },
+          precioOriginal: { type: "number", example: 1299.99 },
+          precioFinal: { type: "number", example: 1039.99 },
+          subtotalOriginal: { type: "number", example: 2599.98 },
+          subtotalFinal: { type: "number", example: 2079.98 },
+          ofertaAplicadaId: {
+  type: "string",
+  nullable: true,
+  example: "oferta_123",
+},
+ofertaTitulo: {
+  type: "string",
+  nullable: true,
+  example: "20% de descuento en jerseys",
+},
+        },
+      },
+    },
+    subtotalOriginal: { type: "number", example: 2599.98 },
+    subtotalFinal: { type: "number", example: 2079.98 },
+    ahorroTotal: { type: "number", example: 520 },
+  },
+},
+
+CreateNews: zodToJsonSchema(createNewSchema),
       UpdateNews: zodToJsonSchema(updateNewSchema),
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
@@ -789,6 +923,16 @@ const swaggerDefinition = {
             format: "date-time",
             example: "2024-01-20T14:20:00Z",
           },
+          createdBy: {
+  type: "string",
+  nullable: true,
+  example: "uid_admin_123",
+},
+updatedBy: {
+  type: "string",
+  nullable: true,
+  example: "uid_admin_123",
+},
         },
       },
       ProductRatingSummary: {
