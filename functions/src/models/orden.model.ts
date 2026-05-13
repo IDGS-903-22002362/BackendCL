@@ -151,6 +151,7 @@ export interface Orden {
   numeroGuia?: string; // Número de guía de envío
   transportista?: string; // Nombre del transportista
   costoEnvio?: number; // Costo de envío (si aplica)
+  shipping?: Record<string, any>; // Datos internos de integración de envío
   notas?: string; // Notas adicionales del cliente
   deliveredAt?: Timestamp; // Fecha efectiva en la que la orden quedó entregada
 
@@ -176,6 +177,10 @@ export interface CrearOrdenDTO {
   pickupLocationId?: string;
   pickupContact?: PickupContact;
   costoEnvio?: number;
+  shipping?: Record<string, any>;
+  shippingQuoteId?: string;
+  selectedShippingOptionId?: string;
+  selectedServiceType?: string;
   notas?: string;
 }
 

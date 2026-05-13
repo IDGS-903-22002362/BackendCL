@@ -1,0 +1,260 @@
+import { getFedexConfig } from "./fedex.config";
+import {
+  FedexMoney,
+  FedexRateAddressInput,
+  FedexRateOption,
+  FedexRatePackageInput,
+  FedexRateQuoteInput,
+  FedexRateReplyDetail,
+  FedexRateResponse,
+  FedexRateSurcharge,
+  FedexRatedShipmentDetail,
+} from "./fedex-rates.types";
+
+type FedexRateRequestPayload = {
+  accountNumber: {
+    value: string;
+  };
+  requestedShipment: {
+    shipper: {
+      address: Record<string, unknown>;
+    };
+    recipient: {
+      address: Record<string, unknown>;
+    };
+    pickupType: "DROPOFF_AT_FEDEX_LOCATION";
+    serviceType?: string;
+    packagingType: "YOUR_PACKAGING";
+    rateRequestType: string[];
+    preferredCurrency: string;
+    shipDateStamp: string;
+    requestedPackageLineItems: Array<{
+      groupPackageCount: number;
+      weight: {
+        units: "KG";
+        value: number;
+      };
+      dimensions: {
+        length: number;
+        width: number;
+        height: number;
+        units: "CM";
+      };
+    }>;
+  };
+  rateRequestControlParameters: {
+    returnTransitTimes: true;
+  };
+};
+
+const roundWeight = (value: number): number => Math.round(value * 100) / 100;
+
+const roundDimension = (value: number): number => Math.max(1, Math.ceil(value));
+
+const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => ({
+  postalCode: address.postalCode,
+  countryCode: address.countryCode,
+  residential: address.residential,
+  ...(address.city ? { city: address.city } : {}),
+  ...(address.stateOrProvinceCode
+    ? { stateOrProvinceCode: address.stateOrProvinceCode }
+    : {}),
+});
+
+const mapPackage = (item: FedexRatePackageInput) => ({
+  groupPackageCount: 1,
+  weight: {
+    units: "KG" as const,
+    value: roundWeight(item.weightKg),
+  },
+  dimensions: {
+    length: roundDimension(item.lengthCm),
+    width: roundDimension(item.widthCm),
+    height: roundDimension(item.heightCm),
+    units: "CM" as const,
+  },
+});
+
+export const mapFedexRateRequest = (
+  input: FedexRateQuoteInput,
+): FedexRateRequestPayload => {
+  const config = getFedexConfig();
+
+  return {
+    accountNumber: {
+      value: config.accountNumber,
+    },
+    requestedShipment: {
+      shipper: {
+        address: mapAddress(input.origin),
+      },
+      recipient: {
+        address: mapAddress(input.destination),
+      },
+      pickupType: "DROPOFF_AT_FEDEX_LOCATION",
+      ...(input.serviceType ? { serviceType: input.serviceType } : {}),
+      packagingType: "YOUR_PACKAGING",
+      rateRequestType: input.rateRequestTypes,
+      preferredCurrency: input.currency,
+      shipDateStamp: input.shipDate,
+      requestedPackageLineItems: input.packages.map(mapPackage),
+    },
+    rateRequestControlParameters: {
+      returnTransitTimes: true,
+    },
+  };
+};
+
+const isFinitePositiveNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+const getMoneyAmount = (money: FedexMoney | undefined): number | undefined => {
+  if (!money || !isFinitePositiveNumber(money.amount)) {
+    return undefined;
+  }
+
+  return money.amount;
+};
+
+const getMoneyCurrency = (
+  money: FedexMoney | undefined,
+  fallback: string,
+): string => money?.currency || fallback;
+
+const selectCharge = (
+  detail: FedexRatedShipmentDetail,
+): { amount?: number; currency?: string } => {
+  const shipmentRateDetail = detail.shipmentRateDetail;
+  const candidates = [
+    shipmentRateDetail?.totalNetCharge,
+    shipmentRateDetail?.totalNetFedExCharge,
+    shipmentRateDetail?.totalNetChargeWithDutiesAndTaxes,
+  ];
+
+  for (const money of candidates) {
+    const amount = getMoneyAmount(money);
+    if (amount) {
+      return {
+        amount,
+        currency: money?.currency,
+      };
+    }
+  }
+
+  return {};
+};
+
+const rateTypeOf = (detail: FedexRatedShipmentDetail): string | undefined =>
+  detail.shipmentRateDetail?.rateType || detail.rateType;
+
+const chooseRatedDetail = (
+  details: FedexRatedShipmentDetail[] | undefined,
+): FedexRatedShipmentDetail | undefined => {
+  if (!Array.isArray(details)) {
+    return undefined;
+  }
+
+  const validDetails = details.filter((detail) => selectCharge(detail).amount);
+  const accountDetail = validDetails.find(
+    (detail) => rateTypeOf(detail)?.toUpperCase() === "ACCOUNT",
+  );
+  const listDetail = validDetails.find(
+    (detail) => rateTypeOf(detail)?.toUpperCase() === "LIST",
+  );
+
+  return accountDetail || listDetail || validDetails[0];
+};
+
+const getServiceDescription = (detail: FedexRateReplyDetail): string | undefined => {
+  const preferredName = detail.serviceDescription?.names?.find(
+    (name) => name.type?.toUpperCase() === "long".toUpperCase() && name.value,
+  );
+
+  return (
+    detail.serviceName ||
+    preferredName?.value ||
+    detail.serviceDescription?.description
+  );
+};
+
+const getDeliveryDate = (detail: FedexRateReplyDetail): string | undefined => {
+  const date =
+    detail.deliveryTimestamp ||
+    detail.commit?.dateDetail?.dayFormat ||
+    detail.commitDetails?.find((item) => item.dateDetail?.dayFormat)?.dateDetail
+      ?.dayFormat;
+
+  return date ? date.slice(0, 10) : undefined;
+};
+
+const mapSurcharges = (
+  detail: FedexRatedShipmentDetail,
+  fallbackCurrency: string,
+): FedexRateSurcharge[] =>
+  (detail.shipmentRateDetail?.surcharges || [])
+    .map((surcharge): FedexRateSurcharge | undefined => {
+      const amount = getMoneyAmount(surcharge.amount);
+      if (!amount) {
+        return undefined;
+      }
+
+      return {
+        type: surcharge.surchargeType,
+        description: surcharge.description,
+        amount,
+        currency: getMoneyCurrency(surcharge.amount, fallbackCurrency),
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+export const mapFedexRateResponse = (
+  response: FedexRateResponse,
+  fallbackCurrency: string,
+): FedexRateOption[] => {
+  const details = response.output?.rateReplyDetails || [];
+
+  return details
+    .map((detail): FedexRateOption | undefined => {
+      const ratedDetail = chooseRatedDetail(detail.ratedShipmentDetails);
+      if (!ratedDetail) {
+        return undefined;
+      }
+
+      const charge = selectCharge(ratedDetail);
+      if (!charge.amount) {
+        return undefined;
+      }
+
+      const currency = charge.currency || fallbackCurrency;
+      const serviceType =
+        detail.serviceType ||
+        detail.serviceDescription?.serviceType ||
+        detail.serviceDescription?.serviceId;
+
+      if (!serviceType) {
+        return undefined;
+      }
+
+      const rawServiceDescription = getServiceDescription(detail);
+
+      const option: FedexRateOption = {
+        provider: "FEDEX" as const,
+        serviceType,
+        serviceName: rawServiceDescription || serviceType,
+        packagingType: detail.packagingType || "YOUR_PACKAGING",
+        amount: charge.amount,
+        currency,
+        ...(getDeliveryDate(detail)
+          ? { estimatedDeliveryDate: getDeliveryDate(detail) }
+          : {}),
+        ...(detail.transitTime ? { transitTime: detail.transitTime } : {}),
+        ...(rateTypeOf(ratedDetail) ? { rateType: rateTypeOf(ratedDetail) } : {}),
+        surcharges: mapSurcharges(ratedDetail, currency),
+        ...(rawServiceDescription ? { rawServiceDescription } : {}),
+      };
+
+      return option;
+    })
+    .filter((item): item is FedexRateOption => Boolean(item))
+    .sort((first, second) => first.amount - second.amount);
+};

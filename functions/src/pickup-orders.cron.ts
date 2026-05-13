@@ -8,7 +8,6 @@ export const expirePickupOrders = onSchedule(
     region: process.env.GCP_REGION || "us-central1",
     timeoutSeconds: 300,
     memory: "256MiB",
-    secrets: ["JWT_SECRET"],
   },
   async () => {
     await pickupOrderService.expireOverduePickups();

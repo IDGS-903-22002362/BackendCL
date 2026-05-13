@@ -20,9 +20,15 @@ import {
   getStripeWebhookSecret,
 } from "../lib/stripe";
 import pickupOrderService from "./pickup-order.service";
+import paidOrderFinalizerService from "./paid-order-finalizer.service";
+import {
+  shippingRefundGuardService,
+  ShippingRefundGuardError,
+} from "./shipping-refund-guard.service";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
+const SHIPPING_EVENTS_COLLECTION = "shipping_events";
 const STRIPE_WEBHOOK_EVENTS_COLLECTION = "stripe_webhook_events";
 const STRIPE_PAYMENT_START_LOCKS_COLLECTION = "stripe_payment_start_locks";
 
@@ -1076,6 +1082,49 @@ class PagoService {
           },
         }));
 
+      if (ordenData.costoEnvio && ordenData.costoEnvio > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: Math.round(ordenData.costoEnvio * 100),
+            product_data: {
+              name: "Envio FedEx",
+              metadata: {
+                provider: String(ordenData.shipping?.provider || "FEDEX"),
+                quoteId: String(ordenData.shipping?.quoteId || ""),
+              },
+            },
+          },
+        });
+      }
+
+      if (ordenData.impuestos && ordenData.impuestos > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: Math.round(ordenData.impuestos * 100),
+            product_data: {
+              name: "Impuestos",
+            },
+          },
+        });
+      }
+
+      const checkoutLineAmount = lineItems.reduce((total, item) => {
+        const unitAmount = item.price_data?.unit_amount || 0;
+        const quantity = typeof item.quantity === "number" ? item.quantity : 1;
+        return total + unitAmount * quantity;
+      }, 0);
+
+      if (checkoutLineAmount !== amount) {
+        throw new ApiError(
+          409,
+          "El total de Stripe Checkout no coincide con el total de la orden",
+        );
+      }
+
       const session = await stripe.checkout.sessions.create(
         {
           mode: "payment",
@@ -1376,6 +1425,41 @@ class PagoService {
       throw new ApiError(400, "El monto de reembolso debe ser mayor a 0");
     }
 
+    const ordenGuardDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(pago.ordenId)
+      .get();
+    if (!ordenGuardDoc.exists) {
+      throw new ApiError(
+        404,
+        `Orden asociada con ID "${pago.ordenId}" no encontrada`,
+      );
+    }
+
+    try {
+      await shippingRefundGuardService.ensureShipmentCanProceedToRefund({
+        orderId: pago.ordenId,
+        order: ordenGuardDoc.data() as Orden,
+        reason: refundReason,
+        requestedByUid,
+      });
+    } catch (error) {
+      if (error instanceof ShippingRefundGuardError) {
+        throw new ApiError(error.statusCode, error.message);
+      }
+      throw error;
+    }
+
+    await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+      orderId: pago.ordenId,
+      provider: ProveedorPago.STRIPE,
+      type: "REFUND_REQUESTED",
+      reason: refundReason,
+      refundAmount: refundAmountToApply,
+      createdBy: requestedByUid,
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+
     let refund: Stripe.Refund;
     try {
       refund = await stripe.refunds.create({
@@ -1458,6 +1542,17 @@ class PagoService {
       refundId: refund.id,
       refundAmount: refund.amount / 100,
       requestedByUid,
+    });
+
+    await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+      orderId: pago.ordenId,
+      provider: ProveedorPago.STRIPE,
+      type: "REFUND_COMPLETED",
+      refundId: refund.id,
+      refundAmount: refund.amount / 100,
+      reason: refundReason,
+      createdBy: requestedByUid,
+      createdAt: admin.firestore.Timestamp.now(),
     });
 
     return {
@@ -1759,6 +1854,11 @@ class PagoService {
       source: "stripe",
       sourceEventId: event.id,
     });
+    await paidOrderFinalizerService.finalizePaidOrder({
+      orderId: pagoMatch.ordenId,
+      provider: "stripe",
+      sourceEventId: event.id,
+    });
     if (orderData?.usuarioId) {
       await this.enqueueOrderConfirmedNotification(
         pagoMatch.ordenId,
@@ -1917,6 +2017,11 @@ class PagoService {
     await pickupOrderService.finalizePaidPickupOrder({
       orderId: pagoMatch.ordenId,
       source: "stripe",
+      sourceEventId: event.id,
+    });
+    await paidOrderFinalizerService.finalizePaidOrder({
+      orderId: pagoMatch.ordenId,
+      provider: "stripe",
       sourceEventId: event.id,
     });
     if (orderData?.usuarioId) {

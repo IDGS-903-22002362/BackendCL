@@ -20,10 +20,6 @@ if (!isCloudFunction) {
     serviceAccount = require(serviceAccountPath);
   } else if (process.env.SERVICE_ACCOUNT_KEY) {
     serviceAccount = JSON.parse(process.env.SERVICE_ACCOUNT_KEY);
-  } else {
-    throw new Error(
-      "No se encontró serviceAccountKey.json ni SERVICE_ACCOUNT_KEY",
-    );
   }
 }
 

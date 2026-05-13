@@ -38,6 +38,7 @@ import {
   completeInventarioPorTalla,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
+import { shippingQuoteService } from "../modules/shipping/shipping-quote.service";
 
 /**
  * Nombre de la colección en Firestore
@@ -894,6 +895,9 @@ export class CarritoService {
       pickupContact?: PickupContact;
       metodoPago: MetodoPago;
       costoEnvio?: number;
+      shippingQuoteId?: string;
+      selectedShippingOptionId?: string;
+      selectedServiceType?: string;
       notas?: string;
     },
   ): Promise<Orden> {
@@ -924,6 +928,39 @@ export class CarritoService {
       ...(item.tallaId ? { tallaId: item.tallaId } : {}),
     }));
 
+    let shippingSnapshot: Record<string, any> | undefined;
+    let costoEnvio = checkoutData.costoEnvio;
+
+    if (
+      (checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY) ===
+      FulfillmentMethod.DELIVERY
+    ) {
+      if (!checkoutData.shippingQuoteId) {
+        throw new Error("shippingQuoteId es requerido para DELIVERY");
+      }
+
+      const { quote, selectedOption } =
+        await shippingQuoteService.validateSelectedQuote({
+          userId: usuarioId,
+          cart: carrito,
+          shippingQuoteId: checkoutData.shippingQuoteId,
+          selectedOptionId: checkoutData.selectedShippingOptionId,
+          selectedServiceType: checkoutData.selectedServiceType,
+        });
+
+      costoEnvio = selectedOption.amount;
+      shippingSnapshot = {
+        provider: "FEDEX",
+        status: "QUOTE_SELECTED",
+        quoteId: checkoutData.shippingQuoteId,
+        selectedOptionId: selectedOption.optionId,
+        selectedServiceType: selectedOption.serviceType,
+        selectedRate: selectedOption,
+        packages: quote.packages,
+        destination: quote.destination,
+      };
+    }
+
     // PASO 4: Construir CrearOrdenDTO
     // subtotal, impuestos y total son placeholders — OrdenService los recalcula
     const crearOrdenDTO: CrearOrdenDTO = {
@@ -938,7 +975,11 @@ export class CarritoService {
       pickupLocationId: checkoutData.pickupLocationId,
       pickupContact: checkoutData.pickupContact,
       metodoPago: checkoutData.metodoPago,
-      costoEnvio: checkoutData.costoEnvio,
+      costoEnvio,
+      shipping: shippingSnapshot,
+      shippingQuoteId: checkoutData.shippingQuoteId,
+      selectedShippingOptionId: checkoutData.selectedShippingOptionId,
+      selectedServiceType: checkoutData.selectedServiceType,
       notas: checkoutData.notas,
     };
 

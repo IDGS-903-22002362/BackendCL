@@ -23,15 +23,15 @@ if (!admin.apps.length) {
       serviceAccount = require(serviceAccountPath);
     } else if (process.env.SERVICE_ACCOUNT_APP_OFICIAL) {
       serviceAccount = JSON.parse(process.env.SERVICE_ACCOUNT_APP_OFICIAL);
-    } else {
-      throw new Error(
-        "No se encontró serviceAccountAppOficial.json ni SERVICE_ACCOUNT_APP_OFICIAL",
-      );
     }
 
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
+    if (serviceAccount) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    } else {
+      admin.initializeApp();
+    }
   }
 }
 
