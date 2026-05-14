@@ -21,6 +21,7 @@ import {
   productoIdParamSchema,
   mergeCarritoSchema,
   checkoutCarritoSchema,
+  createCartFedexQuoteSchema,
 } from "../middleware/validators/carrito.validator";
 import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
 
@@ -379,6 +380,13 @@ router.delete("/", optionalAuthMiddleware, commandController.clearCart);
 // ==========================================
 // CHECKOUT (Convertir carrito en orden)
 // ==========================================
+
+router.post(
+  "/shipping/fedex/quotes",
+  authMiddleware,
+  validateBody(createCartFedexQuoteSchema),
+  commandController.createFedexShippingQuote,
+);
 
 /**
  * @swagger

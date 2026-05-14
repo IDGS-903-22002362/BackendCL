@@ -141,6 +141,12 @@ export const checkoutCarritoSchema = z
       .nonnegative("El costo de envío no puede ser negativo")
       .optional(),
 
+    shippingQuoteId: z.string().trim().min(1).max(160).optional(),
+
+    selectedShippingOptionId: z.string().trim().min(1).max(160).optional(),
+
+    selectedServiceType: z.string().trim().min(1).max(120).optional(),
+
     notas: z
       .string()
       .trim()
@@ -156,6 +162,34 @@ export const checkoutCarritoSchema = z
         path: ["direccionEnvio"],
         message: "La dirección de envío es requerida para DELIVERY",
       });
+    }
+
+    if (method === FulfillmentMethod.DELIVERY) {
+      if (typeof data.costoEnvio === "number") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["costoEnvio"],
+          message:
+            "El costo de envio se calcula en backend; usa shippingQuoteId",
+        });
+      }
+
+      if (!data.shippingQuoteId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["shippingQuoteId"],
+          message: "shippingQuoteId es requerido para DELIVERY",
+        });
+      }
+
+      if (!data.selectedShippingOptionId && !data.selectedServiceType) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectedShippingOptionId"],
+          message:
+            "selectedShippingOptionId o selectedServiceType es requerido para DELIVERY",
+        });
+      }
     }
 
     if (method === FulfillmentMethod.PICKUP) {
@@ -182,3 +216,9 @@ export const checkoutCarritoSchema = z
       }
     }
   });
+
+export const createCartFedexQuoteSchema = z
+  .object({
+    direccionEnvio: direccionEnvioSchema,
+  })
+  .strict();

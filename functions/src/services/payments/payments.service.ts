@@ -42,8 +42,13 @@ import {
 } from "./payment-sanitizer";
 import { PaymentAttempt } from "./payment-domain.types";
 import { ProviderRefundStatusEntry } from "./payment-domain.types";
+import {
+  shippingRefundGuardService,
+  ShippingRefundGuardError,
+} from "../shipping-refund-guard.service";
 
 const ORDENES_COLLECTION = "ordenes";
+const SHIPPING_EVENTS_COLLECTION = "shipping_events";
 const USERS_APP_COLLECTION = "usuariosApp";
 const POLL_NEXT_PENDING_SHORT_MS = 3_000;
 const POLL_NEXT_PENDING_LONG_MS = 10_000;
@@ -722,6 +727,43 @@ export class PaymentsService {
       attempt,
       input.refundAmountMinor,
     );
+
+    if (attempt.ordenId) {
+      const orderDoc = await firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(attempt.ordenId)
+        .get();
+      if (orderDoc.exists) {
+        try {
+          await shippingRefundGuardService.ensureShipmentCanProceedToRefund({
+            orderId: attempt.ordenId,
+            order: orderDoc.data() as Orden,
+            reason: input.reason,
+            requestedByUid: user.uid,
+          });
+        } catch (error) {
+          if (error instanceof ShippingRefundGuardError) {
+            throw new PaymentApiError(
+              error.statusCode,
+              "SHIPPING_REFUND_BLOCKED",
+              error.message,
+            );
+          }
+          throw error;
+        }
+      }
+    }
+
+    await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+      orderId: attempt.ordenId,
+      provider: ProveedorPago.APLAZO,
+      type: "REFUND_REQUESTED",
+      reason: input.reason,
+      refundAmountMinor: refundAmounts.requestedMinor,
+      createdBy: user.uid,
+      createdAt: Timestamp.now(),
+    });
+
     const refundOperation = await this.refundRepo.createProcessingRefund({
       paymentAttemptId,
       amountMinor: refundAmounts.requestedMinor,
@@ -762,6 +804,17 @@ export class PaymentsService {
         refundAmountMinor: refundAmounts.requestedMinor,
         refundAmountMajor: nextRefundTotalMinor / 100,
         providerStatus: refundResult.providerStatus,
+      });
+
+      await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+        orderId: attempt.ordenId,
+        provider: ProveedorPago.APLAZO,
+        type: "REFUND_COMPLETED",
+        refundId: refundResult.refundId,
+        refundAmountMinor: refundAmounts.requestedMinor,
+        reason: input.reason,
+        createdBy: user.uid,
+        createdAt: Timestamp.now(),
       });
 
       const updatedAttempt = await this.requirePaymentAttempt(paymentAttemptId);

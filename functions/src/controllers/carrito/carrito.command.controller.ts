@@ -1,5 +1,9 @@
 import { Request, Response } from "express";
 import carritoService from "../../services/carrito.service";
+import {
+  shippingQuoteService,
+  ShippingQuoteError,
+} from "../../modules/shipping/shipping-quote.service";
 
 /**
  * Controller: Carrito Command (Escritura)
@@ -354,6 +358,42 @@ export const checkout = async (req: Request, res: Response) => {
         statusCode === 500 && error instanceof Error
           ? error.message
           : undefined,
+    });
+  }
+};
+
+export const createFedexShippingQuote = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "Se requiere autenticación para cotizar envío",
+      });
+    }
+
+    const usuarioId = req.user.uid as string;
+    const carrito = await carritoService.getOrCreateCart(usuarioId);
+    const quote = await shippingQuoteService.createFedexCartQuote({
+      userId: usuarioId,
+      cart: carrito,
+      direccionEnvio: req.body.direccionEnvio,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Cotización FedEx generada exitosamente",
+      data: quote,
+    });
+  } catch (error) {
+    const statusCode =
+      error instanceof ShippingQuoteError ? error.statusCode : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "No fue posible cotizar envío FedEx",
     });
   }
 };

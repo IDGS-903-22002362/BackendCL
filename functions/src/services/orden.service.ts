@@ -30,6 +30,10 @@ import {
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import pickupLocationService from "./pickup-location.service";
+import {
+  shippingRefundGuardService,
+  ShippingRefundGuardError,
+} from "./shipping-refund-guard.service";
 
 /**
  * Colección de órdenes en Firestore
@@ -155,6 +159,27 @@ export class OrdenService {
         throw new Error("La dirección de envío es requerida para DELIVERY");
       }
 
+      if (fulfillmentMethod === FulfillmentMethod.DELIVERY) {
+        const shipping = data.shipping as Record<string, any> | undefined;
+        const selectedRate = shipping?.selectedRate as
+          | { amount?: number; serviceType?: string }
+          | undefined;
+
+        if (
+          shipping?.provider !== "FEDEX" ||
+          shipping?.status !== "QUOTE_SELECTED" ||
+          !shipping?.quoteId ||
+          !selectedRate ||
+          typeof selectedRate.amount !== "number" ||
+          selectedRate.amount < 0 ||
+          !selectedRate.serviceType
+        ) {
+          throw new Error(
+            "DELIVERY requiere una cotización FedEx válida generada por backend",
+          );
+        }
+      }
+
       let pickupLocationSnapshot: Orden["pickupLocation"] | undefined;
       if (fulfillmentMethod === FulfillmentMethod.PICKUP) {
         if (!data.pickupLocationId) {
@@ -247,7 +272,9 @@ export class OrdenService {
       // PASO 2: Calcular totales
       const impuestosCalculados = subtotalCalculado * TASA_IVA; // 0% por ahora
       const costoEnvioCalculado =
-        fulfillmentMethod === FulfillmentMethod.PICKUP ? 0 : data.costoEnvio ?? 0;
+        fulfillmentMethod === FulfillmentMethod.PICKUP
+          ? 0
+          : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
       const totalCalculado =
         subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
 
@@ -281,6 +308,7 @@ export class OrdenService {
             }
           : {}),
         costoEnvio: costoEnvioCalculado,
+        ...(data.shipping ? { shipping: data.shipping } : {}),
         notas: data.notas,
         createdAt: now,
         updatedAt: now,
@@ -873,6 +901,20 @@ export class OrdenService {
       }
 
       console.log(`  ✓ Estado validado: ${orden.estado} (puede cancelarse)`);
+
+      try {
+        await shippingRefundGuardService.ensureShipmentCanProceedToRefund({
+          orderId: ordenId,
+          order: orden,
+          reason: "Cancelación de orden",
+          requestedByUid: usuarioActual.uid,
+        });
+      } catch (error) {
+        if (error instanceof ShippingRefundGuardError) {
+          throw new Error(error.message);
+        }
+        throw error;
+      }
 
       // PASO 5: Restaurar stock de productos y registrar devoluciones
       console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);

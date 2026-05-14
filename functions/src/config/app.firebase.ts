@@ -22,10 +22,6 @@ if (process.env.SERVICE_ACCOUNT_APP_OFICIAL) {
 
   if (fs.existsSync(serviceAccountPath)) {
     serviceAccount = require(serviceAccountPath);
-  } else {
-    throw new Error(
-      "No se encontró serviceAccountAppOficial.json ni SERVICE_ACCOUNT_APP_OFICIAL",
-    );
   }
 }
 

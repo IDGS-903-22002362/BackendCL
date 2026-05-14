@@ -14,6 +14,20 @@ Notas:
 - Nunca exponer `STRIPE_SECRET_KEY` en frontend.
 - Usar llaves separadas por entorno (test/live).
 
+## FedEx en Firebase
+
+FedEx corre con secretos de Firebase Functions en producción. Después de definirlos localmente, súbelos al proyecto con:
+
+```bash
+firebase functions:secrets:set FEDEX_ENV
+firebase functions:secrets:set FEDEX_BASE_URL
+firebase functions:secrets:set FEDEX_CLIENT_ID
+firebase functions:secrets:set FEDEX_CLIENT_SECRET
+firebase functions:secrets:set FEDEX_ACCOUNT_NUMBER
+```
+
+Si también usas pickup, tracking o remitente avanzado, configura los secretos adicionales de FedEx que consume `functions/src/modules/shipping/fedex/fedex.config.ts` y `fedex-ship.mapper.ts`.
+
 ## Desarrollo local
 
 ```bash

@@ -38,6 +38,10 @@ import bannerRoutes from "./banner.routes";
 import pickupLocationsRoutes from "./pickup-locations.routes";
 import adminPickupLocationsRoutes from "./admin-pickup-locations.routes";
 import adminPickupOrdersRoutes from "./admin-pickup-orders.routes";
+import adminFedexRoutes from "./admin-fedex.routes";
+import adminOrdersFedexRoutes from "./admin-orders-fedex.routes";
+import ordersTrackingRoutes from "./orders-tracking.routes";
+import shippingRoutes from "../modules/shipping/shipping.routes";
 
 const router = Router();
 
@@ -72,6 +76,10 @@ router.use("/banners", bannerRoutes);
 router.use("/pickup-locations", pickupLocationsRoutes);
 router.use("/admin/pickup-locations", adminPickupLocationsRoutes);
 router.use("/admin/pickup-orders", adminPickupOrdersRoutes);
+router.use("/admin/fedex", adminFedexRoutes);
+router.use("/admin/orders", adminOrdersFedexRoutes);
+router.use("/orders", ordersTrackingRoutes);
+router.use("/shipping", shippingRoutes);
 
 // Futuros módulos:
 
