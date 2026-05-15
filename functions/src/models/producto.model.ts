@@ -33,6 +33,27 @@ export interface ProductRatingSummary {
   updatedAt?: Timestamp;
 }
 
+export interface FedexProductShipping {
+  enabled?: boolean;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+  packageType?: "YOUR_PACKAGING";
+  declaredValue?: number;
+  countryOfManufacture?: "MX";
+  customsDescription?: string;
+  hsCode?: string;
+}
+
+export interface ProductShipping {
+  requiresShipping?: boolean;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+}
+
 /**
  * Interface principal de Producto
  * Representa un artículo en la colección 'productos' de Firestore
@@ -54,6 +75,8 @@ export interface Producto {
   imagenes: string[]; // Array de URLs de imágenes del producto
   detalleIds: string[]; // Array de IDs de detalles relacionados (opcional)
   ratingSummary: ProductRatingSummary; // Resumen denormalizado de calificaciones
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo: boolean; // Si el producto está disponible para venta
   createdAt: Timestamp; // Fecha de creación
   updatedAt: Timestamp; // Fecha de última actualización
@@ -79,6 +102,8 @@ export interface CrearProductoDTO {
   imagenes: string[];
   detalleIds: string[];
   ratingSummary?: ProductRatingSummary;
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo: boolean;
 }
 
@@ -102,6 +127,8 @@ export interface ActualizarProductoDTO {
   imagenes?: string[];
   detalleIds?: string[];
   ratingSummary?: ProductRatingSummary;
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo?: boolean;
 }
 

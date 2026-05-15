@@ -349,6 +349,12 @@ export class ProductService {
       imagenes: data.imagenes || [],
       detalleIds: Array.isArray(data.detalleIds) ? data.detalleIds : [],
       ratingSummary,
+      ...(data.fedexShipping && typeof data.fedexShipping === "object"
+        ? { fedexShipping: data.fedexShipping }
+        : {}),
+      ...(data.shipping && typeof data.shipping === "object"
+        ? { shipping: data.shipping }
+        : {}),
       activo: data.activo,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,

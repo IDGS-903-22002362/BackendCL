@@ -394,6 +394,9 @@ export const createFedexShippingQuote = async (req: Request, res: Response) => {
         error instanceof Error
           ? error.message
           : "No fue posible cotizar envío FedEx",
+      ...(error instanceof ShippingQuoteError && error.code
+        ? { code: error.code }
+        : {}),
     });
   }
 };

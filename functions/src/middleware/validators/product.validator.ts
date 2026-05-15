@@ -48,6 +48,31 @@ const hasUniqueStringValues = (items: string[]): boolean => {
   return unique.size === items.length;
 };
 
+const fedexShippingSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    weightKg: z.number().positive("El peso FedEx debe ser mayor a 0").optional(),
+    lengthCm: z.number().positive("El largo FedEx debe ser mayor a 0").optional(),
+    widthCm: z.number().positive("El ancho FedEx debe ser mayor a 0").optional(),
+    heightCm: z.number().positive("El alto FedEx debe ser mayor a 0").optional(),
+    packageType: z.literal("YOUR_PACKAGING").optional().default("YOUR_PACKAGING"),
+    declaredValue: z.number().nonnegative().optional(),
+    countryOfManufacture: z.literal("MX").optional(),
+    customsDescription: z.string().trim().max(200).optional(),
+    hsCode: z.string().trim().max(40).optional(),
+  })
+  .strict();
+
+const shippingSchema = z
+  .object({
+    requiresShipping: z.boolean().optional(),
+    weightKg: z.number().positive("El peso de envío debe ser mayor a 0").optional(),
+    lengthCm: z.number().positive("El largo de envío debe ser mayor a 0").optional(),
+    widthCm: z.number().positive("El ancho de envío debe ser mayor a 0").optional(),
+    heightCm: z.number().positive("El alto de envío debe ser mayor a 0").optional(),
+  })
+  .strict();
+
 /**
  * Schema para crear un nuevo producto
  * Valida todos los campos requeridos según el modelo Producto
@@ -174,6 +199,10 @@ export const createProductSchema = z
       .optional()
       .default([]),
 
+    fedexShipping: fedexShippingSchema.optional(),
+
+    shipping: shippingSchema.optional(),
+
     activo: z
       .boolean({
         invalid_type_error: "El campo activo debe ser un booleano",
@@ -295,6 +324,10 @@ export const updateProductSchema = z
       .refine(hasUniqueStringValues, "No se permiten detalles duplicados")
       .optional()
       .default([]),
+
+    fedexShipping: fedexShippingSchema.optional(),
+
+    shipping: shippingSchema.optional(),
 
     activo: z
       .boolean({

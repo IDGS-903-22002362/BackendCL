@@ -12,6 +12,11 @@ import {
   FedexRateQuoteInput,
 } from "./fedex/fedex-rates.types";
 import { fedexRatesService } from "./fedex/fedex-rates.service";
+import {
+  buildFedexPackageLineItemsFromCart,
+  FedexProductPackageInput,
+  FedexPackageValidationError,
+} from "./fedex/fedex-package-normalizer";
 
 const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -19,11 +24,13 @@ const QUOTE_TTL_MS = 20 * 60 * 1000;
 
 export class ShippingQuoteError extends Error {
   statusCode: number;
+  code?: string;
 
-  constructor(message: string, statusCode = 400) {
+  constructor(message: string, statusCode = 400, code?: string) {
     super(message);
     this.name = "ShippingQuoteError";
     this.statusCode = statusCode;
+    this.code = code;
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -47,6 +54,19 @@ export interface ShippingQuoteRecord {
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+type FirestoreLike = FirebaseFirestore.Firestore;
+
+type FedexRatesServiceLike = {
+  quoteRates(input: FedexRateQuoteInput): Promise<{
+    ok: true;
+    provider: "FEDEX";
+    environment: "sandbox" | "production";
+    quoteId: string;
+    currency: string;
+    options: FedexRateOption[];
+  }>;
+};
 
 export interface CreateCartFedexQuoteInput {
   userId: string;
@@ -85,82 +105,6 @@ const normalizeCartForHash = (cart: Carrito) => ({
 export const buildShippingCartHash = (cart: Carrito): string =>
   hashObject(normalizeCartForHash(cart));
 
-const readPositiveNumber = (...values: unknown[]): number | undefined => {
-  for (const value of values) {
-    const numberValue =
-      typeof value === "number"
-        ? value
-        : typeof value === "string"
-          ? Number(value)
-          : Number.NaN;
-
-    if (Number.isFinite(numberValue) && numberValue > 0) {
-      return numberValue;
-    }
-  }
-
-  return undefined;
-};
-
-const getNested = (source: Record<string, any>, path: string): unknown =>
-  path.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object") {
-      return undefined;
-    }
-    return (current as Record<string, unknown>)[key];
-  }, source);
-
-const packageFromProduct = (
-  productId: string,
-  product: Producto,
-): FedexRatePackageInput => {
-  const raw = product as Record<string, any>;
-  const shipping = raw.shipping || {};
-  const dimensions = raw.dimensions || raw.dimensiones || shipping.dimensions || {};
-
-  const weightKg = readPositiveNumber(
-    shipping.weightKg,
-    shipping.pesoKg,
-    raw.weightKg,
-    raw.pesoKg,
-    raw.peso,
-    getNested(raw, "logistics.weightKg"),
-  );
-  const lengthCm = readPositiveNumber(
-    dimensions.lengthCm,
-    dimensions.largoCm,
-    shipping.lengthCm,
-    raw.lengthCm,
-    raw.largoCm,
-    raw.largo,
-  );
-  const widthCm = readPositiveNumber(
-    dimensions.widthCm,
-    dimensions.anchoCm,
-    shipping.widthCm,
-    raw.widthCm,
-    raw.anchoCm,
-    raw.ancho,
-  );
-  const heightCm = readPositiveNumber(
-    dimensions.heightCm,
-    dimensions.altoCm,
-    shipping.heightCm,
-    raw.heightCm,
-    raw.altoCm,
-    raw.alto,
-  );
-
-  if (!weightKg || !lengthCm || !widthCm || !heightCm) {
-    throw new ShippingQuoteError(
-      `El producto "${product.descripcion || productId}" no tiene peso y dimensiones FedEx válidos`,
-      422,
-    );
-  }
-
-  return { weightKg, lengthCm, widthCm, heightCm };
-};
-
 const buildDestination = (address: DireccionEnvio): FedexRateAddressInput => ({
   postalCode: address.codigoPostal,
   city: address.ciudad,
@@ -196,18 +140,23 @@ const buildOptionId = (option: FedexRateOption): string =>
     .slice(0, 24);
 
 export class ShippingQuoteService {
+  constructor(
+    private readonly db: FirestoreLike = firestoreTienda as FirestoreLike,
+    private readonly ratesService: FedexRatesServiceLike = fedexRatesService,
+  ) {}
+
   private getCollection() {
-    return firestoreTienda.collection(SHIPPING_QUOTES_COLLECTION);
+    return this.db.collection(SHIPPING_QUOTES_COLLECTION);
   }
 
   async buildPackagesFromCart(cart: Carrito): Promise<FedexRatePackageInput[]> {
     if (!Array.isArray(cart.items) || cart.items.length === 0) {
-      throw new ShippingQuoteError("El carrito está vacío", 400);
+      throw new ShippingQuoteError("El carrito estÃ¡ vacÃ­o", 400);
     }
 
-    const packages: FedexRatePackageInput[] = [];
+    const products: FedexProductPackageInput[] = [];
     for (const item of cart.items) {
-      const productDoc = await firestoreTienda
+      const productDoc = await this.db
         .collection(PRODUCTOS_COLLECTION)
         .doc(item.productoId)
         .get();
@@ -222,20 +171,44 @@ export class ShippingQuoteService {
       const product = productDoc.data() as Producto;
       if (!product.activo) {
         throw new ShippingQuoteError(
-          `El producto "${product.descripcion}" no está disponible`,
+          `El producto "${product.descripcion}" no estÃ¡ disponible`,
           400,
         );
       }
 
-      const productPackage = packageFromProduct(item.productoId, product);
-      for (let index = 0; index < item.cantidad; index += 1) {
-        packages.push(productPackage);
+      products.push({
+        productId: item.productoId,
+        name: product.descripcion || item.productoId,
+        quantity: item.cantidad,
+        price: item.precioUnitario,
+        categoryId: product.categoriaId,
+        rawProduct: product,
+      });
+    }
+
+    let packages: FedexRatePackageInput[];
+    try {
+      const result = buildFedexPackageLineItemsFromCart(products);
+      packages = result.packages.map((item) => ({
+        weightKg: item.weightKg,
+        lengthCm: item.lengthCm,
+        widthCm: item.widthCm,
+        heightCm: item.heightCm,
+      }));
+    } catch (error) {
+      if (error instanceof FedexPackageValidationError) {
+        throw new ShippingQuoteError(
+          error.message,
+          error.statusCode,
+          error.code,
+        );
       }
+      throw error;
     }
 
     if (packages.length > 99) {
       throw new ShippingQuoteError(
-        "FedEx permite máximo 99 paquetes por cotización",
+        "FedEx permite mÃ¡ximo 99 paquetes por cotizaciÃ³n",
         422,
       );
     }
@@ -245,6 +218,18 @@ export class ShippingQuoteService {
 
   async createFedexCartQuote(input: CreateCartFedexQuoteInput) {
     const packages = await this.buildPackagesFromCart(input.cart);
+    if (packages.length === 0) {
+      return {
+        ok: true,
+        provider: "FEDEX" as const,
+        requiresShipping: false,
+        quoteId: "",
+        currency: "MXN",
+        expiresAt: undefined,
+        options: [],
+      };
+    }
+
     const cartHash = buildShippingCartHash(input.cart);
     const quoteInput: FedexRateQuoteInput = {
       origin: buildOrigin(),
@@ -255,7 +240,7 @@ export class ShippingQuoteService {
       rateRequestTypes: ["ACCOUNT"],
     };
 
-    const quote = await fedexRatesService.quoteRates(quoteInput);
+    const quote = await this.ratesService.quoteRates(quoteInput);
     const options: ShippingQuoteOption[] = quote.options.map((option) => ({
       ...option,
       optionId: option.optionId || buildOptionId(option),
@@ -282,6 +267,7 @@ export class ShippingQuoteService {
     return {
       ok: true,
       provider: "FEDEX" as const,
+      requiresShipping: true,
       quoteId: quote.quoteId,
       currency: quote.currency,
       expiresAt: expiresAt.toDate().toISOString(),
@@ -294,7 +280,7 @@ export class ShippingQuoteService {
   ): Promise<{ quote: ShippingQuoteRecord; selectedOption: ShippingQuoteOption }> {
     const quoteDoc = await this.getCollection().doc(input.shippingQuoteId).get();
     if (!quoteDoc.exists) {
-      throw new ShippingQuoteError("La cotización FedEx no existe", 409);
+      throw new ShippingQuoteError("La cotizaciÃ³n FedEx no existe", 409);
     }
 
     const quote = {
@@ -303,20 +289,20 @@ export class ShippingQuoteService {
     };
 
     if (quote.provider !== "FEDEX") {
-      throw new ShippingQuoteError("La cotización no pertenece a FedEx", 409);
+      throw new ShippingQuoteError("La cotizaciÃ³n no pertenece a FedEx", 409);
     }
 
     if (quote.userId !== input.userId) {
-      throw new ShippingQuoteError("La cotización no pertenece al usuario", 403);
+      throw new ShippingQuoteError("La cotizaciÃ³n no pertenece al usuario", 403);
     }
 
     if (quote.expiresAt.toMillis() <= Date.now()) {
-      throw new ShippingQuoteError("La cotización FedEx expiró", 409);
+      throw new ShippingQuoteError("La cotizaciÃ³n FedEx expirÃ³", 409);
     }
 
     if (quote.cartHash !== buildShippingCartHash(input.cart)) {
       throw new ShippingQuoteError(
-        "El carrito cambió desde la cotización FedEx",
+        "El carrito cambiÃ³ desde la cotizaciÃ³n FedEx",
         409,
       );
     }
@@ -330,7 +316,7 @@ export class ShippingQuoteService {
 
     if (!selectedOption) {
       throw new ShippingQuoteError(
-        "La opción seleccionada no existe en la cotización FedEx",
+        "La opciÃ³n seleccionada no existe en la cotizaciÃ³n FedEx",
         409,
       );
     }
@@ -348,3 +334,4 @@ export class ShippingQuoteService {
 }
 
 export const shippingQuoteService = new ShippingQuoteService();
+
