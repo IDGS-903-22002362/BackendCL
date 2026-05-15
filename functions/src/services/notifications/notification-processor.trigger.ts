@@ -1,5 +1,6 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { STORE_FIRESTORE_DATABASE } from "../../config/firestore.constants";
+import { NOTIFICATION_EVENT_SECRETS } from "../../config/runtime-secrets";
 import logger from "../../utils/logger";
 import notificationProcessingService from "./notification-processing.service";
 
@@ -14,6 +15,7 @@ export const processNotificationEventTrigger = onDocumentCreated(
     region: process.env.GCP_REGION || "us-central1",
     timeoutSeconds: 180,
     memory: "512MiB",
+    secrets: [...NOTIFICATION_EVENT_SECRETS],
   },
   async (event) => {
     const eventId = event.params.eventId;

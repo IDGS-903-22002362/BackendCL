@@ -1,5 +1,6 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { STORE_FIRESTORE_DATABASE } from "../../config/firestore.constants";
+import { PAYMENT_EVENT_SECRETS } from "../../config/runtime-secrets";
 import logger from "../../utils/logger";
 import paymentEventProcessingService from "./payment-event-processing.service";
 
@@ -8,28 +9,6 @@ const triggerLogger = logger.child({
   database: STORE_FIRESTORE_DATABASE,
 });
 
-const APLAZO_PAYMENT_SECRETS = [
-  "APLAZO_ENABLED",
-  "APLAZO_ENV",
-  "APLAZO_INTEGRATION_VERSION",
-  "APLAZO_ONLINE_ENABLED",
-  "APLAZO_REFUNDS_ENABLED",
-  "APLAZO_RECONCILE_ENABLED",
-  "APLAZO_ONLINE_BASE_URL",
-  "APLAZO_ONLINE_MERCHANT_BASE_URL",
-  "APLAZO_ONLINE_REFUNDS_BASE_URL",
-  "APLAZO_ONLINE_MERCHANT_ID",
-  "APLAZO_ONLINE_API_TOKEN",
-  "APLAZO_ONLINE_WEBHOOK_SECRET",
-  "APLAZO_ONLINE_WEBHOOK_AUTH_SCHEME",
-  "APLAZO_ONLINE_TIMEOUT_MS",
-  "APLAZO_ONLINE_AUTH_PATH",
-  "APLAZO_ONLINE_CREATE_PATH",
-  "APLAZO_ONLINE_STATUS_PATH",
-  "APLAZO_ONLINE_REFUND_PATH",
-  "APLAZO_ONLINE_REFUND_STATUS_PATH",
-] as const;
-
 export const processPaymentEventTrigger = onDocumentCreated(
   {
     document: "paymentEventLogs/{eventId}",
@@ -37,7 +16,7 @@ export const processPaymentEventTrigger = onDocumentCreated(
     region: process.env.GCP_REGION || "us-central1",
     timeoutSeconds: 180,
     memory: "512MiB",
-    secrets: [...APLAZO_PAYMENT_SECRETS],
+    secrets: [...PAYMENT_EVENT_SECRETS],
   },
   async (event) => {
     const eventId = event.params.eventId;

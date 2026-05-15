@@ -8,11 +8,20 @@ export const loadEnvironment = (): void => {
     return;
   }
 
+  if (process.env.FUNCTION_NAME || process.env.K_SERVICE) {
+    envLoaded = true;
+    return;
+  }
+
   dotenv.config({
     path: path.resolve(__dirname, "../../.env"),
   });
   dotenv.config({
     path: path.resolve(__dirname, "../../.env.local"),
+    override: true,
+  });
+  dotenv.config({
+    path: path.resolve(__dirname, "../../.secret.local"),
     override: true,
   });
 

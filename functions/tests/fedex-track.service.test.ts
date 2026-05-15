@@ -162,7 +162,7 @@ describe("FedEx track service", () => {
     );
     expect(deps.addEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "TRACKING_REFRESHED",
+        type: "FEDEX_TRACKING_REFRESHED",
         status: "IN_TRANSIT",
       }),
     );

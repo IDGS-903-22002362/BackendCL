@@ -28,6 +28,7 @@ import {
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
+import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 
 let apiAiConfigValidated = false;
 
@@ -47,6 +48,7 @@ export const api = onRequest(
   {
     memory: "1GiB",
     invoker: "public",
+    secrets: [...API_RUNTIME_SECRETS],
   },
   (req, res) => {
     validateApiAiConfigOnce();

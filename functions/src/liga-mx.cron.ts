@@ -1,13 +1,14 @@
 import { logger } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { configuracionLigaMx } from "./config/liga-mx.config";
+import { LIGA_MX_SECRETS } from "./config/runtime-secrets";
 import ligaMxService from "./services/liga-mx";
 
 export const syncLigaMxData = onSchedule(
   {
     schedule: configuracionLigaMx.programacion,
     timeZone: configuracionLigaMx.zonaHoraria,
-    secrets: ["LMX_API_KEY"],
+    secrets: [...LIGA_MX_SECRETS],
   },
   async (): Promise<void> => {
     try {

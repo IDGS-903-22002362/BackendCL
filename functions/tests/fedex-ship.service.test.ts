@@ -1,4 +1,5 @@
 import { EstadoOrden, FulfillmentMethod } from "../src/models/orden.model";
+import { PaymentStatus } from "../src/models/pago.model";
 import {
   FedexShipError,
   FedexShipService,
@@ -42,6 +43,9 @@ const buildOrder = (overrides: Record<string, unknown> = {}) => ({
     codigoPostal: "37000",
   },
   shipping: {
+    provider: "FEDEX",
+    quoteId: "quote_1",
+    status: "QUOTE_SELECTED",
     selectedServiceType: "FEDEX_EXPRESS_SAVER",
     packages: [{ weightKg: 1, lengthCm: 30, widthCm: 25, heightCm: 10 }],
   },
@@ -56,6 +60,10 @@ const buildDeps = (orderData: Record<string, unknown>) => {
     data: () => orderData,
   });
   const addEvent = jest.fn().mockResolvedValue({ id: "event_1" });
+  const getPayments = jest.fn().mockResolvedValue({
+    docs: [{ data: () => ({ status: PaymentStatus.PAID }) }],
+  });
+  const wherePayments = jest.fn().mockReturnValue({ get: getPayments });
   const save = jest.fn().mockResolvedValue(undefined);
   const post = jest.fn().mockResolvedValue({
     output: {
@@ -75,10 +83,14 @@ const buildDeps = (orderData: Record<string, unknown>) => {
       ],
     },
   });
+  const put = jest.fn().mockResolvedValue({});
   const db = {
     collection: jest.fn((name: string) => {
       if (name === "ordenes") {
         return { doc: jest.fn(() => ({ get, update })) };
+      }
+      if (name === "pagos") {
+        return { where: wherePayments };
       }
       return { add: addEvent };
     }),
@@ -87,7 +99,19 @@ const buildDeps = (orderData: Record<string, unknown>) => {
     file: jest.fn(() => ({ save })),
   };
 
-  return { db, bucket, client: { post }, update, get, addEvent, save, post };
+  return {
+    db,
+    bucket,
+    client: { post, put },
+    update,
+    get,
+    addEvent,
+    save,
+    post,
+    put,
+    getPayments,
+    wherePayments,
+  };
 };
 
 describe("FedEx ship service", () => {
@@ -169,7 +193,7 @@ describe("FedEx ship service", () => {
     expect(deps.addEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         orderId: "orden_123",
-        type: "LABEL_CREATED",
+        type: "FEDEX_LABEL_CREATED",
         trackingNumber: "TRACK123",
       }),
     );
