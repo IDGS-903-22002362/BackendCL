@@ -11,25 +11,37 @@ export const authMiddleware = async (
 ): Promise<void> => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    console.warn("❌ authMiddleware: No hay Bearer token en header");
     res.status(401).json({ message: "No autorizado. Token requerido" });
     return;
   }
 
   const token = authHeader.split(" ")[1];
   const jwtSecret = process.env.JWT_SECRET;
+  console.log("🔐 authMiddleware DEBUG:", {
+    jwtSecretExists: !!jwtSecret,
+    jwtSecretLength: jwtSecret?.length ?? 0,
+    tokenLength: token.length,
+    tokenPreview: token.substring(0, 50),
+  });
   if (!jwtSecret) {
+    console.error("🔴 CRÍTICO: JWT_SECRET no está definido");
+    console.error("   Secrets disponibles:", Object.keys(process.env).filter(k =>
+      k.includes('JWT') || k.includes('SECRET') || k.includes('STRIPE')
+    ));
     res.status(500).json({ message: "Error de configuración del servidor" });
     return;
   }
 
   try {
     // Verificar el token JWT propio con la clave secreta
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+    const decoded = jwt.verify(token, jwtSecret) as {
       uid: string;
       email: string;
       rol: RolUsuario;
       nombre: string;
     };
+    console.log("✅ Token verificado para uid:", decoded.uid);
 
     // Buscar el usuario en Firestore para obtener datos adicionales
     const snapshot = await firestoreApp
