@@ -24,6 +24,7 @@ type FedexRateRequestPayload = {
       address: Record<string, unknown>;
     };
     recipient: {
+      contact?: Record<string, unknown>;
       address: Record<string, unknown>;
     };
     pickupType: "USE_SCHEDULED_PICKUP";
@@ -100,9 +101,36 @@ const readConfiguredServiceType = (): string | undefined => {
   return serviceType;
 };
 
+export function normalizeMxPhoneForFedEx(value?: string | null): string | undefined {
+  if (!value) return undefined;
+
+  let digits = value.replace(/\D/g, "");
+
+  if (digits.length === 12 && digits.startsWith("52")) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.length !== 10) {
+    return undefined;
+  }
+
+  return digits;
+}
+
+const cleanStreetLines = (streetLines?: string[]): string[] | undefined => {
+  const cleaned = (streetLines || [])
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  return cleaned.length > 0 ? cleaned : undefined;
+};
+
 const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => {
   const isMX = address.countryCode.toUpperCase() === "MX";
+  const streetLines = cleanStreetLines(address.streetLines);
+
   return {
+    ...(streetLines ? { streetLines } : {}),
     postalCode: address.postalCode,
     countryCode: address.countryCode,
     residential: address.residential,
@@ -110,6 +138,20 @@ const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => 
     ...(address.stateOrProvinceCode
       ? { stateOrProvinceCode: isMX ? normalizeMxStateForFedEx(address.stateOrProvinceCode) : address.stateOrProvinceCode }
       : {}),
+  };
+};
+
+const mapContact = (address: FedexRateAddressInput): Record<string, unknown> | undefined => {
+  const phoneNumber = normalizeMxPhoneForFedEx(address.contact?.phoneNumber);
+  const personName = address.contact?.personName?.trim();
+
+  if (!phoneNumber && !personName) {
+    return undefined;
+  }
+
+  return {
+    ...(personName ? { personName } : {}),
+    ...(phoneNumber ? { phoneNumber } : {}),
   };
 };
 
@@ -132,7 +174,11 @@ export const mapFedexRateRequest = (
 ): FedexRateRequestPayload => {
   const config = getFedexConfig();
   const requestedPackageLineItems = input.packages.map(mapPackage);
-  const serviceType = readConfiguredServiceType();
+  const serviceType =
+    input.useConfiguredServiceType === false
+      ? undefined
+      : readConfiguredServiceType();
+  const recipientContact = mapContact(input.destination);
 
   return {
     accountNumber: {
@@ -143,6 +189,7 @@ export const mapFedexRateRequest = (
         address: mapAddress(input.origin),
       },
       recipient: {
+        ...(recipientContact ? { contact: recipientContact } : {}),
         address: mapAddress(input.destination),
       },
       pickupType: "USE_SCHEDULED_PICKUP",

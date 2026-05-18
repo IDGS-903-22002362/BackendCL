@@ -12,7 +12,10 @@ import {
   FedexRateQuoteInput,
 } from "./fedex/fedex-rates.types";
 import { FedexProviderError } from "./fedex/fedex.errors";
-import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
+import {
+  FedexRateRequestConfigError,
+  normalizeMxPhoneForFedEx,
+} from "./fedex/fedex-rates.mapper";
 import { fedexRatesService } from "./fedex/fedex-rates.service";
 import { fedexAvailabilityService } from "./fedex/fedex-availability.service";
 import {
@@ -21,7 +24,10 @@ import {
   FedexPackageValidationError,
 } from "./fedex/fedex-package-normalizer";
 import { fedexAddressService } from "./fedex/fedex-address.service";
-import { normalizeFedExCity } from "./fedex/fedex-address.helper";
+import {
+  normalizeFedExCity,
+  normalizeMxStateForFedEx,
+} from "./fedex/fedex-address.helper";
 
 const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -116,6 +122,19 @@ const buildDestination = (address: DireccionEnvio): FedexRateAddressInput => ({
   stateOrProvinceCode: address.estado,
   countryCode: "MX",
   residential: true,
+  streetLines: [
+    `${address.calle} ${address.numero}`,
+    address.numeroInterior
+      ? `${address.colonia} Int ${address.numeroInterior}`
+      : address.colonia,
+    address.referencias,
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value)),
+  contact: {
+    personName: address.nombre,
+    phoneNumber: normalizeMxPhoneForFedEx(address.telefono),
+  },
 });
 
 const buildOrigin = (): FedexRateAddressInput => {
@@ -143,6 +162,40 @@ const buildOptionId = (option: FedexRateOption): string =>
     )
     .digest("hex")
     .slice(0, 24);
+
+const withoutStateOrProvinceCode = (
+  input: FedexRateQuoteInput,
+): FedexRateQuoteInput => ({
+  ...input,
+  origin: {
+    ...input.origin,
+    stateOrProvinceCode: undefined,
+  },
+  destination: {
+    ...input.destination,
+    stateOrProvinceCode: undefined,
+  },
+});
+
+const withNormalizedStateOrProvinceCode = (
+  input: FedexRateQuoteInput,
+): FedexRateQuoteInput => ({
+  ...input,
+  origin: {
+    ...input.origin,
+    stateOrProvinceCode:
+      input.origin.countryCode.toUpperCase() === "MX"
+        ? normalizeMxStateForFedEx(input.origin.stateOrProvinceCode)
+        : input.origin.stateOrProvinceCode,
+  },
+  destination: {
+    ...input.destination,
+    stateOrProvinceCode:
+      input.destination.countryCode.toUpperCase() === "MX"
+        ? normalizeMxStateForFedEx(input.destination.stateOrProvinceCode)
+        : input.destination.stateOrProvinceCode,
+  },
+});
 
 export class ShippingQuoteService {
   constructor(
@@ -244,6 +297,7 @@ export class ShippingQuoteService {
       shipDate,
       currency: "MXN",
       rateRequestTypes: ["ACCOUNT", "LIST"],
+      useConfiguredServiceType: false,
     };
 
     const [isOriginValid, isDestinationValid] = await Promise.all([
@@ -275,20 +329,20 @@ export class ShippingQuoteService {
 
     let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;
     try {
-      // Caso A: Sin serviceType, sin carrierCodes
-      quote = await this.ratesService.quoteRates(quoteInput);
+      // Caso A: Sin stateOrProvinceCode, sin serviceType, sin carrierCodes
+      quote = await this.ratesService.quoteRates(withoutStateOrProvinceCode(quoteInput));
     } catch (errorA) {
-      console.warn("[FedEx Quote] Caso A falló, intentando Caso B con FDXE...");
-      const quoteInputB = { ...quoteInput, carrierCodes: ["FDXE"] };
+      console.warn("[FedEx Quote] Caso A sin estado falló, intentando Caso B con estado normalizado...");
+      const quoteInputB = withNormalizedStateOrProvinceCode(quoteInput);
       
       try {
-        // Caso B: Sin serviceType, carrier FDXE
+        // Caso B: Con stateOrProvinceCode normalizado, sin serviceType, sin carrierCodes
         quote = await this.ratesService.quoteRates(quoteInputB);
       } catch (errorB) {
-        console.warn("[FedEx Quote] Caso B falló, consultando Service Availability para Caso C...");
+        console.warn("[FedEx Quote] Caso B con estado falló, consultando Service Availability para Caso C...");
         
         try {
-          const validOptions = await fedexAvailabilityService.checkAvailability(quoteInput);
+          const validOptions = await fedexAvailabilityService.checkAvailability(quoteInputB);
           
           if (!validOptions || validOptions.length === 0) {
              throw new ShippingQuoteError(
@@ -301,7 +355,7 @@ export class ShippingQuoteService {
           console.log(`[FedEx Quote] Caso C usando: serviceType=${preferred.serviceType}, carrierCode=${preferred.carrierCode}`);
           
           const quoteInputC = {
-            ...quoteInput,
+            ...quoteInputB,
             serviceType: preferred.serviceType,
             carrierCodes: preferred.carrierCode ? [preferred.carrierCode] : undefined,
           };
@@ -314,7 +368,7 @@ export class ShippingQuoteService {
             throw errorC; // Lanzado por nosotros mismos (0 combinaciones)
           }
 
-          const finalError = errorC instanceof Error ? errorC : errorA;
+          const finalError = errorC instanceof Error ? errorC : errorB || errorA;
 
           if (finalError instanceof FedexProviderError) {
             throw new ShippingQuoteError(finalError.message, 422);

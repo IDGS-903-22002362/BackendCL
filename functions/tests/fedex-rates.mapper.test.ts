@@ -2,6 +2,7 @@ import { getFedexConfig } from "../src/modules/shipping/fedex/fedex.config";
 import {
   mapFedexRateRequest,
   mapFedexRateResponse,
+  normalizeMxPhoneForFedEx,
 } from "../src/modules/shipping/fedex/fedex-rates.mapper";
 import {
   fedexRateQuoteSchema,
@@ -135,6 +136,97 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.carrierCodes).toBeUndefined();
   });
 
+  it("omits MX states in Caso A", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      origin: {
+        ...baseInput.origin,
+        stateOrProvinceCode: undefined,
+      },
+      destination: {
+        ...baseInput.destination,
+        stateOrProvinceCode: undefined,
+      },
+      useConfiguredServiceType: false,
+    });
+
+    expect(request.requestedShipment.shipper.address).not.toHaveProperty("stateOrProvinceCode");
+    expect(request.requestedShipment.recipient.address).not.toHaveProperty("stateOrProvinceCode");
+    expect(request.requestedShipment.serviceType).toBeUndefined();
+    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+  });
+
+  it("includes normalized MX state in Caso B without adding serviceType or carrierCodes", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      origin: {
+        ...baseInput.origin,
+        postalCode: "37500",
+        stateOrProvinceCode: "Guanajuato",
+      },
+      destination: {
+        ...baseInput.destination,
+        postalCode: "37208",
+        city: "Leon",
+        stateOrProvinceCode: "GTO",
+      },
+      useConfiguredServiceType: false,
+    });
+
+    expect(request.requestedShipment.shipper.address).toMatchObject({
+      city: "Leon",
+      stateOrProvinceCode: "GT",
+      postalCode: "37500",
+      countryCode: "MX",
+    });
+    expect(request.requestedShipment.recipient.address).toMatchObject({
+      city: "Leon",
+      stateOrProvinceCode: "GT",
+      postalCode: "37208",
+      countryCode: "MX",
+    });
+    expect(request.requestedShipment.serviceType).toBeUndefined();
+    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+  });
+
+  it("normalizes MX phone and removes empty streetLines", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      destination: {
+        ...baseInput.destination,
+        contact: {
+          personName: "Juan Perez",
+          phoneNumber: "+52 477 353 8866",
+        },
+        streetLines: ["Puma 102", " ", "Lomas de Echeveste", ""],
+      },
+    });
+
+    expect(normalizeMxPhoneForFedEx("+52 477 353 8866")).toBe("4773538866");
+    expect(request.requestedShipment.recipient.contact).toMatchObject({
+      personName: "Juan Perez",
+      phoneNumber: "4773538866",
+    });
+    expect(request.requestedShipment.recipient.address.streetLines).toEqual([
+      "Puma 102",
+      "Lomas de Echeveste",
+    ]);
+  });
+
+  it("omits invalid MX phone numbers from recipient contact", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      destination: {
+        ...baseInput.destination,
+        contact: {
+          phoneNumber: "12345",
+        },
+      },
+    });
+
+    expect(request.requestedShipment.recipient.contact).toBeUndefined();
+  });
+
   it("rounds package dimensions and weight for FedEx", () => {
     const request = mapFedexRateRequest(baseInput);
     const firstPackage = request.requestedShipment.requestedPackageLineItems[0];
@@ -146,6 +238,8 @@ describe("FedEx rates mapper", () => {
       height: 11,
       units: "CM",
     });
+    expect(firstPackage).not.toHaveProperty("packageType");
+    expect(firstPackage).not.toHaveProperty("packagingType");
   });
 
   it("omits serviceType in Caso A unless input or FEDEX_SERVICE_TYPE is configured", () => {

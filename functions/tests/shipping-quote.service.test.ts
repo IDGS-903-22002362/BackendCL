@@ -42,12 +42,12 @@ const cart = {
 
 const address = {
   nombre: "Juan Perez",
-  telefono: "4771234567",
-  calle: "Uno",
-  numero: "1",
-  colonia: "Centro",
+  telefono: "+52 477 353 8866",
+  calle: "Puma",
+  numero: "102",
+  colonia: "Lomas de Echeveste",
   ciudad: "León de los Aldama",
-  estado: "GUA",
+  estado: "Guanajuato",
   codigoPostal: "37208",
 };
 
@@ -141,13 +141,21 @@ describe("ShippingQuoteService FedEx packages", () => {
           postalCode: "37500",
           countryCode: "MX",
           residential: false,
+          stateOrProvinceCode: undefined,
         }),
         destination: expect.objectContaining({
           city: "Leon",
           postalCode: "37208",
           countryCode: "MX",
           residential: true,
+          stateOrProvinceCode: undefined,
+          streetLines: ["Puma 102", "Lomas de Echeveste"],
+          contact: {
+            personName: "Juan Perez",
+            phoneNumber: "4773538866",
+          },
         }),
+        useConfiguredServiceType: false,
         rateRequestTypes: ["ACCOUNT", "LIST"],
         packages: [
           { weightKg: 0.9, lengthCm: 20, widthCm: 20, heightCm: 20 },
@@ -236,6 +244,78 @@ describe("ShippingQuoteService FedEx packages", () => {
       }),
     );
     expect(ratesService.quoteRates).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to normalized MX states without serviceType or carrierCodes", async () => {
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { db } = buildDb({
+      descripcion: "Tarro grande",
+      categoriaId: "tarros",
+      activo: true,
+      fedexShipping: {
+        enabled: true,
+        weightKg: 0.9,
+        lengthCm: 20,
+        widthCm: 20,
+        heightCm: 20,
+      },
+    });
+    const ratesService = {
+      quoteRates: jest
+        .fn()
+        .mockRejectedValueOnce(
+          new FedexProviderError({
+            provider: "FEDEX",
+            status: 400,
+            message: "Bad request without state",
+          }),
+        )
+        .mockResolvedValueOnce({
+          ok: true,
+          provider: "FEDEX",
+          environment: "sandbox",
+          quoteId: "quote_3",
+          currency: "MXN",
+          options: [
+            {
+              provider: "FEDEX",
+              serviceType: "FEDEX_EXPRESS_SAVER",
+              serviceName: "FedEx Express Saver",
+              packagingType: "YOUR_PACKAGING",
+              amount: 120,
+              currency: "MXN",
+              surcharges: [],
+            },
+          ],
+        }),
+    };
+    const service = new ShippingQuoteService(db as any, ratesService as any);
+
+    await service.createFedexCartQuote({
+      userId: "user_1",
+      cart,
+      direccionEnvio: address,
+    });
+
+    expect(ratesService.quoteRates).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        origin: expect.objectContaining({ stateOrProvinceCode: undefined }),
+        destination: expect.objectContaining({ stateOrProvinceCode: undefined }),
+      }),
+    );
+    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("serviceType");
+    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("carrierCodes");
+    expect(ratesService.quoteRates).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        origin: expect.objectContaining({ stateOrProvinceCode: "GT" }),
+        destination: expect.objectContaining({ stateOrProvinceCode: "GT" }),
+        useConfiguredServiceType: false,
+      }),
+    );
+    expect(ratesService.quoteRates.mock.calls[1][0]).not.toHaveProperty("serviceType");
+    expect(ratesService.quoteRates.mock.calls[1][0]).not.toHaveProperty("carrierCodes");
   });
 
   it("does not call FedEx when all cart products are non-shippable", async () => {

@@ -42,6 +42,7 @@ describe("FedEx rates service", () => {
     process.env.FEDEX_ACCOUNT_NUMBER = "740561073";
     delete process.env.FEDEX_SERVICE_TYPE;
     jest.spyOn(console, "log").mockImplementation(() => undefined);
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
@@ -90,24 +91,20 @@ describe("FedEx rates service", () => {
     );
     const payload = client.post.mock.calls[0][1] as any;
     expect(payload.requestedShipment.serviceType).toBeUndefined();
-    expect(console.log).toHaveBeenCalledWith(
-      "[FedEx Rate Debug]",
-      expect.objectContaining({
-        hasServiceType: false,
-        serviceType: null,
-        packagingType: "YOUR_PACKAGING",
-        hasOneRateSpecialService: false,
-        pickupType: "USE_SCHEDULED_PICKUP",
-        originCountry: "MX",
-        originPostalCode: "37150",
-        recipientCountry: "MX",
-        recipientPostalCode: "06100",
-        packageCount: 1,
-      }),
-    );
-    expect(JSON.stringify((console.log as jest.Mock).mock.calls)).not.toContain(
-      "client-secret",
-    );
+    const ratePayloadDebug = JSON.parse((console.log as jest.Mock).mock.calls[0][1]);
+    const addressDebug = JSON.parse((console.log as jest.Mock).mock.calls[1][1]);
+    const logOutput = JSON.stringify((console.log as jest.Mock).mock.calls);
+    expect(logOutput).toContain("[FedEx Rate Payload Debug]");
+    expect(logOutput).toContain("[FedEx Address Debug]");
+    expect(ratePayloadDebug.accountNumberPresent).toBe(true);
+    expect(ratePayloadDebug).not.toHaveProperty("accountNumber");
+    expect(addressDebug.destination).toMatchObject({
+      postalCode: "06100",
+      countryCode: "MX",
+    });
+    expect(addressDebug.requestedPackageLineItems).toHaveLength(1);
+    expect(logOutput).not.toContain("740561073");
+    expect(logOutput).not.toContain("client-secret");
     expect(result).toMatchObject({
       ok: true,
       provider: "FEDEX",
@@ -139,5 +136,45 @@ describe("FedEx rates service", () => {
       provider: "FEDEX",
       message: "Bad FedEx request",
     });
+  });
+
+  it("logs complete FedEx error payload without account number", async () => {
+    const client = {
+      post: jest.fn().mockRejectedValue({
+        response: {
+          status: 400,
+          statusText: "Bad Request",
+          data: {
+            transactionId: "tx-123",
+            errors: [
+              {
+                code: "INVALID.INPUT.EXCEPTION",
+                message: "Invalid recipient postal code",
+              },
+            ],
+          },
+          headers: {},
+        },
+        message: "Request failed",
+      }),
+    };
+    const service = new FedexRatesService(client);
+
+    await expect(service.quoteRates(input)).rejects.toMatchObject({
+      message: "Request failed",
+    });
+
+    const errorDebug = JSON.parse((console.error as jest.Mock).mock.calls[0][1]);
+    const errorOutput = JSON.stringify((console.error as jest.Mock).mock.calls);
+    expect(errorOutput).toContain("[FedEx Error Raw]");
+    expect(errorDebug.errors).toEqual([
+      {
+        code: "INVALID.INPUT.EXCEPTION",
+        message: "Invalid recipient postal code",
+      },
+    ]);
+    expect(errorOutput).toContain("Invalid recipient postal code");
+    expect(errorDebug.transactionId).toBe("tx-123");
+    expect(errorOutput).not.toContain("740561073");
   });
 });

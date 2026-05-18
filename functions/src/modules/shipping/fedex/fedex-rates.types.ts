@@ -8,6 +8,11 @@ export interface FedexRateAddressInput {
   stateOrProvinceCode?: string;
   countryCode: string;
   residential: boolean;
+  streetLines?: string[];
+  contact?: {
+    personName?: string;
+    phoneNumber?: string;
+  };
 }
 
 export interface FedexRatePackageInput {
@@ -26,6 +31,7 @@ export interface FedexRateQuoteInput {
   rateRequestTypes: string[];
   serviceType?: string;
   carrierCodes?: string[];
+  useConfiguredServiceType?: boolean;
 }
 
 export interface FedexRateSurcharge {
@@ -187,6 +193,7 @@ export const fedexRateQuoteSchema = z
     carrierCodes: z
       .array(z.string().trim().min(1).transform((value) => value.toUpperCase()))
       .optional(),
+    useConfiguredServiceType: z.boolean().optional(),
   })
   .strict();
 

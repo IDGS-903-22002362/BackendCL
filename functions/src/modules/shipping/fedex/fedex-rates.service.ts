@@ -85,6 +85,11 @@ const logSafeRatePayload = (
         countryCode: payload.requestedShipment?.recipient?.address?.countryCode,
         residential: payload.requestedShipment?.recipient?.address?.residential,
       },
+      recipientContact: {
+        hasPhone: Boolean(payload.requestedShipment?.recipient?.contact?.phoneNumber),
+        phoneNumber: payload.requestedShipment?.recipient?.contact?.phoneNumber,
+      },
+      streetLines: payload.requestedShipment?.recipient?.address?.streetLines,
       totalPackageCount: payload.requestedShipment?.totalPackageCount,
       packages: payload.requestedShipment?.requestedPackageLineItems?.map((p: any) => ({
         groupPackageCount: p.groupPackageCount,
@@ -105,7 +110,7 @@ export class FedexRatesService {
     const requestPayload = mapFedexRateRequest(input);
     logSafeRatePayload(requestPayload);
 
-    console.log("[FedEx Address Debug]", {
+    console.log("[FedEx Address Debug]", JSON.stringify({
       origin: {
         city: requestPayload.requestedShipment?.shipper?.address?.city,
         stateOrProvinceCode: requestPayload.requestedShipment?.shipper?.address?.stateOrProvinceCode,
@@ -120,7 +125,14 @@ export class FedexRatesService {
         countryCode: requestPayload.requestedShipment?.recipient?.address?.countryCode,
         residential: requestPayload.requestedShipment?.recipient?.address?.residential,
       },
-    });
+      recipientContact: {
+        hasPhone: Boolean(requestPayload.requestedShipment?.recipient?.contact?.phoneNumber),
+        phoneNumber: requestPayload.requestedShipment?.recipient?.contact?.phoneNumber,
+      },
+      streetLines: requestPayload.requestedShipment?.recipient?.address?.streetLines,
+      requestedPackageLineItems:
+        requestPayload.requestedShipment?.requestedPackageLineItems,
+    }, null, 2));
 
     let response: FedexRateResponse;
     try {
@@ -129,17 +141,23 @@ export class FedexRatesService {
         requestPayload,
       );
     } catch (error: any) {
-      console.error("[FedEx Error Raw]", {
+      const response = error?.response || error?.originalError?.response;
+      console.error("[FedEx Error Raw]", JSON.stringify({
         source: "RATE_API",
-        status: error?.originalError?.response?.status || error?.status,
-        statusText: error?.originalError?.response?.statusText,
+        status: response?.status || error?.status,
+        statusText: response?.statusText,
         transactionId:
-          error?.originalError?.response?.headers?.["x-customer-transaction-id"] ||
-          error?.originalError?.response?.headers?.["x-fedex-transaction-id"] ||
+          response?.data?.transactionId ||
+          response?.headers?.["x-customer-transaction-id"] ||
+          response?.headers?.["x-fedex-transaction-id"] ||
           error?.fedexTransactionId,
-        data: error?.originalError?.response?.data,
-        message: error?.message,
-      });
+        data: response?.data,
+        errors: response?.data?.errors || error?.errors,
+        message:
+          response?.data?.errors?.[0]?.message ||
+          response?.data?.message ||
+          error?.message,
+      }, null, 2));
       throw error;
     }
     const options = mapFedexRateResponse(response, input.currency).map((option) => ({
