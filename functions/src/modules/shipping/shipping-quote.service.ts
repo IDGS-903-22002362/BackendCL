@@ -20,6 +20,7 @@ import {
   FedexProductPackageInput,
   FedexPackageValidationError,
 } from "./fedex/fedex-package-normalizer";
+import { fedexAddressService } from "./fedex/fedex-address.service";
 
 const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -242,6 +243,25 @@ export class ShippingQuoteService {
       currency: "MXN",
       rateRequestTypes: ["ACCOUNT", "LIST"],
     };
+
+    const [isOriginValid, isDestinationValid] = await Promise.all([
+      fedexAddressService.validatePostalCode({
+        countryCode: quoteInput.origin.countryCode,
+        stateOrProvinceCode: quoteInput.origin.stateOrProvinceCode,
+        postalCode: quoteInput.origin.postalCode,
+        carrierCode: "FDXE"
+      }),
+      fedexAddressService.validatePostalCode({
+        countryCode: quoteInput.destination.countryCode,
+        stateOrProvinceCode: quoteInput.destination.stateOrProvinceCode,
+        postalCode: quoteInput.destination.postalCode,
+        carrierCode: "FDXE"
+      })
+    ]);
+
+    if (!isOriginValid || !isDestinationValid) {
+      throw new ShippingQuoteError("FedEx no reconoce la combinación estado/código postal del origen o destino.", 422);
+    }
 
     let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;
     try {

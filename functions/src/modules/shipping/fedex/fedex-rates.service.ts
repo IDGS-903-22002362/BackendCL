@@ -105,6 +105,23 @@ export class FedexRatesService {
     const requestPayload = mapFedexRateRequest(input);
     logSafeRatePayload(requestPayload);
 
+    console.log("[FedEx Address Debug]", {
+      origin: {
+        city: requestPayload.requestedShipment?.shipper?.address?.city,
+        stateOrProvinceCode: requestPayload.requestedShipment?.shipper?.address?.stateOrProvinceCode,
+        postalCode: requestPayload.requestedShipment?.shipper?.address?.postalCode,
+        countryCode: requestPayload.requestedShipment?.shipper?.address?.countryCode,
+        residential: requestPayload.requestedShipment?.shipper?.address?.residential,
+      },
+      destination: {
+        city: requestPayload.requestedShipment?.recipient?.address?.city,
+        stateOrProvinceCode: requestPayload.requestedShipment?.recipient?.address?.stateOrProvinceCode,
+        postalCode: requestPayload.requestedShipment?.recipient?.address?.postalCode,
+        countryCode: requestPayload.requestedShipment?.recipient?.address?.countryCode,
+        residential: requestPayload.requestedShipment?.recipient?.address?.residential,
+      },
+    });
+
     let response: FedexRateResponse;
     try {
       response = await this.client.post<FedexRateResponse>(

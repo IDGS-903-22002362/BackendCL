@@ -5,18 +5,17 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
     .trim()
     .toUpperCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/_/g, " ");
 
   const map: Record<string, string> = {
     AGUASCALIENTES: "AG",
     AGS: "AG",
     AG: "AG",
 
-    BAJA_CALIFORNIA: "BC",
     "BAJA CALIFORNIA": "BC",
     BC: "BC",
 
-    BAJA_CALIFORNIA_SUR: "BS",
     "BAJA CALIFORNIA SUR": "BS",
     BCS: "BS",
     BS: "BS",
@@ -33,7 +32,6 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
     CHIH: "CH",
     CH: "CH",
 
-    CIUDAD_DE_MEXICO: "DF",
     "CIUDAD DE MEXICO": "DF",
     CDMX: "DF",
     "MEXICO CITY": "DF",
@@ -68,9 +66,9 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
     JAL: "JA",
     JA: "JA",
 
-    MEXICO: "EM",
     "ESTADO DE MEXICO": "EM",
     EDOMEX: "EM",
+    MEXICO: "EM",
     EM: "EM",
 
     MICHOACAN: "MI",
@@ -86,7 +84,6 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
     NAY: "NA",
     NA: "NA",
 
-    NUEVO_LEON: "NL",
     "NUEVO LEON": "NL",
     NL: "NL",
 
@@ -102,12 +99,10 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
     QRO: "QE",
     QE: "QE",
 
-    QUINTANA_ROO: "QR",
     "QUINTANA ROO": "QR",
     QROO: "QR",
     QR: "QR",
 
-    SAN_LUIS_POTOSI: "SL",
     "SAN LUIS POTOSI": "SL",
     SLP: "SL",
     SL: "SL",
