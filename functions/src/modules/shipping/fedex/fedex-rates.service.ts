@@ -57,25 +57,44 @@ const createOptionId = (option: {
 const logSafeRatePayload = (
   payload: ReturnType<typeof mapFedexRateRequest>,
 ): void => {
-  const shipment = payload.requestedShipment;
-
-  console.log("[FedEx Rate Debug]", {
-    packagingType: shipment.packagingType,
-    hasServiceType: Boolean(shipment.serviceType),
-    serviceType: shipment.serviceType || null,
-    hasOneRateSpecialService: JSON.stringify(shipment).includes("FEDEX_ONE_RATE"),
-    pickupType: shipment.pickupType,
-    originCountry: shipment.shipper.address.countryCode,
-    originPostalCode: shipment.shipper.address.postalCode,
-    recipientCountry: shipment.recipient.address.countryCode,
-    recipientPostalCode: shipment.recipient.address.postalCode,
-    packageCount: shipment.totalPackageCount,
-    packages: shipment.requestedPackageLineItems.map((item) => ({
-      groupPackageCount: item.groupPackageCount,
-      weight: item.weight,
-      dimensions: item.dimensions,
-    })),
-  });
+  console.log("[FedEx Rate Payload Debug]", JSON.stringify({
+    accountNumberPresent: Boolean(payload.accountNumber?.value),
+    requestedShipment: {
+      hasServiceType: Boolean(payload.requestedShipment?.serviceType),
+      serviceType: payload.requestedShipment?.serviceType || null,
+      hasCarrierCode: Boolean((payload.requestedShipment as any)?.carrierCode),
+      carrierCode: (payload.requestedShipment as any)?.carrierCode || null,
+      hasCarrierCodes: Boolean(payload.requestedShipment?.carrierCodes?.length),
+      carrierCodes: payload.requestedShipment?.carrierCodes || [],
+      packagingType: payload.requestedShipment?.packagingType,
+      pickupType: payload.requestedShipment?.pickupType,
+      rateRequestType: payload.requestedShipment?.rateRequestType,
+      hasOneRateSpecialService: JSON.stringify(payload.requestedShipment || {}).includes("FEDEX_ONE_RATE"),
+      hasShipmentSpecialServices: Boolean((payload.requestedShipment as any)?.shipmentSpecialServices),
+      origin: {
+        city: payload.requestedShipment?.shipper?.address?.city,
+        stateOrProvinceCode: payload.requestedShipment?.shipper?.address?.stateOrProvinceCode,
+        postalCode: payload.requestedShipment?.shipper?.address?.postalCode,
+        countryCode: payload.requestedShipment?.shipper?.address?.countryCode,
+        residential: payload.requestedShipment?.shipper?.address?.residential,
+      },
+      destination: {
+        city: payload.requestedShipment?.recipient?.address?.city,
+        stateOrProvinceCode: payload.requestedShipment?.recipient?.address?.stateOrProvinceCode,
+        postalCode: payload.requestedShipment?.recipient?.address?.postalCode,
+        countryCode: payload.requestedShipment?.recipient?.address?.countryCode,
+        residential: payload.requestedShipment?.recipient?.address?.residential,
+      },
+      totalPackageCount: payload.requestedShipment?.totalPackageCount,
+      packages: payload.requestedShipment?.requestedPackageLineItems?.map((p: any) => ({
+        groupPackageCount: p.groupPackageCount,
+        weight: p.weight,
+        dimensions: p.dimensions,
+        hasPackageType: Boolean(p.packageType),
+        hasPackagingType: Boolean(p.packagingType),
+      })),
+    },
+  }, null, 2));
 };
 
 export class FedexRatesService {
@@ -86,10 +105,21 @@ export class FedexRatesService {
     const requestPayload = mapFedexRateRequest(input);
     logSafeRatePayload(requestPayload);
 
-    const response = await this.client.post<FedexRateResponse>(
-      FEDEX_RATES_PATH,
-      requestPayload,
-    );
+    let response: FedexRateResponse;
+    try {
+      response = await this.client.post<FedexRateResponse>(
+        FEDEX_RATES_PATH,
+        requestPayload,
+      );
+    } catch (error: any) {
+      console.error("[FedEx Rate API Error]", {
+        message: error.message,
+        code: (error.errors as any)?.[0]?.code || error.status,
+        transactionId: error.fedexTransactionId,
+        errors: error.errors,
+      });
+      throw error;
+    }
     const options = mapFedexRateResponse(response, input.currency).map((option) => ({
       ...option,
       optionId: option.optionId || createOptionId(option),

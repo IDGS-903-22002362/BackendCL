@@ -14,6 +14,7 @@ import {
 import { FedexProviderError } from "./fedex/fedex.errors";
 import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
 import { fedexRatesService } from "./fedex/fedex-rates.service";
+import { fedexAvailabilityService } from "./fedex/fedex-availability.service";
 import {
   buildFedexPackageLineItemsFromCart,
   FedexProductPackageInput,
@@ -244,17 +245,58 @@ export class ShippingQuoteService {
 
     let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;
     try {
+      // Caso A: Sin serviceType, sin carrierCodes
       quote = await this.ratesService.quoteRates(quoteInput);
-    } catch (error) {
-      if (error instanceof FedexProviderError) {
-        throw new ShippingQuoteError(error.message, 422);
-      }
+    } catch (errorA) {
+      console.warn("[FedEx Quote] Caso A falló, intentando Caso B con FDXE...");
+      const quoteInputB = { ...quoteInput, carrierCodes: ["FDXE"] };
+      
+      try {
+        // Caso B: Sin serviceType, carrier FDXE
+        quote = await this.ratesService.quoteRates(quoteInputB);
+      } catch (errorB) {
+        console.warn("[FedEx Quote] Caso B falló, consultando Service Availability para Caso C...");
+        
+        try {
+          const validOptions = await fedexAvailabilityService.checkAvailability(quoteInput);
+          
+          if (!validOptions || validOptions.length === 0) {
+             throw new ShippingQuoteError(
+               "El destino o cuenta no tiene cobertura válida con YOUR_PACKAGING según Service Availability API. Verifica origen/destino.",
+               422
+             );
+          }
+          
+          const preferred = validOptions.find((o: any) => o.carrierCode === "FDXE") || validOptions[0];
+          console.log(`[FedEx Quote] Caso C usando: serviceType=${preferred.serviceType}, carrierCode=${preferred.carrierCode}`);
+          
+          const quoteInputC = {
+            ...quoteInput,
+            serviceType: preferred.serviceType,
+            carrierCodes: preferred.carrierCode ? [preferred.carrierCode] : undefined,
+          };
+          
+          quote = await this.ratesService.quoteRates(quoteInputC);
+        } catch (errorC) {
+          console.error("[FedEx Quote] Todos los casos fallaron.");
+          
+          if (errorC instanceof ShippingQuoteError) {
+            throw errorC; // Lanzado por nosotros mismos (0 combinaciones)
+          }
 
-      if (error instanceof FedexRateRequestConfigError) {
-        throw new ShippingQuoteError(error.message, error.statusCode);
-      }
+          const finalError = errorC instanceof Error ? errorC : errorA;
 
-      throw error;
+          if (finalError instanceof FedexProviderError) {
+            throw new ShippingQuoteError(finalError.message, 422);
+          }
+
+          if (finalError instanceof FedexRateRequestConfigError) {
+            throw new ShippingQuoteError(finalError.message, finalError.statusCode);
+          }
+
+          throw finalError;
+        }
+      }
     }
     const options: ShippingQuoteOption[] = quote.options.map((option) => ({
       ...option,

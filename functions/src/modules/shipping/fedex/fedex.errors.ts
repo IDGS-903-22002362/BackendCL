@@ -5,6 +5,8 @@ export interface FedexSafeErrorPayload {
   status: number;
   message: string;
   fedexTransactionId?: string;
+  errors?: unknown[];
+  originalError?: unknown;
 }
 
 export class FedexProviderError extends Error {
@@ -12,6 +14,8 @@ export class FedexProviderError extends Error {
   status: number;
   fedexTransactionId?: string;
   isOperational: boolean;
+  errors?: unknown[];
+  originalError?: unknown;
 
   constructor(payload: FedexSafeErrorPayload) {
     super(payload.message);
@@ -20,6 +24,8 @@ export class FedexProviderError extends Error {
     this.status = payload.status;
     this.fedexTransactionId = payload.fedexTransactionId;
     this.isOperational = true;
+    this.errors = payload.errors;
+    this.originalError = payload.originalError;
 
     Error.captureStackTrace(this, this.constructor);
   }
@@ -32,6 +38,7 @@ export class FedexProviderError extends Error {
       ...(this.fedexTransactionId
         ? { fedexTransactionId: this.fedexTransactionId }
         : {}),
+      ...(this.errors ? { errors: this.errors } : {}),
     };
   }
 }
@@ -135,6 +142,8 @@ export const mapFedexError = (error: unknown): FedexProviderError => {
           : "FedEx request failed before receiving a response",
       ),
       ...(transactionId ? { fedexTransactionId: transactionId } : {}),
+      errors: Array.isArray((error.response?.data as any)?.errors) ? (error.response?.data as any).errors : undefined,
+      originalError: error,
     });
   }
 

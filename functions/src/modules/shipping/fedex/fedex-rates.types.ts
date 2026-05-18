@@ -25,6 +25,7 @@ export interface FedexRateQuoteInput {
   currency: string;
   rateRequestTypes: string[];
   serviceType?: string;
+  carrierCodes?: string[];
 }
 
 export interface FedexRateSurcharge {
@@ -183,6 +184,9 @@ export const fedexRateQuoteSchema = z
       .nullable()
       .optional()
       .transform((value) => value || undefined),
+    carrierCodes: z
+      .array(z.string().trim().min(1).transform((value) => value.toUpperCase()))
+      .optional(),
   })
   .strict();
 

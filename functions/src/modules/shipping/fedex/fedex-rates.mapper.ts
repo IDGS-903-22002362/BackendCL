@@ -24,6 +24,7 @@ type FedexRateRequestPayload = {
     };
     pickupType: "USE_SCHEDULED_PICKUP";
     serviceType?: string;
+    carrierCodes?: string[];
     packagingType: "YOUR_PACKAGING";
     rateRequestType: string[];
     preferredCurrency: string;
@@ -95,15 +96,19 @@ const readConfiguredServiceType = (): string | undefined => {
   return serviceType;
 };
 
-const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => ({
-  postalCode: address.postalCode,
-  countryCode: address.countryCode,
-  residential: address.residential,
-  ...(address.city ? { city: address.city } : {}),
-  ...(address.stateOrProvinceCode
-    ? { stateOrProvinceCode: address.stateOrProvinceCode }
-    : {}),
-});
+const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => {
+  const isMX = address.countryCode.toUpperCase() === "MX";
+  return {
+    postalCode: address.postalCode,
+    countryCode: address.countryCode,
+    residential: address.residential,
+    ...(address.city ? { city: address.city } : {}),
+    // Omitir stateOrProvinceCode para MX para evitar errores de Rate API
+    ...(address.stateOrProvinceCode && !isMX
+      ? { stateOrProvinceCode: address.stateOrProvinceCode }
+      : {}),
+  };
+};
 
 const mapPackage = (item: FedexRatePackageInput) => ({
   groupPackageCount: 1,
@@ -138,7 +143,8 @@ export const mapFedexRateRequest = (
         address: mapAddress(input.destination),
       },
       pickupType: "USE_SCHEDULED_PICKUP",
-      ...(serviceType ? { serviceType } : {}),
+      ...(input.serviceType ? { serviceType: input.serviceType } : serviceType ? { serviceType } : {}),
+      ...(input.carrierCodes && input.carrierCodes.length > 0 ? { carrierCodes: input.carrierCodes } : {}),
       packagingType: "YOUR_PACKAGING",
       rateRequestType: input.rateRequestTypes,
       preferredCurrency: input.currency,
