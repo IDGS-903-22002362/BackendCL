@@ -29,7 +29,7 @@ const input: FedexRateQuoteInput = {
   ],
   shipDate: "2026-05-12",
   currency: "MXN",
-  rateRequestTypes: ["ACCOUNT"],
+  rateRequestTypes: ["ACCOUNT", "LIST"],
 };
 
 describe("FedEx rates service", () => {
@@ -90,6 +90,24 @@ describe("FedEx rates service", () => {
     );
     const payload = client.post.mock.calls[0][1] as any;
     expect(payload.requestedShipment.serviceType).toBeUndefined();
+    expect(console.log).toHaveBeenCalledWith(
+      "[FedEx Rate Debug]",
+      expect.objectContaining({
+        hasServiceType: false,
+        serviceType: null,
+        packagingType: "YOUR_PACKAGING",
+        hasOneRateSpecialService: false,
+        pickupType: "USE_SCHEDULED_PICKUP",
+        originCountry: "MX",
+        originPostalCode: "37150",
+        recipientCountry: "MX",
+        recipientPostalCode: "06100",
+        packageCount: 1,
+      }),
+    );
+    expect(JSON.stringify((console.log as jest.Mock).mock.calls)).not.toContain(
+      "client-secret",
+    );
     expect(result).toMatchObject({
       ok: true,
       provider: "FEDEX",

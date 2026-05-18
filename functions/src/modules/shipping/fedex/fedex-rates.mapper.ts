@@ -62,6 +62,14 @@ const roundWeight = (value: number): number => Math.round(value * 100) / 100;
 
 const roundDimension = (value: number): number => Math.max(1, Math.ceil(value));
 
+const BLOCKED_SERVICE_TYPES = new Set([
+  "FEDEX_ONE_RATE",
+  "SMART_POST",
+  "FEDEX_GROUND_ECONOMY",
+  "GROUND_HOME_DELIVERY",
+  "FEDEX_GROUND",
+]);
+
 const readConfiguredServiceType = (): string | undefined => {
   const rawValue = process.env.FEDEX_SERVICE_TYPE?.trim();
 
@@ -75,9 +83,13 @@ const readConfiguredServiceType = (): string | undefined => {
 
   const serviceType = rawValue.toUpperCase();
   if (!/^[A-Z0-9_]+$/.test(serviceType)) {
-    throw new FedexRateRequestConfigError(
-      "Invalid FedEx environment variable: FEDEX_SERVICE_TYPE",
-    );
+    console.warn("Ignoring invalid FedEx FEDEX_SERVICE_TYPE value");
+    return undefined;
+  }
+
+  if (BLOCKED_SERVICE_TYPES.has(serviceType)) {
+    console.warn("Ignoring blocked FedEx FEDEX_SERVICE_TYPE value");
+    return undefined;
   }
 
   return serviceType;

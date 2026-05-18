@@ -35,7 +35,7 @@ const baseInput: FedexRateQuoteInput = {
   ],
   shipDate: "2026-05-12",
   currency: "MXN",
-  rateRequestTypes: ["ACCOUNT"],
+  rateRequestTypes: ["ACCOUNT", "LIST"],
 };
 
 describe("FedEx rates mapper", () => {
@@ -47,6 +47,10 @@ describe("FedEx rates mapper", () => {
     process.env.FEDEX_CLIENT_SECRET = "client-secret";
     process.env.FEDEX_ACCOUNT_NUMBER = "740561073";
     delete process.env.FEDEX_SERVICE_TYPE;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -98,6 +102,7 @@ describe("FedEx rates mapper", () => {
       "USE_SCHEDULED_PICKUP",
     );
     expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
+    expect(request.requestedShipment.rateRequestType).toEqual(["ACCOUNT", "LIST"]);
     expect(request.requestedShipment.preferredCurrency).toBe("MXN");
     expect(request.requestedShipment.totalPackageCount).toBe(1);
   });
@@ -136,12 +141,22 @@ describe("FedEx rates mapper", () => {
     );
   });
 
-  it("rejects invalid FEDEX_SERVICE_TYPE values", () => {
-    process.env.FEDEX_SERVICE_TYPE = "FEDEX EXPRESS SAVER";
+  it("omits invalid and blocked FEDEX_SERVICE_TYPE values", () => {
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    expect(() => mapFedexRateRequest(baseInput)).toThrow(
-      "Invalid FedEx environment variable: FEDEX_SERVICE_TYPE",
-    );
+    process.env.FEDEX_SERVICE_TYPE = "FEDEX EXPRESS SAVER";
+    expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
+
+    for (const blockedValue of [
+      "FEDEX_ONE_RATE",
+      "SMART_POST",
+      "FEDEX_GROUND_ECONOMY",
+      "GROUND_HOME_DELIVERY",
+      "FEDEX_GROUND",
+    ]) {
+      process.env.FEDEX_SERVICE_TYPE = blockedValue;
+      expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
+    }
   });
 
   it("normalizes response, prefers ACCOUNT, filters invalid amounts, and sorts", () => {

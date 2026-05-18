@@ -59,19 +59,17 @@ const logSafeRatePayload = (
 ): void => {
   const shipment = payload.requestedShipment;
 
-  console.log("fedex_rate_request_payload_summary", {
+  console.log("[FedEx Rate Debug]", {
     packagingType: shipment.packagingType,
     hasServiceType: Boolean(shipment.serviceType),
+    serviceType: shipment.serviceType || null,
+    hasOneRateSpecialService: JSON.stringify(shipment).includes("FEDEX_ONE_RATE"),
     pickupType: shipment.pickupType,
-    origin: {
-      countryCode: shipment.shipper.address.countryCode,
-      postalCode: shipment.shipper.address.postalCode,
-    },
-    destination: {
-      countryCode: shipment.recipient.address.countryCode,
-      postalCode: shipment.recipient.address.postalCode,
-    },
-    totalPackageCount: shipment.totalPackageCount,
+    originCountry: shipment.shipper.address.countryCode,
+    originPostalCode: shipment.shipper.address.postalCode,
+    recipientCountry: shipment.recipient.address.countryCode,
+    recipientPostalCode: shipment.recipient.address.postalCode,
+    packageCount: shipment.totalPackageCount,
     packages: shipment.requestedPackageLineItems.map((item) => ({
       groupPackageCount: item.groupPackageCount,
       weight: item.weight,
