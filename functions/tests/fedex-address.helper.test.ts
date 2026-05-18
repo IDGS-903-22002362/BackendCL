@@ -1,4 +1,7 @@
-import { normalizeMxStateForFedEx } from "../src/modules/shipping/fedex/fedex-address.helper";
+import {
+  normalizeFedExCity,
+  normalizeMxStateForFedEx,
+} from "../src/modules/shipping/fedex/fedex-address.helper";
 
 describe("normalizeMxStateForFedEx", () => {
   it("should normalize Guanajuato variants to GT", () => {
@@ -43,5 +46,19 @@ describe("normalizeMxStateForFedEx", () => {
     expect(normalizeMxStateForFedEx("")).toBeUndefined();
     expect(normalizeMxStateForFedEx(null)).toBeUndefined();
     expect(normalizeMxStateForFedEx(undefined)).toBeUndefined();
+  });
+});
+
+describe("normalizeFedExCity", () => {
+  it("normalizes Leon variants for FedEx", () => {
+    expect(normalizeFedExCity("León")).toBe("Leon");
+    expect(normalizeFedExCity("León de los Aldama")).toBe("Leon");
+    expect(normalizeFedExCity("Leon, GTO")).toBe("Leon");
+    expect(normalizeFedExCity("Leon")).toBe("Leon");
+  });
+
+  it("removes accents and preserves non-Leon city names", () => {
+    expect(normalizeFedExCity("Mérida")).toBe("Merida");
+    expect(normalizeFedExCity("")).toBeUndefined();
   });
 });

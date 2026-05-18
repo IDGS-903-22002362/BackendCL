@@ -17,6 +17,9 @@ type FedexClientLike = {
   post<T = unknown>(path: string, data?: unknown): Promise<T>;
 };
 
+type FedexPostalValidationRole = "ORIGIN" | "DESTINATION";
+type FedexPostalValidationMode = "WITHOUT_STATE" | "WITH_STATE_FALLBACK";
+
 export class FedexAddressService {
   constructor(private readonly client: FedexClientLike = fedexClient) {}
 
@@ -37,27 +40,89 @@ export class FedexAddressService {
     stateOrProvinceCode?: string;
     postalCode: string;
     carrierCode?: string;
+    role?: FedexPostalValidationRole;
+    shipDate?: string;
   }): Promise<boolean> {
-    try {
-      const isMX = input.countryCode.toUpperCase() === "MX";
+    const countryCode = input.countryCode.toUpperCase();
+    const carrierCode = input.carrierCode || "FDXE";
+    const role = input.role || "DESTINATION";
+    const normalizedState =
+      countryCode === "MX"
+        ? normalizeMxStateForFedEx(input.stateOrProvinceCode)
+        : input.stateOrProvinceCode;
+
+    const postPostalValidation = async (
+      mode: FedexPostalValidationMode,
+      stateOrProvinceCode?: string,
+    ): Promise<void> => {
       const payload = {
-        carrierCode: input.carrierCode || "FDXE",
-        countryCode: input.countryCode,
-        stateOrProvinceCode: isMX ? normalizeMxStateForFedEx(input.stateOrProvinceCode) : input.stateOrProvinceCode,
+        carrierCode,
+        countryCode,
+        ...(stateOrProvinceCode ? { stateOrProvinceCode } : {}),
         postalCode: input.postalCode,
+        ...(input.shipDate ? { shipDate: input.shipDate } : {}),
       };
 
-      await this.client.post<any>(
-        FEDEX_POSTAL_VALIDATION_PATH,
-        payload,
-      );
-      
+      console.log("[FedEx Postal Validation Request]", {
+        role,
+        countryCode,
+        postalCode: input.postalCode,
+        stateOrProvinceCode: stateOrProvinceCode || null,
+        carrierCode,
+        mode,
+      });
+
+      await this.client.post<any>(FEDEX_POSTAL_VALIDATION_PATH, payload);
+    };
+
+    const logPostalValidationError = (
+      error: any,
+      mode: FedexPostalValidationMode,
+    ) => {
+      const response =
+        error?.response || error?.originalError?.response;
+      console.error("[FedEx Postal Validation Error]", {
+        role,
+        mode,
+        status: response?.status || error?.status,
+        transactionId:
+          response?.data?.transactionId ||
+          response?.headers?.["x-customer-transaction-id"] ||
+          response?.headers?.["x-fedex-transaction-id"] ||
+          error?.fedexTransactionId,
+        errors: response?.data?.errors || error?.errors,
+        message:
+          response?.data?.errors?.[0]?.message ||
+          error?.message,
+      });
+    };
+
+    try {
+      if (countryCode === "MX") {
+        try {
+          await postPostalValidation("WITHOUT_STATE");
+          return true;
+        } catch (error: any) {
+          logPostalValidationError(error, "WITHOUT_STATE");
+
+          if (normalizedState) {
+            try {
+              await postPostalValidation("WITH_STATE_FALLBACK", normalizedState);
+              return true;
+            } catch (fallbackError: any) {
+              logPostalValidationError(fallbackError, "WITH_STATE_FALLBACK");
+              return false;
+            }
+          }
+
+          return false;
+        }
+      }
+
+      await postPostalValidation("WITH_STATE_FALLBACK", normalizedState);
       return true;
     } catch (error: any) {
-      console.warn("[FedEx Postal Validation Error]", {
-        status: error?.originalError?.response?.status || error?.status,
-        data: error?.originalError?.response?.data,
-      });
+      logPostalValidationError(error, "WITH_STATE_FALLBACK");
       return false;
     }
   }

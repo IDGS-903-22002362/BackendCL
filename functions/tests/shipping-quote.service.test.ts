@@ -1,5 +1,19 @@
+jest.mock("../src/modules/shipping/fedex/fedex-address.service", () => ({
+  fedexAddressService: {
+    validatePostalCode: jest.fn(),
+  },
+}));
+
+jest.mock("../src/modules/shipping/fedex/fedex-availability.service", () => ({
+  fedexAvailabilityService: {
+    checkAvailability: jest.fn(),
+  },
+}));
+
 import { ShippingQuoteService } from "../src/modules/shipping/shipping-quote.service";
 import { FedexProviderError } from "../src/modules/shipping/fedex/fedex.errors";
+import { fedexAddressService } from "../src/modules/shipping/fedex/fedex-address.service";
+import { fedexAvailabilityService } from "../src/modules/shipping/fedex/fedex-availability.service";
 
 const originalEnv = { ...process.env };
 
@@ -32,9 +46,9 @@ const address = {
   calle: "Uno",
   numero: "1",
   colonia: "Centro",
-  ciudad: "Leon",
+  ciudad: "León de los Aldama",
   estado: "GUA",
-  codigoPostal: "37000",
+  codigoPostal: "37208",
 };
 
 const buildDb = (product: Record<string, unknown>) => {
@@ -67,6 +81,12 @@ describe("ShippingQuoteService FedEx packages", () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     setFedexEnv();
+    jest.mocked(fedexAddressService.validatePostalCode).mockResolvedValue(true);
+    jest.mocked(fedexAvailabilityService.checkAvailability).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -116,6 +136,18 @@ describe("ShippingQuoteService FedEx packages", () => {
 
     expect(ratesService.quoteRates).toHaveBeenCalledWith(
       expect.objectContaining({
+        origin: expect.objectContaining({
+          city: "Leon",
+          postalCode: "37500",
+          countryCode: "MX",
+          residential: false,
+        }),
+        destination: expect.objectContaining({
+          city: "Leon",
+          postalCode: "37208",
+          countryCode: "MX",
+          residential: true,
+        }),
         rateRequestTypes: ["ACCOUNT", "LIST"],
         packages: [
           { weightKg: 0.9, lengthCm: 20, widthCm: 20, heightCm: 20 },
@@ -133,6 +165,77 @@ describe("ShippingQuoteService FedEx packages", () => {
       requiresShipping: true,
       quoteId: "quote_1",
     });
+  });
+
+  it("passes postal validation roles and continues to Rate API when MX postal validation fails", async () => {
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    jest.mocked(fedexAddressService.validatePostalCode)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    const { db } = buildDb({
+      descripcion: "Tarro grande",
+      categoriaId: "tarros",
+      activo: true,
+      fedexShipping: {
+        enabled: true,
+        weightKg: 0.9,
+        lengthCm: 20,
+        widthCm: 20,
+        heightCm: 20,
+      },
+    });
+    const ratesService = {
+      quoteRates: jest.fn().mockResolvedValue({
+        ok: true,
+        provider: "FEDEX",
+        environment: "sandbox",
+        quoteId: "quote_2",
+        currency: "MXN",
+        options: [
+          {
+            provider: "FEDEX",
+            serviceType: "FEDEX_EXPRESS_SAVER",
+            serviceName: "FedEx Express Saver",
+            packagingType: "YOUR_PACKAGING",
+            amount: 120,
+            currency: "MXN",
+            surcharges: [],
+          },
+        ],
+      }),
+    };
+    const service = new ShippingQuoteService(db as any, ratesService as any);
+
+    await service.createFedexCartQuote({
+      userId: "user_1",
+      cart,
+      direccionEnvio: address,
+    });
+
+    expect(fedexAddressService.validatePostalCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "ORIGIN",
+        countryCode: "MX",
+        postalCode: "37500",
+        carrierCode: "FDXE",
+      }),
+    );
+    expect(fedexAddressService.validatePostalCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "DESTINATION",
+        countryCode: "MX",
+        postalCode: "37208",
+        carrierCode: "FDXE",
+      }),
+    );
+    expect(ratesService.quoteRates).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        serviceType: expect.anything(),
+        carrierCodes: expect.anything(),
+      }),
+    );
+    expect(ratesService.quoteRates).toHaveBeenCalledTimes(1);
   });
 
   it("does not call FedEx when all cart products are non-shippable", async () => {
@@ -190,15 +293,15 @@ describe("ShippingQuoteService FedEx packages", () => {
         heightCm: 20,
       },
     });
+    const fedexError = new FedexProviderError({
+      provider: "FEDEX",
+      status: 400,
+      message: "Invalid service and packaging combination",
+    });
     const ratesService = {
-      quoteRates: jest.fn().mockRejectedValue(
-        new FedexProviderError({
-          provider: "FEDEX",
-          status: 400,
-          message: "Invalid service and packaging combination",
-        }),
-      ),
+      quoteRates: jest.fn().mockRejectedValue(fedexError),
     };
+    jest.mocked(fedexAvailabilityService.checkAvailability).mockRejectedValue(fedexError);
     const service = new ShippingQuoteService(db as any, ratesService as any);
 
     await expect(

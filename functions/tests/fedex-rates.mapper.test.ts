@@ -105,6 +105,34 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.rateRequestType).toEqual(["ACCOUNT", "LIST"]);
     expect(request.requestedShipment.preferredCurrency).toBe("MXN");
     expect(request.requestedShipment.totalPackageCount).toBe(1);
+    expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
+    expect(request.requestedShipment.serviceType).toBeUndefined();
+    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+  });
+
+  it("normalizes FedEx city names without adding carrierCodes in Caso A", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      origin: {
+        ...baseInput.origin,
+        city: "León de los Aldama",
+      },
+      destination: {
+        ...baseInput.destination,
+        city: "Leon, GTO",
+      },
+    });
+
+    expect(request.requestedShipment.shipper.address).toMatchObject({
+      city: "Leon",
+    });
+    expect(request.requestedShipment.recipient.address).toMatchObject({
+      city: "Leon",
+    });
+    expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
+    expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
+    expect(request.requestedShipment.serviceType).toBeUndefined();
+    expect(request.requestedShipment.carrierCodes).toBeUndefined();
   });
 
   it("rounds package dimensions and weight for FedEx", () => {
@@ -120,7 +148,7 @@ describe("FedEx rates mapper", () => {
     });
   });
 
-  it("omits serviceType unless FEDEX_SERVICE_TYPE is configured", () => {
+  it("omits serviceType in Caso A unless input or FEDEX_SERVICE_TYPE is configured", () => {
     expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
 
     expect(
@@ -128,7 +156,7 @@ describe("FedEx rates mapper", () => {
         ...baseInput,
         serviceType: "FEDEX_EXPRESS_SAVER",
       }).requestedShipment.serviceType,
-    ).toBeUndefined();
+    ).toBe("FEDEX_EXPRESS_SAVER");
 
     for (const emptyValue of ["", " ", "null", "undefined"]) {
       process.env.FEDEX_SERVICE_TYPE = emptyValue;

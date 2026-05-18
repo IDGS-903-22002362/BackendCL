@@ -1,5 +1,8 @@
 import { getFedexConfig } from "./fedex.config";
-import { normalizeMxStateForFedEx } from "./fedex-address.helper";
+import {
+  normalizeFedExCity,
+  normalizeMxStateForFedEx,
+} from "./fedex-address.helper";
 import {
   FedexMoney,
   FedexRateAddressInput,
@@ -103,7 +106,7 @@ const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => 
     postalCode: address.postalCode,
     countryCode: address.countryCode,
     residential: address.residential,
-    ...(address.city ? { city: address.city.replace(" de los Aldama", "") } : {}),
+    ...(address.city ? { city: normalizeFedExCity(address.city) } : {}),
     ...(address.stateOrProvinceCode
       ? { stateOrProvinceCode: isMX ? normalizeMxStateForFedEx(address.stateOrProvinceCode) : address.stateOrProvinceCode }
       : {}),

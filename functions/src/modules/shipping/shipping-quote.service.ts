@@ -21,6 +21,7 @@ import {
   FedexPackageValidationError,
 } from "./fedex/fedex-package-normalizer";
 import { fedexAddressService } from "./fedex/fedex-address.service";
+import { normalizeFedExCity } from "./fedex/fedex-address.helper";
 
 const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -111,7 +112,7 @@ export const buildShippingCartHash = (cart: Carrito): string =>
 
 const buildDestination = (address: DireccionEnvio): FedexRateAddressInput => ({
   postalCode: address.codigoPostal,
-  city: address.ciudad,
+  city: normalizeFedExCity(address.ciudad),
   stateOrProvinceCode: address.estado,
   countryCode: "MX",
   residential: true,
@@ -121,7 +122,7 @@ const buildOrigin = (): FedexRateAddressInput => {
   const shipper = getFedexShipperConfig();
   return {
     postalCode: shipper.postalCode,
-    city: shipper.city,
+    city: normalizeFedExCity(shipper.city),
     stateOrProvinceCode: shipper.stateOrProvinceCode,
     countryCode: shipper.countryCode,
     residential: false,
@@ -235,32 +236,41 @@ export class ShippingQuoteService {
     }
 
     const cartHash = buildShippingCartHash(input.cart);
+    const shipDate = new Date().toISOString().slice(0, 10);
     const quoteInput: FedexRateQuoteInput = {
       origin: buildOrigin(),
       destination: buildDestination(input.direccionEnvio),
       packages,
-      shipDate: new Date().toISOString().slice(0, 10),
+      shipDate,
       currency: "MXN",
       rateRequestTypes: ["ACCOUNT", "LIST"],
     };
 
     const [isOriginValid, isDestinationValid] = await Promise.all([
       fedexAddressService.validatePostalCode({
+        role: "ORIGIN",
         countryCode: quoteInput.origin.countryCode,
         stateOrProvinceCode: quoteInput.origin.stateOrProvinceCode,
         postalCode: quoteInput.origin.postalCode,
-        carrierCode: "FDXE"
+        carrierCode: "FDXE",
+        shipDate,
       }),
       fedexAddressService.validatePostalCode({
+        role: "DESTINATION",
         countryCode: quoteInput.destination.countryCode,
         stateOrProvinceCode: quoteInput.destination.stateOrProvinceCode,
         postalCode: quoteInput.destination.postalCode,
-        carrierCode: "FDXE"
+        carrierCode: "FDXE",
+        shipDate,
       })
     ]);
 
     if (!isOriginValid || !isDestinationValid) {
-      throw new ShippingQuoteError("FedEx no reconoce la combinación estado/código postal del origen o destino.", 422);
+      console.warn("[FedEx Postal Validation Warning]", {
+        originValid: isOriginValid,
+        destinationValid: isDestinationValid,
+        action: "CONTINUE_TO_RATE_API",
+      });
     }
 
     let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;

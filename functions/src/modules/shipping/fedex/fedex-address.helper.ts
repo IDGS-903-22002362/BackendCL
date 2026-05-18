@@ -143,3 +143,24 @@ export function normalizeMxStateForFedEx(value?: string | null): string | undefi
 
   return map[normalized] ?? value.trim();
 }
+
+export function normalizeFedExCity(value?: string | null): string | undefined {
+  if (!value) return undefined;
+
+  const normalized = value
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const upper = normalized.toUpperCase();
+
+  if (
+    upper === "LEON DE LOS ALDAMA" ||
+    upper === "LEON, GTO" ||
+    upper === "LEON"
+  ) {
+    return "Leon";
+  }
+
+  return normalized;
+}
