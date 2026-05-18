@@ -13,16 +13,17 @@ const setFedexEnv = () => {
   process.env.FEDEX_CLIENT_ID = "client-id";
   process.env.FEDEX_CLIENT_SECRET = "client-secret";
   process.env.FEDEX_ACCOUNT_NUMBER = "740561073";
-  process.env.FEDEX_SHIPPER_NAME = "Club León Fulfillment";
-  process.env.FEDEX_SHIPPER_COMPANY = "Club León";
+  process.env.FEDEX_SHIPPER_CONTACT_NAME = "La Guarida del León";
+  process.env.FEDEX_SHIPPER_COMPANY_NAME = "La Guarida del León";
   process.env.FEDEX_SHIPPER_PHONE = "4771234567";
   process.env.FEDEX_SHIPPER_EMAIL = "shipping@example.com";
   process.env.FEDEX_SHIPPER_STREET_1 = "Blvd Adolfo López Mateos 1810";
   process.env.FEDEX_SHIPPER_STREET_2 = "Colonia La Martinica";
   process.env.FEDEX_SHIPPER_CITY = "León";
-  process.env.FEDEX_SHIPPER_STATE = "GUA";
+  process.env.FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE = "Guanajuato";
   process.env.FEDEX_SHIPPER_POSTAL_CODE = "37500";
   process.env.FEDEX_SHIPPER_COUNTRY_CODE = "MX";
+  process.env.FEDEX_SHIPPER_RESIDENTIAL = "false";
 };
 
 const shipInput: FedexShipRequestInput = {
@@ -79,13 +80,42 @@ describe("FedEx ship mapper", () => {
       "SENDER",
     );
     expect(request.requestedShipment.shipper.contact.personName).toBe(
-      "Club Leon Fulfillment",
+      "La Guarida del Leon",
     );
+    expect(request.requestedShipment.shipper.contact.companyName).toBe(
+      "La Guarida del Leon",
+    );
+    expect(request.requestedShipment.shipper.address).toMatchObject({
+      city: "Leon",
+      stateOrProvinceCode: "Guanajuato",
+      postalCode: "37500",
+      countryCode: "MX",
+      residential: false,
+    });
     expect(request.requestedShipment.recipients[0].contact.personName).toBe(
       "Jose Perez",
     );
     expect(serialized).not.toContain("client-secret");
     expect(serialized).not.toContain("access_token");
+  });
+
+  it("keeps backward compatibility with legacy shipper env names", () => {
+    delete process.env.FEDEX_SHIPPER_CONTACT_NAME;
+    delete process.env.FEDEX_SHIPPER_COMPANY_NAME;
+    delete process.env.FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE;
+    delete process.env.FEDEX_SHIPPER_RESIDENTIAL;
+    process.env.FEDEX_SHIPPER_NAME = "Club Leon Fulfillment";
+    process.env.FEDEX_SHIPPER_COMPANY = "Club Leon";
+    process.env.FEDEX_SHIPPER_STATE = "GUA";
+
+    const shipper = getFedexShipperConfig();
+
+    expect(shipper).toMatchObject({
+      name: "Club Leon Fulfillment",
+      company: "Club Leon",
+      stateOrProvinceCode: "GUA",
+    });
+    expect(shipper.residential).toBeUndefined();
   });
 
   it("rounds package values and rejects invalid packages", () => {

@@ -2,6 +2,120 @@
 
 Guia breve para consumir FedEx desde el frontend considerando el flujo actual de checkout, pagos Stripe/Aplazo, generacion de guia y reembolsos.
 
+## Cambios nuevos: remitente FedEx controlado por backend
+
+El backend ya tiene configurada la direccion origen/remitente de FedEx en secrets desplegados. El frontend no debe pedir, guardar ni enviar datos del remitente para el flujo normal de checkout.
+
+Remitente activo en backend:
+
+| Campo backend | Valor operativo |
+| --- | --- |
+| Contacto | La Guarida del Leon |
+| Empresa | La Guarida del Leon |
+| Telefono | 4777112626 |
+| Direccion | Blvd. Adolfo Lopez Mateos, La Martinca |
+| Ciudad | Leon de los Aldama |
+| Estado | Guanajuato |
+| CP | 37500 |
+| Pais | MX |
+| Residencial | false |
+
+Impacto para frontend:
+
+- En checkout, enviar solo la direccion destino del cliente.
+- No exponer variables `FEDEX_SHIPPER_*` en `.env` del frontend.
+- No agregar campos de origen/remitente en formularios de cliente.
+- No mandar `origin` en `POST /api/carrito/shipping/fedex/quotes`.
+- No recalcular costo de envio en frontend; usar siempre `options[].amount` devuelto por backend.
+- Si existe una pantalla interna de pruebas que llama `POST /api/shipping/fedex/rates`, puede seguir enviando `origin`, pero no debe usarse para checkout real.
+
+### Implementacion frontend recomendada
+
+1. Revisar el formulario de direccion de envio y conservar solo datos del destinatario.
+2. Al cotizar carrito, llamar `POST /api/carrito/shipping/fedex/quotes` con `direccionEnvio`.
+3. Mostrar las opciones devueltas por backend y guardar `quoteId` mas `optionId`.
+4. Al crear la orden, enviar `shippingQuoteId` y `selectedShippingOptionId`.
+5. Despues del pago, consultar tracking; no intentar crear guia desde cliente.
+
+Ejemplo de cotizacion desde checkout:
+
+```ts
+type DireccionEnvio = {
+  calle?: string;
+  numeroExterior?: string;
+  numeroInterior?: string;
+  colonia?: string;
+  ciudad?: string;
+  estado?: string;
+  codigoPostal: string;
+  pais?: string;
+  telefono?: string;
+  nombre?: string;
+  referencias?: string;
+};
+
+async function cotizarFedExCheckout(
+  token: string,
+  direccionEnvio: DireccionEnvio,
+) {
+  const response = await fetch("/api/carrito/shipping/fedex/quotes", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ direccionEnvio }),
+  });
+
+  if (!response.ok) {
+    throw new Error("No fue posible cotizar el envio con FedEx");
+  }
+
+  return response.json();
+}
+```
+
+Ejemplo de checkout con opcion FedEx seleccionada:
+
+```ts
+async function crearOrdenDeliveryFedEx(input: {
+  token: string;
+  direccionEnvio: DireccionEnvio;
+  metodoPago: "TARJETA" | "APLAZO";
+  quoteId: string;
+  optionId: string;
+}) {
+  const response = await fetch("/api/carrito/checkout", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${input.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      fulfillmentMethod: "DELIVERY",
+      direccionEnvio: input.direccionEnvio,
+      metodoPago: input.metodoPago,
+      shippingQuoteId: input.quoteId,
+      selectedShippingOptionId: input.optionId,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("No fue posible crear la orden con envio FedEx");
+  }
+
+  return response.json();
+}
+```
+
+Checklist de migracion para estos cambios:
+
+- Eliminar cualquier uso frontend de `FEDEX_SHIPPER_NAME`, `FEDEX_SHIPPER_CONTACT_NAME`, `FEDEX_SHIPPER_COMPANY_NAME`, `FEDEX_SHIPPER_PHONE`, `FEDEX_SHIPPER_STREET_1`, `FEDEX_SHIPPER_CITY`, `FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE`, `FEDEX_SHIPPER_POSTAL_CODE`, `FEDEX_SHIPPER_COUNTRY_CODE` y similares.
+- Eliminar inputs UI de "direccion origen", "remitente" o "shipper" en checkout cliente.
+- Confirmar que el payload de cotizacion de carrito no incluya `origin`, `packages`, `shipper` ni `accountNumber`.
+- Confirmar que el payload de checkout no incluya `costoEnvio`.
+- En errores `422` o `502`, mostrar reintento o pedir cambiar direccion; no pedir al usuario corregir el remitente.
+
 ## Reglas base
 
 - El frontend no debe llamar directo a FedEx. Siempre debe usar el backend.

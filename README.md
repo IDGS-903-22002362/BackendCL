@@ -28,6 +28,22 @@ firebase functions:secrets:set FEDEX_ACCOUNT_NUMBER
 
 Si también usas pickup, tracking o remitente avanzado, configura los secretos adicionales de FedEx que consume `functions/src/modules/shipping/fedex/fedex.config.ts` y `fedex-ship.mapper.ts`.
 
+Variables de remitente usadas por FedEx:
+
+```bash
+FEDEX_SHIPPER_CONTACT_NAME=La Guarida del Leon
+FEDEX_SHIPPER_COMPANY_NAME=La Guarida del Leon
+FEDEX_SHIPPER_PHONE=4777112626
+FEDEX_SHIPPER_EMAIL=desarrolloclubleon@gmail.com
+FEDEX_SHIPPER_STREET_1=Blvd. Adolfo Lopez Mateos
+FEDEX_SHIPPER_STREET_2=La Martinca
+FEDEX_SHIPPER_CITY=Leon de los Aldama
+FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE=Guanajuato
+FEDEX_SHIPPER_POSTAL_CODE=37500
+FEDEX_SHIPPER_COUNTRY_CODE=MX
+FEDEX_SHIPPER_RESIDENTIAL=false
+```
+
 ## Desarrollo local
 
 ```bash

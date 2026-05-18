@@ -15,24 +15,31 @@ import {
 
 const LABEL_STOCK_TYPE = "PAPER_85X11_TOP_HALF_LABEL";
 
-const requiredShipperEnv = [
-  "FEDEX_SHIPPER_NAME",
-  "FEDEX_SHIPPER_PHONE",
-  "FEDEX_SHIPPER_STREET_1",
-  "FEDEX_SHIPPER_CITY",
-  "FEDEX_SHIPPER_STATE",
-  "FEDEX_SHIPPER_POSTAL_CODE",
-  "FEDEX_SHIPPER_COUNTRY_CODE",
-] as const;
-
-type ShipperEnvVar = typeof requiredShipperEnv[number];
-
-const readRequiredShipperEnv = (name: ShipperEnvVar): string => {
+const readOptionalShipperEnv = (name: string): string | undefined => {
   const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing FedEx shipper environment variable: ${name}`);
+  return value || undefined;
+};
+
+const readRequiredShipperEnv = (
+  name: string,
+  legacyName?: string,
+): string => {
+  const value = readOptionalShipperEnv(name);
+  const legacyValue = legacyName ? readOptionalShipperEnv(legacyName) : undefined;
+
+  if (value) {
+    return value;
   }
-  return value;
+
+  if (legacyValue) {
+    return legacyValue;
+  }
+
+  throw new Error(
+    `Missing FedEx shipper environment variable: ${name}${
+      legacyName ? ` or ${legacyName}` : ""
+    }`,
+  );
 };
 
 export const cleanFedexText = (value: string): string =>
@@ -50,6 +57,19 @@ const cleanOptionalText = (value: string | undefined): string | undefined => {
 
   const cleaned = cleanFedexText(value);
   return cleaned ? cleaned : undefined;
+};
+
+const readOptionalBooleanEnv = (
+  name: string,
+  defaultValue?: boolean,
+): boolean | undefined => {
+  const value = readOptionalShipperEnv(name);
+
+  if (!value) {
+    return defaultValue;
+  }
+
+  return !["false", "0", "no", "off"].includes(value.toLowerCase());
 };
 
 const roundWeight = (value: number): number => Math.round(value * 100) / 100;
@@ -74,19 +94,32 @@ export const getFedexShipperConfig = (): FedexShipContactAddress => {
   ].filter((item): item is string => Boolean(item));
 
   return {
-    name: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_NAME")),
-    company: cleanOptionalText(process.env.FEDEX_SHIPPER_COMPANY) || "Club Leon",
+    name: cleanFedexText(
+      readRequiredShipperEnv(
+        "FEDEX_SHIPPER_CONTACT_NAME",
+        "FEDEX_SHIPPER_NAME",
+      ),
+    ),
+    company:
+      cleanOptionalText(
+        readOptionalShipperEnv("FEDEX_SHIPPER_COMPANY_NAME") ||
+          readOptionalShipperEnv("FEDEX_SHIPPER_COMPANY"),
+      ) || "Club Leon",
     phone: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_PHONE")).replace(/\D/g, ""),
     email: cleanOptionalText(process.env.FEDEX_SHIPPER_EMAIL),
     streetLines: streetLines.map(cleanFedexText),
     city: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_CITY")),
     stateOrProvinceCode: cleanFedexText(
-      readRequiredShipperEnv("FEDEX_SHIPPER_STATE"),
+      readRequiredShipperEnv(
+        "FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE",
+        "FEDEX_SHIPPER_STATE",
+      ),
     ),
     postalCode: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_POSTAL_CODE")),
     countryCode: cleanFedexText(
       readRequiredShipperEnv("FEDEX_SHIPPER_COUNTRY_CODE"),
     ).toUpperCase(),
+    residential: readOptionalBooleanEnv("FEDEX_SHIPPER_RESIDENTIAL"),
   };
 };
 
