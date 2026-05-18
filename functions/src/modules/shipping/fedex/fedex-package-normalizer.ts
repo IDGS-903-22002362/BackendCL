@@ -19,7 +19,6 @@ export type FedexPackageDimensions = {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
-  packageType: FedexPackageType;
 };
 
 export type FedexRequestedPackageLineItem = {
@@ -159,7 +158,6 @@ const roundPackageDimensions = (
   lengthCm: Math.ceil(values.lengthCm),
   widthCm: Math.ceil(values.widthCm),
   heightCm: Math.ceil(values.heightCm),
-  packageType: "YOUR_PACKAGING",
 });
 
 const assertFedexLimits = (

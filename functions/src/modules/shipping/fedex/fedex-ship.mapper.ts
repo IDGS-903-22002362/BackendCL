@@ -1,4 +1,5 @@
 import { getFedexConfig } from "./fedex.config";
+import { normalizeMxStateForFedEx } from "./fedex-address.helper";
 import {
   FedexCancelShipmentNormalizedResult,
   FedexCancelShipmentProviderResponse,
@@ -108,13 +109,13 @@ export const getFedexShipperConfig = (): FedexShipContactAddress => {
     phone: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_PHONE")).replace(/\D/g, ""),
     email: cleanOptionalText(process.env.FEDEX_SHIPPER_EMAIL),
     streetLines: streetLines.map(cleanFedexText),
-    city: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_CITY")),
-    stateOrProvinceCode: cleanFedexText(
+    city: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_CITY")).replace(" de los Aldama", ""),
+    stateOrProvinceCode: normalizeMxStateForFedEx(cleanFedexText(
       readRequiredShipperEnv(
         "FEDEX_SHIPPER_STATE_OR_PROVINCE_CODE",
         "FEDEX_SHIPPER_STATE",
       ),
-    ),
+    )) || "GT",
     postalCode: cleanFedexText(readRequiredShipperEnv("FEDEX_SHIPPER_POSTAL_CODE")),
     countryCode: cleanFedexText(
       readRequiredShipperEnv("FEDEX_SHIPPER_COUNTRY_CODE"),

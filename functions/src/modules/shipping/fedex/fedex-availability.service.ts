@@ -1,6 +1,7 @@
 import { fedexClient } from "./fedex-client";
 import { getFedexConfig } from "./fedex.config";
 import { FedexRateQuoteInput } from "./fedex-rates.types";
+import { normalizeMxStateForFedEx } from "./fedex-address.helper";
 
 const FEDEX_AVAILABILITY_PATH = "/availability/v1/transittimes";
 
@@ -17,10 +18,14 @@ export class FedexAvailabilityService {
       origin: {
         postalCode: input.origin.postalCode,
         countryCode: input.origin.countryCode,
+        ...(input.origin.stateOrProvinceCode ? { stateOrProvinceCode: normalizeMxStateForFedEx(input.origin.stateOrProvinceCode) } : {}),
+        ...(input.origin.city ? { city: input.origin.city.replace(" de los Aldama", "") } : {}),
       },
       destination: {
         postalCode: input.destination.postalCode,
         countryCode: input.destination.countryCode,
+        ...(input.destination.stateOrProvinceCode ? { stateOrProvinceCode: normalizeMxStateForFedEx(input.destination.stateOrProvinceCode) } : {}),
+        ...(input.destination.city ? { city: input.destination.city.replace(" de los Aldama", "") } : {}),
       },
       shipDateStamp: input.shipDate,
       carrierCodes: ["FDXE", "FDXG"],
@@ -58,11 +63,16 @@ export class FedexAvailabilityService {
 
       return validOptions;
     } catch (error: any) {
-      console.error("[FedEx Service Availability Error]", {
-        message: error.message,
-        code: (error.errors as any)?.[0]?.code || error.status,
-        transactionId: error.fedexTransactionId,
-        errors: error.errors,
+      console.error("[FedEx Error Raw]", {
+        source: "SERVICE_AVAILABILITY",
+        status: error?.originalError?.response?.status || error?.status,
+        statusText: error?.originalError?.response?.statusText,
+        transactionId:
+          error?.originalError?.response?.headers?.["x-customer-transaction-id"] ||
+          error?.originalError?.response?.headers?.["x-fedex-transaction-id"] ||
+          error?.fedexTransactionId,
+        data: error?.originalError?.response?.data,
+        message: error?.message,
       });
       throw error;
     }

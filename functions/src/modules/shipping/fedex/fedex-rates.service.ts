@@ -112,11 +112,16 @@ export class FedexRatesService {
         requestPayload,
       );
     } catch (error: any) {
-      console.error("[FedEx Rate API Error]", {
-        message: error.message,
-        code: (error.errors as any)?.[0]?.code || error.status,
-        transactionId: error.fedexTransactionId,
-        errors: error.errors,
+      console.error("[FedEx Error Raw]", {
+        source: "RATE_API",
+        status: error?.originalError?.response?.status || error?.status,
+        statusText: error?.originalError?.response?.statusText,
+        transactionId:
+          error?.originalError?.response?.headers?.["x-customer-transaction-id"] ||
+          error?.originalError?.response?.headers?.["x-fedex-transaction-id"] ||
+          error?.fedexTransactionId,
+        data: error?.originalError?.response?.data,
+        message: error?.message,
       });
       throw error;
     }
