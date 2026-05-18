@@ -40,6 +40,12 @@ describe("FedEx rates service", () => {
     process.env.FEDEX_CLIENT_ID = "client-id";
     process.env.FEDEX_CLIENT_SECRET = "client-secret";
     process.env.FEDEX_ACCOUNT_NUMBER = "740561073";
+    delete process.env.FEDEX_SERVICE_TYPE;
+    jest.spyOn(console, "log").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   afterAll(() => {
@@ -75,8 +81,15 @@ describe("FedEx rates service", () => {
       "/rate/v1/rates/quotes",
       expect.objectContaining({
         accountNumber: { value: "740561073" },
+        requestedShipment: expect.objectContaining({
+          packagingType: "YOUR_PACKAGING",
+          pickupType: "USE_SCHEDULED_PICKUP",
+          totalPackageCount: 1,
+        }),
       }),
     );
+    const payload = client.post.mock.calls[0][1] as any;
+    expect(payload.requestedShipment.serviceType).toBeUndefined();
     expect(result).toMatchObject({
       ok: true,
       provider: "FEDEX",

@@ -11,6 +11,8 @@ import {
   FedexRatePackageInput,
   FedexRateQuoteInput,
 } from "./fedex/fedex-rates.types";
+import { FedexProviderError } from "./fedex/fedex.errors";
+import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
 import { fedexRatesService } from "./fedex/fedex-rates.service";
 import {
   buildFedexPackageLineItemsFromCart,
@@ -237,10 +239,23 @@ export class ShippingQuoteService {
       packages,
       shipDate: new Date().toISOString().slice(0, 10),
       currency: "MXN",
-      rateRequestTypes: ["ACCOUNT"],
+      rateRequestTypes: ["ACCOUNT", "LIST"],
     };
 
-    const quote = await this.ratesService.quoteRates(quoteInput);
+    let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;
+    try {
+      quote = await this.ratesService.quoteRates(quoteInput);
+    } catch (error) {
+      if (error instanceof FedexProviderError) {
+        throw new ShippingQuoteError(error.message, 422);
+      }
+
+      if (error instanceof FedexRateRequestConfigError) {
+        throw new ShippingQuoteError(error.message, error.statusCode);
+      }
+
+      throw error;
+    }
     const options: ShippingQuoteOption[] = quote.options.map((option) => ({
       ...option,
       optionId: option.optionId || buildOptionId(option),

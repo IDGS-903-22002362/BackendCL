@@ -390,6 +390,7 @@ export const createFedexShippingQuote = async (req: Request, res: Response) => {
 
     return res.status(statusCode).json({
       success: false,
+      provider: "FEDEX",
       message:
         error instanceof Error
           ? error.message

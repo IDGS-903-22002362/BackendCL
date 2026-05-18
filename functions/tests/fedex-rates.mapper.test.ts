@@ -46,6 +46,7 @@ describe("FedEx rates mapper", () => {
     process.env.FEDEX_CLIENT_ID = "client-id";
     process.env.FEDEX_CLIENT_SECRET = "client-secret";
     process.env.FEDEX_ACCOUNT_NUMBER = "740561073";
+    delete process.env.FEDEX_SERVICE_TYPE;
   });
 
   afterAll(() => {
@@ -94,10 +95,11 @@ describe("FedEx rates mapper", () => {
     expect(request.accountNumber.value).toBe(getFedexConfig().accountNumber);
     expect(request.rateRequestControlParameters.returnTransitTimes).toBe(true);
     expect(request.requestedShipment.pickupType).toBe(
-      "DROPOFF_AT_FEDEX_LOCATION",
+      "USE_SCHEDULED_PICKUP",
     );
     expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
     expect(request.requestedShipment.preferredCurrency).toBe("MXN");
+    expect(request.requestedShipment.totalPackageCount).toBe(1);
   });
 
   it("rounds package dimensions and weight for FedEx", () => {
@@ -113,7 +115,7 @@ describe("FedEx rates mapper", () => {
     });
   });
 
-  it("omits serviceType unless provided", () => {
+  it("omits serviceType unless FEDEX_SERVICE_TYPE is configured", () => {
     expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
 
     expect(
@@ -121,7 +123,25 @@ describe("FedEx rates mapper", () => {
         ...baseInput,
         serviceType: "FEDEX_EXPRESS_SAVER",
       }).requestedShipment.serviceType,
-    ).toBe("FEDEX_EXPRESS_SAVER");
+    ).toBeUndefined();
+
+    for (const emptyValue of ["", " ", "null", "undefined"]) {
+      process.env.FEDEX_SERVICE_TYPE = emptyValue;
+      expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
+    }
+
+    process.env.FEDEX_SERVICE_TYPE = " fedex_express_saver ";
+    expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBe(
+      "FEDEX_EXPRESS_SAVER",
+    );
+  });
+
+  it("rejects invalid FEDEX_SERVICE_TYPE values", () => {
+    process.env.FEDEX_SERVICE_TYPE = "FEDEX EXPRESS SAVER";
+
+    expect(() => mapFedexRateRequest(baseInput)).toThrow(
+      "Invalid FedEx environment variable: FEDEX_SERVICE_TYPE",
+    );
   });
 
   it("normalizes response, prefers ACCOUNT, filters invalid amounts, and sorts", () => {

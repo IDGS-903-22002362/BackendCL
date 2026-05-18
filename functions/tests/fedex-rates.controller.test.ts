@@ -48,11 +48,11 @@ describe("shipping.controller FedEx rates", () => {
 
     await quoteFedexRates(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(502);
+    expect(res.status).toHaveBeenCalledWith(422);
     expect(res.json).toHaveBeenCalledWith({
       ok: false,
       provider: "FEDEX",
-      message: "No fue posible cotizar el envío con FedEx",
+      message: "Invalid destination",
       details: "Invalid destination",
     });
     expect(JSON.stringify((res.json as jest.Mock).mock.calls[0][0])).not.toContain(

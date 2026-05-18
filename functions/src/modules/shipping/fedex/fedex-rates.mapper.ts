@@ -22,12 +22,13 @@ type FedexRateRequestPayload = {
     recipient: {
       address: Record<string, unknown>;
     };
-    pickupType: "DROPOFF_AT_FEDEX_LOCATION";
+    pickupType: "USE_SCHEDULED_PICKUP";
     serviceType?: string;
     packagingType: "YOUR_PACKAGING";
     rateRequestType: string[];
     preferredCurrency: string;
     shipDateStamp: string;
+    totalPackageCount: number;
     requestedPackageLineItems: Array<{
       groupPackageCount: number;
       weight: {
@@ -47,9 +48,40 @@ type FedexRateRequestPayload = {
   };
 };
 
+export class FedexRateRequestConfigError extends Error {
+  statusCode = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "FedexRateRequestConfigError";
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
 const roundWeight = (value: number): number => Math.round(value * 100) / 100;
 
 const roundDimension = (value: number): number => Math.max(1, Math.ceil(value));
+
+const readConfiguredServiceType = (): string | undefined => {
+  const rawValue = process.env.FEDEX_SERVICE_TYPE?.trim();
+
+  if (
+    !rawValue ||
+    rawValue.toLowerCase() === "null" ||
+    rawValue.toLowerCase() === "undefined"
+  ) {
+    return undefined;
+  }
+
+  const serviceType = rawValue.toUpperCase();
+  if (!/^[A-Z0-9_]+$/.test(serviceType)) {
+    throw new FedexRateRequestConfigError(
+      "Invalid FedEx environment variable: FEDEX_SERVICE_TYPE",
+    );
+  }
+
+  return serviceType;
+};
 
 const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => ({
   postalCode: address.postalCode,
@@ -65,7 +97,7 @@ const mapPackage = (item: FedexRatePackageInput) => ({
   groupPackageCount: 1,
   weight: {
     units: "KG" as const,
-    value: roundWeight(item.weightKg),
+    value: Math.max(0.01, roundWeight(item.weightKg)),
   },
   dimensions: {
     length: roundDimension(item.lengthCm),
@@ -79,6 +111,8 @@ export const mapFedexRateRequest = (
   input: FedexRateQuoteInput,
 ): FedexRateRequestPayload => {
   const config = getFedexConfig();
+  const requestedPackageLineItems = input.packages.map(mapPackage);
+  const serviceType = readConfiguredServiceType();
 
   return {
     accountNumber: {
@@ -91,13 +125,14 @@ export const mapFedexRateRequest = (
       recipient: {
         address: mapAddress(input.destination),
       },
-      pickupType: "DROPOFF_AT_FEDEX_LOCATION",
-      ...(input.serviceType ? { serviceType: input.serviceType } : {}),
+      pickupType: "USE_SCHEDULED_PICKUP",
+      ...(serviceType ? { serviceType } : {}),
       packagingType: "YOUR_PACKAGING",
       rateRequestType: input.rateRequestTypes,
       preferredCurrency: input.currency,
       shipDateStamp: input.shipDate,
-      requestedPackageLineItems: input.packages.map(mapPackage),
+      totalPackageCount: requestedPackageLineItems.length,
+      requestedPackageLineItems,
     },
     rateRequestControlParameters: {
       returnTransitTimes: true,

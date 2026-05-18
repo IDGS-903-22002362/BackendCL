@@ -1,4 +1,5 @@
 import { ShippingQuoteService } from "../src/modules/shipping/shipping-quote.service";
+import { FedexProviderError } from "../src/modules/shipping/fedex/fedex.errors";
 
 const originalEnv = { ...process.env };
 
@@ -115,6 +116,7 @@ describe("ShippingQuoteService FedEx packages", () => {
 
     expect(ratesService.quoteRates).toHaveBeenCalledWith(
       expect.objectContaining({
+        rateRequestTypes: ["ACCOUNT", "LIST"],
         packages: [
           { weightKg: 0.9, lengthCm: 20, widthCm: 20, heightCm: 20 },
         ],
@@ -171,6 +173,43 @@ describe("ShippingQuoteService FedEx packages", () => {
     ).rejects.toMatchObject({
       name: "ShippingQuoteError",
       code: "FEDEX_PRODUCT_DIMENSIONS_MISSING",
+      statusCode: 422,
+    });
+  });
+
+  it("wraps FedEx provider rate errors as controlled quote errors", async () => {
+    const { db } = buildDb({
+      descripcion: "Tarro grande",
+      categoriaId: "tarros",
+      activo: true,
+      fedexShipping: {
+        enabled: true,
+        weightKg: 0.9,
+        lengthCm: 20,
+        widthCm: 20,
+        heightCm: 20,
+      },
+    });
+    const ratesService = {
+      quoteRates: jest.fn().mockRejectedValue(
+        new FedexProviderError({
+          provider: "FEDEX",
+          status: 400,
+          message: "Invalid service and packaging combination",
+        }),
+      ),
+    };
+    const service = new ShippingQuoteService(db as any, ratesService as any);
+
+    await expect(
+      service.createFedexCartQuote({
+        userId: "user_1",
+        cart,
+        direccionEnvio: address,
+      }),
+    ).rejects.toMatchObject({
+      name: "ShippingQuoteError",
+      message: "Invalid service and packaging combination",
       statusCode: 422,
     });
   });

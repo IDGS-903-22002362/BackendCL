@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { FedexProviderError } from "./fedex/fedex.errors";
+import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
 import { fedexAddressService } from "./fedex/fedex-address.service";
 import {
   fedexRatesService,
@@ -37,11 +38,19 @@ export const quoteFedexRates = async (req: Request, res: Response) => {
     }
 
     if (error instanceof FedexProviderError) {
-      return res.status(502).json({
+      return res.status(422).json({
         ok: false,
         provider: "FEDEX",
-        message: "No fue posible cotizar el envío con FedEx",
+        message: error.message,
         details: error.message,
+      });
+    }
+
+    if (error instanceof FedexRateRequestConfigError) {
+      return res.status(error.statusCode).json({
+        ok: false,
+        provider: "FEDEX",
+        message: error.message,
       });
     }
 

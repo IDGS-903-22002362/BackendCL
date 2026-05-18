@@ -54,12 +54,40 @@ const createOptionId = (option: {
     .digest("hex")
     .slice(0, 24);
 
+const logSafeRatePayload = (
+  payload: ReturnType<typeof mapFedexRateRequest>,
+): void => {
+  const shipment = payload.requestedShipment;
+
+  console.log("fedex_rate_request_payload_summary", {
+    packagingType: shipment.packagingType,
+    hasServiceType: Boolean(shipment.serviceType),
+    pickupType: shipment.pickupType,
+    origin: {
+      countryCode: shipment.shipper.address.countryCode,
+      postalCode: shipment.shipper.address.postalCode,
+    },
+    destination: {
+      countryCode: shipment.recipient.address.countryCode,
+      postalCode: shipment.recipient.address.postalCode,
+    },
+    totalPackageCount: shipment.totalPackageCount,
+    packages: shipment.requestedPackageLineItems.map((item) => ({
+      groupPackageCount: item.groupPackageCount,
+      weight: item.weight,
+      dimensions: item.dimensions,
+    })),
+  });
+};
+
 export class FedexRatesService {
   constructor(private readonly client: FedexClientLike = fedexClient) {}
 
   async quoteRates(input: FedexRateQuoteInput): Promise<FedexRateQuoteResult> {
     const config = getFedexConfig();
     const requestPayload = mapFedexRateRequest(input);
+    logSafeRatePayload(requestPayload);
+
     const response = await this.client.post<FedexRateResponse>(
       FEDEX_RATES_PATH,
       requestPayload,
