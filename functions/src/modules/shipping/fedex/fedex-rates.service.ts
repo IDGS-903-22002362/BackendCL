@@ -110,28 +110,17 @@ export class FedexRatesService {
     const requestPayload = mapFedexRateRequest(input);
     logSafeRatePayload(requestPayload);
 
-    console.log("[FedEx Address Debug]", JSON.stringify({
-      origin: {
-        city: requestPayload.requestedShipment?.shipper?.address?.city,
-        stateOrProvinceCode: requestPayload.requestedShipment?.shipper?.address?.stateOrProvinceCode,
-        postalCode: requestPayload.requestedShipment?.shipper?.address?.postalCode,
-        countryCode: requestPayload.requestedShipment?.shipper?.address?.countryCode,
-        residential: requestPayload.requestedShipment?.shipper?.address?.residential,
+    const recipient = requestPayload.requestedShipment.recipient;
+    console.log("[FedEx Rate Recipient From Validation]", JSON.stringify({
+      recipientAddress: {
+        streetLines: recipient.address.streetLines,
+        city: recipient.address.city,
+        stateOrProvinceCode: recipient.address.stateOrProvinceCode,
+        postalCode: recipient.address.postalCode,
+        countryCode: recipient.address.countryCode,
+        residential: recipient.address.residential,
       },
-      destination: {
-        city: requestPayload.requestedShipment?.recipient?.address?.city,
-        stateOrProvinceCode: requestPayload.requestedShipment?.recipient?.address?.stateOrProvinceCode,
-        postalCode: requestPayload.requestedShipment?.recipient?.address?.postalCode,
-        countryCode: requestPayload.requestedShipment?.recipient?.address?.countryCode,
-        residential: requestPayload.requestedShipment?.recipient?.address?.residential,
-      },
-      recipientContact: {
-        hasPhone: Boolean(requestPayload.requestedShipment?.recipient?.contact?.phoneNumber),
-        phoneNumber: requestPayload.requestedShipment?.recipient?.contact?.phoneNumber,
-      },
-      streetLines: requestPayload.requestedShipment?.recipient?.address?.streetLines,
-      requestedPackageLineItems:
-        requestPayload.requestedShipment?.requestedPackageLineItems,
+      phoneNumber: recipient.contact?.phoneNumber,
     }, null, 2));
 
     let response: FedexRateResponse;
@@ -141,21 +130,18 @@ export class FedexRatesService {
         requestPayload,
       );
     } catch (error: any) {
-      const response = error?.response || error?.originalError?.response;
-      console.error("[FedEx Error Raw]", JSON.stringify({
-        source: "RATE_API",
-        status: response?.status || error?.status,
-        statusText: response?.statusText,
+      console.error("[FedEx Rate Error Raw]", JSON.stringify({
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
         transactionId:
-          response?.data?.transactionId ||
-          response?.headers?.["x-customer-transaction-id"] ||
-          response?.headers?.["x-fedex-transaction-id"] ||
-          error?.fedexTransactionId,
-        data: response?.data,
-        errors: response?.data?.errors || error?.errors,
+          error?.response?.data?.transactionId ||
+          error?.response?.headers?.["x-customer-transaction-id"] ||
+          error?.response?.headers?.["x-fedex-transaction-id"],
+        data: error?.response?.data,
+        errors: error?.response?.data?.errors,
         message:
-          response?.data?.errors?.[0]?.message ||
-          response?.data?.message ||
+          error?.response?.data?.errors?.[0]?.message ||
+          error?.response?.data?.message ||
           error?.message,
       }, null, 2));
       throw error;

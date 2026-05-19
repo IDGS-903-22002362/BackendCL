@@ -1,9 +1,5 @@
 import { getFedexConfig } from "./fedex.config";
 import {
-  normalizeFedExCity,
-  normalizeMxStateForFedEx,
-} from "./fedex-address.helper";
-import {
   FedexMoney,
   FedexRateAddressInput,
   FedexRateOption,
@@ -119,31 +115,37 @@ export function normalizeMxPhoneForFedEx(value?: string | null): string | undefi
 
 const cleanStreetLines = (streetLines?: string[]): string[] | undefined => {
   const cleaned = (streetLines || [])
-    .map((value) => value?.trim())
+    .map((value) => cleanFedexText(value))
     .filter((value): value is string => Boolean(value));
 
   return cleaned.length > 0 ? cleaned : undefined;
 };
 
+const cleanFedexText = (value?: string | null): string | undefined => {
+  const cleaned = value?.trim().replace(/\s+/g, " ");
+  return cleaned || undefined;
+};
+
 const mapAddress = (address: FedexRateAddressInput): Record<string, unknown> => {
-  const isMX = address.countryCode.toUpperCase() === "MX";
   const streetLines = cleanStreetLines(address.streetLines);
+  const city = cleanFedexText(address.city);
+  const stateOrProvinceCode = cleanFedexText(address.stateOrProvinceCode);
+  const postalCode = cleanFedexText(address.postalCode);
+  const countryCode = cleanFedexText(address.countryCode)?.toUpperCase();
 
   return {
     ...(streetLines ? { streetLines } : {}),
-    postalCode: address.postalCode,
-    countryCode: address.countryCode,
+    ...(postalCode ? { postalCode } : {}),
+    ...(countryCode ? { countryCode } : {}),
     residential: address.residential,
-    ...(address.city ? { city: normalizeFedExCity(address.city) } : {}),
-    ...(address.stateOrProvinceCode
-      ? { stateOrProvinceCode: isMX ? normalizeMxStateForFedEx(address.stateOrProvinceCode) : address.stateOrProvinceCode }
-      : {}),
+    ...(city ? { city } : {}),
+    ...(stateOrProvinceCode ? { stateOrProvinceCode } : {}),
   };
 };
 
 const mapContact = (address: FedexRateAddressInput): Record<string, unknown> | undefined => {
   const phoneNumber = normalizeMxPhoneForFedEx(address.contact?.phoneNumber);
-  const personName = address.contact?.personName?.trim();
+  const personName = cleanFedexText(address.contact?.personName);
 
   if (!phoneNumber && !personName) {
     return undefined;

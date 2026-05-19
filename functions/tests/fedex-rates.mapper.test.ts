@@ -111,12 +111,12 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.carrierCodes).toBeUndefined();
   });
 
-  it("normalizes FedEx city names without adding carrierCodes in Caso A", () => {
+  it("preserves FedEx-resolved city names without adding carrierCodes", () => {
     const request = mapFedexRateRequest({
       ...baseInput,
       origin: {
         ...baseInput.origin,
-        city: "León de los Aldama",
+        city: "  Leon   de los Aldama  ",
       },
       destination: {
         ...baseInput.destination,
@@ -125,10 +125,10 @@ describe("FedEx rates mapper", () => {
     });
 
     expect(request.requestedShipment.shipper.address).toMatchObject({
-      city: "Leon",
+      city: "Leon de los Aldama",
     });
     expect(request.requestedShipment.recipient.address).toMatchObject({
-      city: "Leon",
+      city: "Leon, GTO",
     });
     expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
     expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
@@ -156,7 +156,7 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.carrierCodes).toBeUndefined();
   });
 
-  it("includes normalized MX state in Caso B without adding serviceType or carrierCodes", () => {
+  it("preserves FedEx-resolved MX state without adding serviceType or carrierCodes", () => {
     const request = mapFedexRateRequest({
       ...baseInput,
       origin: {
@@ -175,13 +175,13 @@ describe("FedEx rates mapper", () => {
 
     expect(request.requestedShipment.shipper.address).toMatchObject({
       city: "Leon",
-      stateOrProvinceCode: "GT",
+      stateOrProvinceCode: "Guanajuato",
       postalCode: "37500",
       countryCode: "MX",
     });
     expect(request.requestedShipment.recipient.address).toMatchObject({
       city: "Leon",
-      stateOrProvinceCode: "GT",
+      stateOrProvinceCode: "GTO",
       postalCode: "37208",
       countryCode: "MX",
     });

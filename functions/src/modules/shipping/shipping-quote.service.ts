@@ -17,21 +17,19 @@ import {
   normalizeMxPhoneForFedEx,
 } from "./fedex/fedex-rates.mapper";
 import { fedexRatesService } from "./fedex/fedex-rates.service";
-import { fedexAvailabilityService } from "./fedex/fedex-availability.service";
 import {
   buildFedexPackageLineItemsFromCart,
   FedexProductPackageInput,
   FedexPackageValidationError,
 } from "./fedex/fedex-package-normalizer";
 import { fedexAddressService } from "./fedex/fedex-address.service";
-import {
-  normalizeFedExCity,
-  normalizeMxStateForFedEx,
-} from "./fedex/fedex-address.helper";
+import { FedexNormalizedAddress } from "./fedex/fedex-address.types";
 
 const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
 const QUOTE_TTL_MS = 20 * 60 * 1000;
+const ADDRESS_VALIDATION_ERROR_MESSAGE =
+  "FedEx no pudo validar la dirección de entrega. Revisa calle, colonia, ciudad y código postal.";
 
 export class ShippingQuoteError extends Error {
   statusCode: number;
@@ -116,24 +114,67 @@ const normalizeCartForHash = (cart: Carrito) => ({
 export const buildShippingCartHash = (cart: Carrito): string =>
   hashObject(normalizeCartForHash(cart));
 
-const buildDestination = (address: DireccionEnvio): FedexRateAddressInput => ({
-  postalCode: address.codigoPostal,
-  city: normalizeFedExCity(address.ciudad),
-  stateOrProvinceCode: address.estado,
-  countryCode: "MX",
-  residential: true,
-  streetLines: [
+const cleanText = (value?: string | null): string | undefined => {
+  const cleaned = value?.trim().replace(/\s+/g, " ");
+  return cleaned || undefined;
+};
+
+const cleanStreetLines = (streetLines: Array<string | undefined>): string[] =>
+  streetLines
+    .map(cleanText)
+    .filter((value): value is string => Boolean(value));
+
+const buildAddressValidationStreetLines = (address: DireccionEnvio): string[] =>
+  cleanStreetLines([
     `${address.calle} ${address.numero}`,
     address.numeroInterior
       ? `${address.colonia} Int ${address.numeroInterior}`
       : address.colonia,
     address.referencias,
-  ]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value)),
+  ]);
+
+const buildDestinationValidationInput = (address: DireccionEnvio) => ({
+  address: {
+    streetLines: buildAddressValidationStreetLines(address),
+    ...(cleanText(address.ciudad) ? { city: cleanText(address.ciudad) } : {}),
+    ...(cleanText(address.estado)
+      ? { stateOrProvinceCode: cleanText(address.estado) }
+      : {}),
+    ...(cleanText(address.codigoPostal)
+      ? { postalCode: cleanText(address.codigoPostal) }
+      : {}),
+    countryCode: "MX",
+    residential: true,
+  },
+});
+
+const isUsableResolvedAddress = (
+  address: FedexNormalizedAddress | undefined,
+): address is FedexNormalizedAddress =>
+  Boolean(
+    address &&
+      cleanStreetLines(address.streetLines).length > 0 &&
+      cleanText(address.city) &&
+      cleanText(address.postalCode) &&
+      cleanText(address.countryCode),
+  );
+
+const buildDestinationFromResolvedAddress = (
+  resolvedAddress: FedexNormalizedAddress,
+  rawAddress: DireccionEnvio,
+): FedexRateAddressInput => ({
+  postalCode: cleanText(resolvedAddress.postalCode) || "",
+  city: cleanText(resolvedAddress.city),
+  stateOrProvinceCode: cleanText(resolvedAddress.stateOrProvinceCode),
+  countryCode: "MX",
+  residential:
+    typeof resolvedAddress.residential === "boolean"
+      ? resolvedAddress.residential
+      : true,
+  streetLines: cleanStreetLines(resolvedAddress.streetLines),
   contact: {
-    personName: address.nombre,
-    phoneNumber: normalizeMxPhoneForFedEx(address.telefono),
+    personName: cleanText(rawAddress.nombre),
+    phoneNumber: normalizeMxPhoneForFedEx(rawAddress.telefono),
   },
 });
 
@@ -141,7 +182,7 @@ const buildOrigin = (): FedexRateAddressInput => {
   const shipper = getFedexShipperConfig();
   return {
     postalCode: shipper.postalCode,
-    city: normalizeFedExCity(shipper.city),
+    city: shipper.city,
     stateOrProvinceCode: shipper.stateOrProvinceCode,
     countryCode: shipper.countryCode,
     residential: false,
@@ -162,40 +203,6 @@ const buildOptionId = (option: FedexRateOption): string =>
     )
     .digest("hex")
     .slice(0, 24);
-
-const withoutStateOrProvinceCode = (
-  input: FedexRateQuoteInput,
-): FedexRateQuoteInput => ({
-  ...input,
-  origin: {
-    ...input.origin,
-    stateOrProvinceCode: undefined,
-  },
-  destination: {
-    ...input.destination,
-    stateOrProvinceCode: undefined,
-  },
-});
-
-const withNormalizedStateOrProvinceCode = (
-  input: FedexRateQuoteInput,
-): FedexRateQuoteInput => ({
-  ...input,
-  origin: {
-    ...input.origin,
-    stateOrProvinceCode:
-      input.origin.countryCode.toUpperCase() === "MX"
-        ? normalizeMxStateForFedEx(input.origin.stateOrProvinceCode)
-        : input.origin.stateOrProvinceCode,
-  },
-  destination: {
-    ...input.destination,
-    stateOrProvinceCode:
-      input.destination.countryCode.toUpperCase() === "MX"
-        ? normalizeMxStateForFedEx(input.destination.stateOrProvinceCode)
-        : input.destination.stateOrProvinceCode,
-  },
-});
 
 export class ShippingQuoteService {
   constructor(
@@ -290,9 +297,44 @@ export class ShippingQuoteService {
 
     const cartHash = buildShippingCartHash(input.cart);
     const shipDate = new Date().toISOString().slice(0, 10);
+    const addressValidation = await fedexAddressService.validateAddress(
+      buildDestinationValidationInput(input.direccionEnvio),
+    );
+    const resolvedAddress =
+      addressValidation.isValid &&
+      isUsableResolvedAddress(addressValidation.resolvedAddress)
+        ? addressValidation.resolvedAddress
+        : undefined;
+    const warnings = addressValidation.warnings || [];
+
+    console.log("[FedEx Address Validation Result]", JSON.stringify({
+      inputPostalCode: input.direccionEnvio.codigoPostal,
+      inputCity: input.direccionEnvio.ciudad,
+      inputState: input.direccionEnvio.estado,
+      hasResolvedAddress: Boolean(resolvedAddress),
+      resolvedAddress: resolvedAddress
+        ? {
+            streetLines: resolvedAddress.streetLines,
+            city: resolvedAddress.city,
+            stateOrProvinceCode: resolvedAddress.stateOrProvinceCode,
+            postalCode: resolvedAddress.postalCode,
+            countryCode: resolvedAddress.countryCode,
+            residential: resolvedAddress.residential,
+          }
+        : null,
+      warnings,
+    }, null, 2));
+
+    if (!resolvedAddress) {
+      throw new ShippingQuoteError(ADDRESS_VALIDATION_ERROR_MESSAGE, 422);
+    }
+
     const quoteInput: FedexRateQuoteInput = {
       origin: buildOrigin(),
-      destination: buildDestination(input.direccionEnvio),
+      destination: buildDestinationFromResolvedAddress(
+        resolvedAddress,
+        input.direccionEnvio,
+      ),
       packages,
       shipDate,
       currency: "MXN",
@@ -300,87 +342,19 @@ export class ShippingQuoteService {
       useConfiguredServiceType: false,
     };
 
-    const [isOriginValid, isDestinationValid] = await Promise.all([
-      fedexAddressService.validatePostalCode({
-        role: "ORIGIN",
-        countryCode: quoteInput.origin.countryCode,
-        stateOrProvinceCode: quoteInput.origin.stateOrProvinceCode,
-        postalCode: quoteInput.origin.postalCode,
-        carrierCode: "FDXE",
-        shipDate,
-      }),
-      fedexAddressService.validatePostalCode({
-        role: "DESTINATION",
-        countryCode: quoteInput.destination.countryCode,
-        stateOrProvinceCode: quoteInput.destination.stateOrProvinceCode,
-        postalCode: quoteInput.destination.postalCode,
-        carrierCode: "FDXE",
-        shipDate,
-      })
-    ]);
-
-    if (!isOriginValid || !isDestinationValid) {
-      console.warn("[FedEx Postal Validation Warning]", {
-        originValid: isOriginValid,
-        destinationValid: isDestinationValid,
-        action: "CONTINUE_TO_RATE_API",
-      });
-    }
-
     let quote: Awaited<ReturnType<FedexRatesServiceLike["quoteRates"]>>;
     try {
-      // Caso A: Sin stateOrProvinceCode, sin serviceType, sin carrierCodes
-      quote = await this.ratesService.quoteRates(withoutStateOrProvinceCode(quoteInput));
-    } catch (errorA) {
-      console.warn("[FedEx Quote] Caso A sin estado falló, intentando Caso B con estado normalizado...");
-      const quoteInputB = withNormalizedStateOrProvinceCode(quoteInput);
-      
-      try {
-        // Caso B: Con stateOrProvinceCode normalizado, sin serviceType, sin carrierCodes
-        quote = await this.ratesService.quoteRates(quoteInputB);
-      } catch (errorB) {
-        console.warn("[FedEx Quote] Caso B con estado falló, consultando Service Availability para Caso C...");
-        
-        try {
-          const validOptions = await fedexAvailabilityService.checkAvailability(quoteInputB);
-          
-          if (!validOptions || validOptions.length === 0) {
-             throw new ShippingQuoteError(
-               "El destino o cuenta no tiene cobertura válida con YOUR_PACKAGING según Service Availability API. Verifica origen/destino.",
-               422
-             );
-          }
-          
-          const preferred = validOptions.find((o: any) => o.carrierCode === "FDXE") || validOptions[0];
-          console.log(`[FedEx Quote] Caso C usando: serviceType=${preferred.serviceType}, carrierCode=${preferred.carrierCode}`);
-          
-          const quoteInputC = {
-            ...quoteInputB,
-            serviceType: preferred.serviceType,
-            carrierCodes: preferred.carrierCode ? [preferred.carrierCode] : undefined,
-          };
-          
-          quote = await this.ratesService.quoteRates(quoteInputC);
-        } catch (errorC) {
-          console.error("[FedEx Quote] Todos los casos fallaron.");
-          
-          if (errorC instanceof ShippingQuoteError) {
-            throw errorC; // Lanzado por nosotros mismos (0 combinaciones)
-          }
-
-          const finalError = errorC instanceof Error ? errorC : errorB || errorA;
-
-          if (finalError instanceof FedexProviderError) {
-            throw new ShippingQuoteError(finalError.message, 422);
-          }
-
-          if (finalError instanceof FedexRateRequestConfigError) {
-            throw new ShippingQuoteError(finalError.message, finalError.statusCode);
-          }
-
-          throw finalError;
-        }
+      quote = await this.ratesService.quoteRates(quoteInput);
+    } catch (error) {
+      if (error instanceof FedexProviderError) {
+        throw new ShippingQuoteError(error.message, 422);
       }
+
+      if (error instanceof FedexRateRequestConfigError) {
+        throw new ShippingQuoteError(error.message, error.statusCode);
+      }
+
+      throw error;
     }
     const options: ShippingQuoteOption[] = quote.options.map((option) => ({
       ...option,

@@ -55,12 +55,34 @@ Impacto para frontend:
 - `selectedServiceType` queda solo como fallback de compatibilidad para crear la orden si no existe `optionId`; no debe usarse para forzar cotizaciones.
 - Un error `422` en cotizacion FedEx puede traer mensajes como `Invalid service and packaging combination`; mostrarlo como error de cotizacion recuperable, permitir revisar direccion o reintentar, y no cambiar flujos de pago.
 
+## Cambios nuevos: Address Validation antes de Rate API
+
+El endpoint real de checkout `POST /api/carrito/shipping/fedex/quotes` ahora llama FedEx Address Validation antes de llamar Rate API. Google Places sigue siendo util para UX/autocompletado, pero no es la fuente de verdad logistica para cotizar con FedEx.
+
+Flujo backend actual:
+
+1. Recibe `direccionEnvio` como hasta ahora.
+2. Construye una direccion destino minima y la manda a FedEx Address Validation.
+3. Si FedEx devuelve `resolvedAddress` usable, esa direccion resuelta se usa como `requestedShipment.recipient.address` en Rate API.
+4. Si FedEx devuelve warnings junto con una direccion usable, el backend registra los warnings y continua a Rate API.
+5. Si FedEx no devuelve direccion usable, el backend responde `422` y no se debe iniciar pago.
+
+Impacto para frontend:
+
+- Seguir usando Google Places solo para autocompletar y mejorar captura de direccion.
+- Seguir llamando `fedexApi.quoteCart(direccionEnvio)`; no llamar directo a FedEx.
+- No hardcodear normalizaciones como `Guanajuato -> GT` o `Leon de los Aldama -> Leon` en frontend.
+- No reemplazar manualmente ciudad/estado/CP antes de cotizar para "ayudar" a FedEx; el backend usara Address Validation como fuente de verdad.
+- Si `quoteCart` responde `422` con `"FedEx no pudo validar la dirección de entrega. Revisa calle, colonia, ciudad y código postal."`, mostrar ese mensaje o uno equivalente y mantener al usuario en edicion de direccion.
+- No iniciar Stripe, Aplazo ni crear orden si no hay `quoteId` y opcion FedEx seleccionada.
+- El telefono puede venir como `+52 477 353 8866`; el backend lo limpia a `4773538866` para FedEx. Aun asi, el formulario puede validar formato para UX.
+
 ### Implementacion en este frontend
 
 El frontend ya cuenta con `src/lib/api/fedex.ts`. El flujo debe usar `fedexApi.quoteCart(direccionEnvio)` para checkout real; esa funcion llama al route handler local de Next `/api/carrito/shipping/fedex/quotes`, que a su vez proxya al backend.
 
 1. Revisar que `buildFedExDireccionEnvio` en checkout construya solo datos del destinatario.
-2. Validar direccion con `fedexApi.validateAddress` si se desea normalizar antes de cotizar.
+2. Usar Google Places solo como ayuda de captura; no asumir que la direccion autocompletada tiene cobertura FedEx.
 3. Cotizar con `fedexApi.quoteCart(direccionEnvio)`.
 4. Mostrar opciones devueltas por backend y guardar `quoteId` mas `optionId`.
 5. Crear orden con `shippingQuoteId` y `selectedShippingOptionId`.
@@ -121,7 +143,8 @@ Checklist de migracion para estos cambios:
 - Confirmar que el payload de cotizacion de carrito no incluya `origin`, `packages`, `shipper`, `accountNumber`, `serviceType` ni `packagingType`.
 - Confirmar que el payload de checkout no incluya `costoEnvio`.
 - En errores `422` de cotizacion, mostrar el mensaje de backend y permitir reintentar/cambiar direccion; no iniciar pago sin cotizacion seleccionada.
-- En errores `502` de validacion de direccion, tratar como advertencia no bloqueante y continuar a cotizar si el formulario local es valido.
+- Eliminar normalizaciones frontend especificas para FedEx de ciudad/estado/CP; Address Validation del backend resuelve el destino para Rate API.
+- En errores `502` del endpoint opcional de validacion de direccion, tratar como advertencia no bloqueante y continuar a cotizar si el formulario local es valido.
 
 ## Reglas base
 
@@ -137,7 +160,7 @@ Checklist de migracion para estos cambios:
 ## Flujo cliente recomendado
 
 1. Capturar direccion de envio.
-2. Validar direccion con FedEx si se quiere normalizar antes de cotizar.
+2. Usar Google Places o validaciones locales solo para UX; FedEx Address Validation se ejecuta en backend durante la cotizacion real.
 3. Cotizar el carrito con `POST /api/carrito/shipping/fedex/quotes`.
 4. Mostrar opciones devueltas por backend.
 5. Guardar la opcion elegida por `optionId`; usar `serviceType` solo como fallback si no hay `optionId`.
@@ -156,7 +179,7 @@ Checklist de migracion para estos cambios:
 
 | Uso | Endpoint | Auth | Cuando usar |
 | --- | --- | --- | --- |
-| Validar direccion | `POST /api/shipping/fedex/address/validate` | No obligatoria | Antes de cotizar, para detectar direccion invalida o normalizada. |
+| Validar direccion | `POST /api/shipping/fedex/address/validate` | No obligatoria | Solo UX/precheck. La cotizacion real vuelve a validar en backend. |
 | Cotizacion generica FedEx | `POST /api/shipping/fedex/rates` | No obligatoria | Solo para pantallas genericas o pruebas controladas. |
 | Cotizacion real del carrito | `POST /api/carrito/shipping/fedex/quotes` | Cliente autenticado | Checkout. Es la ruta que debe usarse para cobrar envio. |
 | Crear orden desde carrito | `POST /api/carrito/checkout` | Cliente autenticado | Despues de elegir una cotizacion FedEx. |
@@ -167,6 +190,8 @@ Checklist de migracion para estos cambios:
 Endpoint:
 
 `POST /api/shipping/fedex/address/validate`
+
+Este endpoint es opcional para UX/precheck. No sustituye la validacion obligatoria que el backend ejecuta dentro de `POST /api/carrito/shipping/fedex/quotes`.
 
 Campos de entrada:
 
@@ -184,6 +209,7 @@ Reglas para Mexico:
 - Para `countryCode: "MX"`, no enviar `address.stateOrProvinceCode` desde checkout al endpoint de validacion. FedEx puede responder `GENERIC.ERROR` si se manda el nombre completo del estado o codigos como `GUA`/`GTO`.
 - Conservar el estado completo en `direccionEnvio.estado` para cotizacion de carrito y checkout; esta regla aplica solo al payload tecnico de `address/validate`.
 - Si la validacion de direccion devuelve `502`, tratarla como advertencia no bloqueante y continuar con la cotizacion real del carrito cuando el formulario local sea valido.
+- Aunque este precheck sea exitoso, siempre usar la respuesta de `quoteCart` como autoridad para habilitar seleccion de envio y pago.
 
 Respuesta util:
 
@@ -237,6 +263,8 @@ Endpoint principal para checkout:
 
 Enviar solo `direccionEnvio`. El backend toma los productos del carrito autenticado, calcula paquetes con peso/dimensiones, cotiza FedEx y guarda una cotizacion temporal.
 
+Antes de Rate API, el backend valida `direccionEnvio` con FedEx Address Validation. Si FedEx devuelve `resolvedAddress`, esa direccion resuelta se usa para `requestedShipment.recipient.address`; la direccion cruda de Google Places no se manda a Rate API como fuente final.
+
 El backend arma internamente el payload FedEx con `packagingType: "YOUR_PACKAGING"` y omite `serviceType` por defecto. El frontend no debe mandar `packagingType`, `serviceType`, paquetes ni origen en este endpoint.
 
 Payload interno esperado hacia FedEx, para referencia de debug:
@@ -244,7 +272,13 @@ Payload interno esperado hacia FedEx, para referencia de debug:
 ```ts
 requestedShipment = {
   shipper,
-  recipient,
+  recipient: {
+    contact: {
+      personName,
+      phoneNumber: "4773538866",
+    },
+    address: resolvedAddressFromFedExAddressValidation,
+  },
   pickupType: "USE_SCHEDULED_PICKUP",
   rateRequestType: ["ACCOUNT", "LIST"],
   packagingType: "YOUR_PACKAGING",
@@ -266,8 +300,22 @@ En logs de backend debe verse algo equivalente a:
 
 Formato requerido de `direccionEnvio`:
 
-- `telefono` debe enviarse como 10 digitos nacionales MX, sin `+52`, espacios, guiones ni parentesis. Ejemplo: `4773538866`.
-- Si Stripe Address Element devuelve `+52 477 353 8866`, el frontend debe normalizarlo antes de llamar a cotizacion o checkout.
+- `telefono` puede enviarse en formato nacional o con prefijo MX. Si llega como `+52 477 353 8866`, el backend lo limpia a `4773538866` antes de llamar FedEx.
+- `calle`, `numero`, `colonia`, `ciudad`, `estado` y `codigoPostal` deben venir desde el formulario/Google Places sin normalizaciones hardcodeadas para FedEx.
+- El backend elimina lineas vacias en `streetLines`; el frontend no necesita mandar campos tecnicos de FedEx.
+
+Ejemplo de direccion final que backend puede usar para Rate API despues de FedEx Address Validation:
+
+```ts
+recipient.address = {
+  streetLines: ["Puma 102", "Lomas de Echeveste"],
+  city: "LEON",
+  stateOrProvinceCode: "GT",
+  postalCode: "37208",
+  countryCode: "MX",
+  residential: true,
+}
+```
 
 Respuesta util para frontend:
 
@@ -291,6 +339,7 @@ Errores que el frontend debe manejar:
 | Carrito vacio | Regresar al carrito. |
 | Producto sin peso/dimensiones FedEx | Bloquear checkout con envio y avisar soporte/admin. |
 | Cotizacion no disponible | Permitir reintentar o cambiar direccion. |
+| FedEx no pudo validar direccion destino | Mostrar: "FedEx no pudo validar la dirección de entrega. Revisa calle, colonia, ciudad y código postal." No iniciar pago. |
 | FedEx devuelve `422` por combinacion servicio/empaque | Mostrar mensaje recuperable y permitir reintentar; no iniciar pago. |
 | FedEx devuelve `422` por cuenta, zona, CP, pickup o dimensiones | Mostrar el mensaje del backend, permitir corregir direccion/reintentar y escalar a admin si apunta a producto/configuracion. |
 | Cotizacion expirada | Recotizar. |
@@ -482,7 +531,7 @@ Campos principales:
 | `401` | Falta sesion. |
 | `403` | Usuario sin permisos. |
 | `409` | Cotizacion expirada, carrito cambio, guia no cancelable o conflicto de estado. |
-| `422` | FedEx no puede procesar la cotizacion, falta logistica del producto o hubo combinacion servicio/empaque invalida. Mostrar mensaje y permitir reintentar/cambiar direccion. |
+| `422` | FedEx no puede validar/procesar la cotizacion, falta logistica del producto o hubo combinacion servicio/empaque invalida. Mostrar mensaje y permitir reintentar/cambiar direccion; no iniciar pago. |
 | `429` | Rate limit; reintentar despues. |
 | `502` | En validacion de direccion: advertencia no bloqueante y continuar a cotizacion. En guia/tracking: FedEx rechazo o no respondio correctamente. |
 | `500` | Error interno. |
@@ -494,6 +543,8 @@ Campos principales:
 - Guardar y enviar `quoteId` mas `optionId`; usar `serviceType` solo como fallback legacy.
 - No enviar `serviceType`, `packagingType`, `origin`, `packages`, `shipper` ni `accountNumber` para cotizar carrito.
 - No agregar `FEDEX_SERVICE_TYPE` ni `FEDEX_ONE_RATE` a variables del frontend.
+- No normalizar manualmente ciudad/estado/CP para FedEx; Google Places es UX y Address Validation del backend es la fuente de verdad para Rate API.
+- Aceptar telefono con `+52`; backend lo limpia a 10 digitos para FedEx.
 - Recotizar si cambia direccion, carrito, cantidades o talla.
 - Crear la orden antes de iniciar Stripe o Aplazo.
 - No mostrar guia hasta que exista `trackingNumber`.
