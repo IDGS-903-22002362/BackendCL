@@ -139,6 +139,15 @@ export const direccionEnvioSchema = z
       .trim()
       .max(500, "Las referencias no pueden exceder 500 caracteres")
       .optional(),
+    addressValidationStatus: z
+      .enum([
+        "VALIDATED",
+        "SUGGESTED",
+        "USER_CONFIRMED",
+        "NOT_VALIDATED",
+        "VALIDATION_UNAVAILABLE",
+      ])
+      .optional(),
   })
   .strict();
 

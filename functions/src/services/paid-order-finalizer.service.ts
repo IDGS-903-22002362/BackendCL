@@ -10,6 +10,18 @@ import {
 const ORDENES_COLLECTION = "ordenes";
 const SHIPPING_EVENTS_COLLECTION = "shipping_events";
 
+const hasFedexTrackingLabel = (shipping: Orden["shipping"]): boolean => {
+  if (!shipping || shipping.provider !== "FEDEX") {
+    return false;
+  }
+
+  const fedexShipping = shipping as Record<string, unknown>;
+  return (
+    typeof fedexShipping.trackingNumber === "string" ||
+    fedexShipping.status === "LABEL_CREATED"
+  );
+};
+
 export interface FinalizePaidOrderInput {
   orderId: string;
   provider: "stripe" | "aplazo";
@@ -64,8 +76,7 @@ class PaidOrderFinalizerService {
     if (
       order.fulfillmentMethod === FulfillmentMethod.PICKUP ||
       order.shipping?.provider !== "FEDEX" ||
-      order.shipping?.trackingNumber ||
-      order.shipping?.status === "LABEL_CREATED"
+      hasFedexTrackingLabel(order.shipping)
     ) {
       return;
     }

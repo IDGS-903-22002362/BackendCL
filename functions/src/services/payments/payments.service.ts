@@ -352,6 +352,18 @@ export class PaymentsService {
         fulfillmentMethod: order.fulfillmentMethod || "DELIVERY",
         pickupLocationId: order.pickupLocationId || "",
         requestCurrency: requestCurrency || "MXN",
+        shippingProvider:
+          typeof order.shipping?.provider === "string" ? order.shipping.provider : "",
+        shippingServiceType:
+          typeof order.shipping?.serviceType === "string"
+            ? order.shipping.serviceType
+            : "",
+        carrierCode:
+          typeof order.shipping?.carrierCode === "string"
+            ? order.shipping.carrierCode
+            : "",
+        shippingTotal: String(order.costoEnvio || 0),
+        discountTotal: String(order.discountTotal || 0),
       },
       status: PaymentStatus.CREATED,
       rawCreateRequestSanitized: sanitizeForStorage({
@@ -1456,6 +1468,11 @@ export class PaymentsService {
     const items = await Promise.all(
       (order.items || []).map(async (item) => {
         const product = await productService.getProductById(item.productoId);
+        const checkoutItem = order.pricingSnapshot?.items?.find(
+          (pricingItem) =>
+            pricingItem.productId === item.productoId &&
+            (pricingItem.tallaId || "") === (item.tallaId || ""),
+        );
 
         return {
           productoId: item.productoId,
@@ -1463,9 +1480,34 @@ export class PaymentsService {
           precioUnitarioMinor: roundToMinor(item.precioUnitario),
           subtotalMinor: roundToMinor(item.subtotal),
           tallaId: item.tallaId,
-          name: product?.descripcion || item.productoId,
-          sku: product?.clave,
+          name: checkoutItem?.productName || product?.descripcion || item.productoId,
+          sku: checkoutItem?.sku || product?.clave,
           imageUrl: product?.imagenes?.[0],
+          precioUnitarioOriginalMinor:
+            typeof checkoutItem?.unitPriceOriginal === "number"
+              ? roundToMinor(checkoutItem.unitPriceOriginal)
+              : roundToMinor(item.precioUnitario),
+          precioUnitarioFinalMinor:
+            typeof checkoutItem?.unitPriceFinal === "number"
+              ? roundToMinor(checkoutItem.unitPriceFinal)
+              : roundToMinor(item.precioUnitario),
+          subtotalOriginalMinor:
+            typeof checkoutItem?.subtotalOriginal === "number"
+              ? roundToMinor(checkoutItem.subtotalOriginal)
+              : roundToMinor(item.subtotal),
+          subtotalFinalMinor:
+            typeof checkoutItem?.subtotalFinal === "number"
+              ? roundToMinor(checkoutItem.subtotalFinal)
+              : roundToMinor(item.subtotal),
+          discountMinor:
+            typeof checkoutItem?.discountTotal === "number"
+              ? roundToMinor(checkoutItem.discountTotal)
+              : 0,
+          weightKg: checkoutItem?.weightKg,
+          lengthCm: checkoutItem?.lengthCm,
+          widthCm: checkoutItem?.widthCm,
+          heightCm: checkoutItem?.heightCm,
+          requiresShipping: checkoutItem?.requiereEnvio,
         };
       }),
     );
@@ -1475,8 +1517,80 @@ export class PaymentsService {
       taxMinor: roundToMinor(order.impuestos),
       shippingMinor: roundToMinor(order.costoEnvio),
       totalMinor: roundToMinor(order.total),
-      currency: "MXN",
+      currency: order.currency || "MXN",
       items,
+      subtotalOriginalMinor:
+        typeof order.subtotalOriginal === "number"
+          ? roundToMinor(order.subtotalOriginal)
+          : roundToMinor(order.subtotal),
+      subtotalFinalMinor:
+        typeof order.subtotalFinal === "number"
+          ? roundToMinor(order.subtotalFinal)
+          : roundToMinor(order.subtotal),
+      discountMinor:
+        typeof order.discountTotal === "number"
+          ? roundToMinor(order.discountTotal)
+          : 0,
+      shipping: order.shipping
+        ? {
+            method:
+              typeof order.shipping.method === "string"
+                ? order.shipping.method
+                : undefined,
+            provider:
+              typeof order.shipping.provider === "string"
+                ? order.shipping.provider
+                : undefined,
+            serviceType:
+              typeof order.shipping.serviceType === "string"
+                ? order.shipping.serviceType
+                : undefined,
+            serviceName:
+              typeof order.shipping.serviceName === "string"
+                ? order.shipping.serviceName
+                : undefined,
+            carrierCode:
+              typeof order.shipping.carrierCode === "string"
+                ? order.shipping.carrierCode
+                : undefined,
+            packagingType:
+              typeof order.shipping.packagingType === "string"
+                ? order.shipping.packagingType
+                : undefined,
+            amountMinor: roundToMinor(order.costoEnvio),
+            currency: order.currency || "MXN",
+            transitTime:
+              typeof order.shipping.transitTime === "string"
+                ? order.shipping.transitTime
+                : undefined,
+            deliveryTimestamp:
+              typeof order.shipping.deliveryTimestamp === "string"
+                ? order.shipping.deliveryTimestamp
+                : undefined,
+            deliveryDayOfWeek:
+              typeof order.shipping.deliveryDayOfWeek === "string"
+                ? order.shipping.deliveryDayOfWeek
+                : undefined,
+            addressValidationStatus:
+              typeof order.shipping.addressValidationStatus === "string"
+                ? order.shipping.addressValidationStatus
+                : undefined,
+            rateTransactionId:
+              typeof order.shipping.rateTransactionId === "string"
+                ? order.shipping.rateTransactionId
+                : undefined,
+            availabilityTransactionId:
+              typeof order.shipping.availabilityTransactionId === "string"
+                ? order.shipping.availabilityTransactionId
+                : undefined,
+            quotedAt:
+              typeof order.shipping.quotedAt === "string"
+                ? order.shipping.quotedAt
+                : undefined,
+          }
+        : undefined,
+      warnings: order.pricingSnapshot?.warnings || [],
+      calculatedAt: order.pricingSnapshot?.calculatedAt,
     };
   }
 

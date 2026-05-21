@@ -1800,7 +1800,9 @@ const swaggerOptions: swaggerJsdoc.Options = {
   // Escanear archivos de rutas para extraer anotaciones JSDoc
   apis: [
     "./src/routes/*.routes.ts", // Para desarrollo local
+    "./src/modules/**/*.routes.ts", // Rutas modulares en desarrollo local
     "./lib/routes/*.routes.js", // Para producción (archivos compilados)
+    "./lib/modules/**/*.routes.js", // Rutas modulares compiladas
   ],
 };
 

@@ -18,6 +18,21 @@ import {
 } from "../../models/orden.model";
 import { pickupContactSchema } from "./orden.validator";
 
+const checkoutShippingSelectionSchema = z
+  .object({
+    method: z.enum(["PICKUP", "FEDEX", "MANUAL"]),
+    provider: z.literal("FEDEX").optional(),
+    serviceType: z.string().trim().min(1).max(120).optional(),
+    serviceName: z.string().trim().min(1).max(160).optional(),
+    carrierCode: z.string().trim().min(1).max(20).optional(),
+    packagingType: z.string().trim().min(1).max(80).optional(),
+    quotedAmount: z.number().nonnegative().optional(),
+    quotedCurrency: z.string().trim().min(3).max(3).optional(),
+    transitTime: z.string().trim().min(1).max(80).optional(),
+    deliveryTimestamp: z.string().trim().min(1).max(80).optional(),
+  })
+  .strict();
+
 /**
  * Schema para agregar un item al carrito
  * POST /api/carrito/items
@@ -147,6 +162,8 @@ export const checkoutCarritoSchema = z
 
     selectedServiceType: z.string().trim().min(1).max(120).optional(),
 
+    shippingSelection: checkoutShippingSelectionSchema.optional(),
+
     notas: z
       .string()
       .trim()
@@ -174,20 +191,27 @@ export const checkoutCarritoSchema = z
         });
       }
 
-      if (!data.shippingQuoteId) {
+      const shippingSelectionMethod = data.shippingSelection?.method;
+
+      if (!data.shippingQuoteId && shippingSelectionMethod !== "FEDEX") {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["shippingQuoteId"],
-          message: "shippingQuoteId es requerido para DELIVERY",
+          message:
+            "shippingQuoteId es requerido para DELIVERY salvo que uses shippingSelection FEDEX",
         });
       }
 
-      if (!data.selectedShippingOptionId && !data.selectedServiceType) {
+      if (
+        !data.selectedShippingOptionId &&
+        !data.selectedServiceType &&
+        !data.shippingSelection?.serviceType
+      ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["selectedShippingOptionId"],
           message:
-            "selectedShippingOptionId o selectedServiceType es requerido para DELIVERY",
+            "selectedShippingOptionId, selectedServiceType o shippingSelection.serviceType es requerido para DELIVERY",
         });
       }
     }

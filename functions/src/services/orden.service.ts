@@ -152,6 +152,12 @@ export class OrdenService {
       const itemsValidados: ItemOrden[] = [];
       let subtotalCalculado = 0;
       const requestedByVariant = new Map<string, number>();
+      const pricingItemsByVariant = new Map(
+        (data.pricingSnapshot?.items || []).map((item) => [
+          `${item.productId}::${item.tallaId ?? "__GLOBAL__"}`,
+          item,
+        ]),
+      );
       const fulfillmentMethod =
         data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
 
@@ -249,9 +255,18 @@ export class OrdenService {
         }
         requestedByVariant.set(variantKey, requestedTotal);
 
-        // Recalcular precios desde el servidor (SEGURIDAD: ignorar valores del cliente)
-        const precioUnitario = producto.precioPublico;
-        const subtotalItem = precioUnitario * item.cantidad;
+        // Preferir snapshot server-side de checkout cuando exista.
+        const pricingSnapshotItem = pricingItemsByVariant.get(
+          `${item.productoId}::${stockContext.tallaId ?? "__GLOBAL__"}`,
+        );
+        const precioUnitario =
+          typeof pricingSnapshotItem?.unitPriceFinal === "number"
+            ? pricingSnapshotItem.unitPriceFinal
+            : producto.precioPublico;
+        const subtotalItem =
+          typeof pricingSnapshotItem?.subtotalFinal === "number"
+            ? pricingSnapshotItem.subtotalFinal
+            : precioUnitario * item.cantidad;
 
         const itemValidado: ItemOrden = {
           productoId: item.productoId,
@@ -274,9 +289,13 @@ export class OrdenService {
       const costoEnvioCalculado =
         fulfillmentMethod === FulfillmentMethod.PICKUP
           ? 0
-          : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
+          : typeof data.pricingSnapshot?.shippingTotal === "number"
+            ? data.pricingSnapshot.shippingTotal
+            : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
       const totalCalculado =
-        subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
+        typeof data.pricingSnapshot?.total === "number"
+          ? data.pricingSnapshot.total
+          : subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
 
       console.log(`💰 Totales calculados:`);
       console.log(`   Subtotal: $${subtotalCalculado.toFixed(2)}`);
@@ -309,6 +328,21 @@ export class OrdenService {
           : {}),
         costoEnvio: costoEnvioCalculado,
         ...(data.shipping ? { shipping: data.shipping } : {}),
+        ...(data.pricingSnapshot ? { pricingSnapshot: data.pricingSnapshot } : {}),
+        ...(data.paymentMetadata ? { paymentMetadata: data.paymentMetadata } : {}),
+        ...(typeof data.discountTotal === "number"
+          ? { discountTotal: data.discountTotal }
+          : {}),
+        ...(typeof data.subtotalOriginal === "number"
+          ? { subtotalOriginal: data.subtotalOriginal }
+          : {}),
+        ...(typeof data.subtotalFinal === "number"
+          ? { subtotalFinal: data.subtotalFinal }
+          : {}),
+        ...(typeof data.shippingTotal === "number"
+          ? { shippingTotal: data.shippingTotal }
+          : {}),
+        ...(data.currency ? { currency: data.currency } : {}),
         notas: data.notas,
         createdAt: now,
         updatedAt: now,

@@ -100,6 +100,34 @@ export interface PaymentPricingSnapshotItem {
   name?: string;
   sku?: string;
   imageUrl?: string;
+  precioUnitarioOriginalMinor?: number;
+  precioUnitarioFinalMinor?: number;
+  subtotalOriginalMinor?: number;
+  subtotalFinalMinor?: number;
+  discountMinor?: number;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+  requiresShipping?: boolean;
+}
+
+export interface PaymentPricingSnapshotShipping {
+  method?: string;
+  provider?: string;
+  serviceType?: string;
+  serviceName?: string;
+  carrierCode?: string;
+  packagingType?: string;
+  amountMinor?: number;
+  currency?: string;
+  transitTime?: string;
+  deliveryTimestamp?: string;
+  deliveryDayOfWeek?: string;
+  addressValidationStatus?: string;
+  rateTransactionId?: string;
+  availabilityTransactionId?: string;
+  quotedAt?: string;
 }
 
 export interface PaymentPricingSnapshot {
@@ -109,6 +137,13 @@ export interface PaymentPricingSnapshot {
   totalMinor: number;
   currency: string;
   items: PaymentPricingSnapshotItem[];
+  subtotalOriginalMinor?: number;
+  subtotalFinalMinor?: number;
+  discountMinor?: number;
+  shipping?: PaymentPricingSnapshotShipping;
+  warnings?: string[];
+  calculatedAt?: string;
+  checkoutSnapshotId?: string;
 }
 
 export interface PaymentFinalizationState {

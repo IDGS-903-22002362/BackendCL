@@ -2,6 +2,119 @@ import { z } from "zod";
 
 export type FedexProvider = "FEDEX";
 
+export type FedexCarrierCode = "FDXE" | "FDXG" | "FXSP" | "FXCC";
+
+export type FedexRateRequestType =
+  | "ACCOUNT"
+  | "LIST"
+  | "PREFERRED"
+  | "INCENTIVE";
+
+export type FedexPickupType =
+  | "DROPOFF_AT_FEDEX_LOCATION"
+  | "CONTACT_FEDEX_TO_SCHEDULE"
+  | "USE_SCHEDULED_PICKUP"
+  | "ON_CALL"
+  | "PACKAGE_RETURN_PROGRAM"
+  | "REGULAR_STOP"
+  | "TAG";
+
+export type FedexPackagingType =
+  | "YOUR_PACKAGING"
+  | "FEDEX_ENVELOPE"
+  | "FEDEX_BOX"
+  | "FEDEX_SMALL_BOX"
+  | "FEDEX_MEDIUM_BOX"
+  | "FEDEX_LARGE_BOX"
+  | "FEDEX_EXTRA_LARGE_BOX"
+  | "FEDEX_PAK"
+  | "FEDEX_TUBE"
+  | string;
+
+export type FedexServiceType = string;
+
+export type FedexRateAddress = {
+  streetLines?: string[];
+  city?: string;
+  stateOrProvinceCode?: string;
+  postalCode: string;
+  countryCode: string;
+  residential?: boolean;
+};
+
+export type FedexRatePackageDto = {
+  weightKg: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+  declaredValue?: number;
+  quantity?: number;
+};
+
+export type FedexRateQuoteDto = {
+  recipient: FedexRateAddress;
+  packages: FedexRatePackageDto[];
+  shipDateStamp?: string;
+  serviceType?: FedexServiceType;
+  carrierCodes?: FedexCarrierCode[];
+  returnTransitTimes?: boolean;
+  rateRequestTypes?: FedexRateRequestType[];
+  preferredCurrency?: string;
+  pickupType?: FedexPickupType;
+  packagingType?: FedexPackagingType;
+  includePickupRates?: boolean;
+};
+
+export type FedexRequestedPackageLineItem = {
+  groupPackageCount: number;
+  weight: {
+    units: "KG" | "LB";
+    value: number;
+  };
+  dimensions: {
+    length: number;
+    width: number;
+    height: number;
+    units: "CM" | "IN";
+  };
+  declaredValue?: {
+    amount: number;
+    currency: string;
+  };
+};
+
+export type FedexRateQuoteRequest = {
+  accountNumber: {
+    value: string;
+  };
+  rateRequestControlParameters?: {
+    returnTransitTimes?: boolean;
+    servicesNeededOnRateFailure?: boolean;
+    variableOptions?: string;
+    rateSortOrder?: string;
+  };
+  requestedShipment: {
+    shipper: {
+      address: FedexRateAddress;
+    };
+    recipient: {
+      address: FedexRateAddress;
+    };
+    serviceType?: string;
+    preferredCurrency?: string;
+    rateRequestType?: FedexRateRequestType[];
+    shipDateStamp: string;
+    pickupType: FedexPickupType;
+    packagingType: FedexPackagingType;
+    totalPackageCount: number;
+    totalWeight?: number;
+    requestedPackageLineItems: FedexRequestedPackageLineItem[];
+    documentShipment?: boolean;
+  };
+  processingOptions?: string[];
+  carrierCodes?: FedexCarrierCode[];
+};
+
 export interface FedexRateAddressInput {
   postalCode: string;
   city?: string;
@@ -75,6 +188,8 @@ export interface FedexRateReplyDetail {
   serviceName?: string;
   serviceDescription?: {
     description?: string;
+    astraDescription?: string;
+    code?: string;
     serviceId?: string;
     serviceType?: string;
     names?: Array<{
@@ -88,8 +203,10 @@ export interface FedexRateReplyDetail {
   transitTime?: string;
   commit?: {
     dateDetail?: {
+      dayOfWeek?: string;
       dayFormat?: string;
     };
+    saturdayDelivery?: boolean;
   };
   commitDetails?: Array<{
     dateDetail?: {
@@ -101,9 +218,19 @@ export interface FedexRateReplyDetail {
 
 export interface FedexRatedShipmentDetail {
   rateType?: string;
+  ratedWeightMethod?: string;
+  totalBaseCharge?: FedexMoney;
+  totalNetCharge?: FedexMoney;
+  totalNetFedExCharge?: FedexMoney;
+  totalSurcharges?: FedexMoney;
+  totalTaxes?: FedexMoney;
   shipmentRateDetail?: {
     rateType?: string;
     totalNetCharge?: FedexMoney;
+    totalBaseCharge?: FedexMoney;
+    totalSurcharges?: FedexMoney;
+    totalTaxes?: FedexMoney;
+    currency?: string;
     totalNetFedExCharge?: FedexMoney;
     totalNetChargeWithDutiesAndTaxes?: FedexMoney;
     surcharges?: Array<{
@@ -111,14 +238,62 @@ export interface FedexRatedShipmentDetail {
       description?: string;
       amount?: FedexMoney;
     }>;
+    [key: string]: unknown;
   };
+  [key: string]: unknown;
 }
 
 export interface FedexRateResponse {
+  transactionId?: string;
+  customerTransactionId?: string;
   output?: {
     rateReplyDetails?: FedexRateReplyDetail[];
+    alerts?: Array<{
+      code?: string;
+      message?: string;
+      alertType?: string;
+    }>;
+    quoteDate?: string;
+    encoded?: boolean;
+    [key: string]: unknown;
   };
 }
+
+export type FedexRatesResponse = FedexRateResponse;
+
+export type NormalizedFedexRateQuote = {
+  provider: "FEDEX";
+  serviceType: string;
+  serviceName?: string;
+  carrierCode?: FedexCarrierCode;
+  packagingType?: string;
+  currency: string;
+  amount: number;
+  accountAmount?: number;
+  listAmount?: number;
+  baseCharge?: number;
+  surcharges?: number;
+  taxes?: number;
+  transitTime?: string;
+  deliveryTimestamp?: string;
+  deliveryDayOfWeek?: string;
+  saturdayDelivery?: boolean;
+  rateType?: string;
+  rawRateTypes: string[];
+};
+
+export type NormalizedFedexRatesResult = {
+  success: true;
+  transactionId?: string;
+  customerTransactionId?: string;
+  currency: string;
+  quotes: NormalizedFedexRateQuote[];
+  alerts: Array<{
+    code?: string;
+    message?: string;
+    alertType?: string;
+  }>;
+};
 
 const createAddressSchema = (prefix: "origin" | "destination") =>
   z
@@ -198,3 +373,100 @@ export const fedexRateQuoteSchema = z
   .strict();
 
 export type FedexRateQuoteSchemaInput = z.infer<typeof fedexRateQuoteSchema>;
+
+const publicStreetLineSchema = z.string().trim().min(1).max(70);
+
+const publicRecipientSchema = z
+  .object({
+    streetLines: z.array(publicStreetLineSchema).max(3).optional(),
+    city: z.string().trim().min(1).max(50).optional(),
+    stateOrProvinceCode: z
+      .string()
+      .trim()
+      .min(1)
+      .max(10)
+      .optional()
+      .transform((value) => value?.toUpperCase()),
+    postalCode: z
+      .string({
+        required_error: "recipient.postalCode is required",
+      })
+      .trim()
+      .min(1, "recipient.postalCode is required")
+      .max(20),
+    countryCode: z
+      .string({
+        required_error: "recipient.countryCode is required",
+      })
+      .trim()
+      .transform((value) => value.toUpperCase())
+      .refine((value) => /^[A-Z]{2}$/.test(value), {
+        message: "recipient.countryCode must be exactly 2 letters",
+      }),
+    residential: z.boolean().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      ["MX", "US", "CA"].includes(value.countryCode) &&
+      !value.stateOrProvinceCode
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stateOrProvinceCode"],
+        message: "recipient.stateOrProvinceCode is required for MX, US and CA",
+      });
+    }
+  });
+
+const publicPackageSchema = z
+  .object({
+    weightKg: z.number().positive("weightKg must be greater than 0"),
+    lengthCm: z.number().positive("lengthCm must be greater than 0"),
+    widthCm: z.number().positive("widthCm must be greater than 0"),
+    heightCm: z.number().positive("heightCm must be greater than 0"),
+    declaredValue: z.number().min(0).optional(),
+    quantity: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export const fedexCarrierCodeSchema = z.enum(["FDXE", "FDXG", "FXSP", "FXCC"]);
+export const fedexRateRequestTypeSchema = z.enum([
+  "ACCOUNT",
+  "LIST",
+  "PREFERRED",
+  "INCENTIVE",
+]);
+
+export const fedexPublicRateQuoteSchema = z
+  .object({
+    recipient: publicRecipientSchema,
+    packages: z
+      .array(publicPackageSchema)
+      .min(1, "packages must contain at least one package")
+      .max(20, "packages can contain at most 20 packages"),
+    shipDateStamp: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "shipDateStamp must use YYYY-MM-DD format")
+      .optional(),
+    serviceType: z.string().trim().min(1).optional(),
+    carrierCodes: z.array(fedexCarrierCodeSchema).min(1).optional(),
+    returnTransitTimes: z.boolean().optional(),
+    rateRequestTypes: z.array(fedexRateRequestTypeSchema).min(1).optional(),
+    preferredCurrency: z
+      .string()
+      .trim()
+      .min(1)
+      .max(3)
+      .optional()
+      .transform((value) => value?.toUpperCase()),
+    pickupType: z.string().trim().min(1).optional(),
+    packagingType: z.string().trim().min(1).optional(),
+    includePickupRates: z.boolean().optional(),
+  })
+  .strict();
+
+export type FedexPublicRateQuoteSchemaInput = z.infer<
+  typeof fedexPublicRateQuoteSchema
+>;

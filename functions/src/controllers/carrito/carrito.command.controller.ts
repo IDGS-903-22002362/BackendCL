@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import carritoService from "../../services/carrito.service";
+import { CheckoutFlowError } from "../../models/checkout-pricing.model";
 import {
   shippingQuoteService,
   ShippingQuoteError,
@@ -329,6 +330,15 @@ export const checkout = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error en POST /api/carrito/checkout:", error);
+
+    if (error instanceof CheckoutFlowError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+        ...(error.data ? { data: error.data } : {}),
+      });
+    }
 
     let statusCode = 500;
     if (error instanceof Error) {

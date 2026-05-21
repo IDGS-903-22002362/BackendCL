@@ -27,18 +27,21 @@ import {
 import {
   Orden,
   CrearOrdenDTO,
-  ItemOrden,
   DireccionEnvio,
   MetodoPago,
   FulfillmentMethod,
   PickupContact,
 } from "../models/orden.model";
+import {
+  CheckoutShippingAddress,
+  CheckoutShippingSelection,
+} from "../models/checkout-pricing.model";
 import ordenService from "./orden.service";
 import {
   completeInventarioPorTalla,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
-import { shippingQuoteService } from "../modules/shipping/shipping-quote.service";
+import { checkoutPricingService } from "./checkout/checkout-pricing.service";
 
 /**
  * Nombre de la colección en Firestore
@@ -898,6 +901,7 @@ export class CarritoService {
       shippingQuoteId?: string;
       selectedShippingOptionId?: string;
       selectedServiceType?: string;
+      shippingSelection?: Partial<CheckoutShippingSelection>;
       notas?: string;
     },
   ): Promise<Orden> {
@@ -920,63 +924,60 @@ export class CarritoService {
     // PASO 3: Mapear ItemCarrito[] → ItemOrden[]
     // Se agregan campos requeridos por la orden (subtotal por item)
     // Los precios se recalcularán en OrdenService.createOrden() desde Firestore
-    const itemsOrden: ItemOrden[] = carrito.items.map((item) => ({
-      productoId: item.productoId,
-      cantidad: item.cantidad,
-      precioUnitario: item.precioUnitario,
-      subtotal: Math.round(item.precioUnitario * item.cantidad * 100) / 100,
-      ...(item.tallaId ? { tallaId: item.tallaId } : {}),
-    }));
-
-    let shippingSnapshot: Record<string, any> | undefined;
-    let costoEnvio = checkoutData.costoEnvio;
-
-    if (
-      (checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY) ===
-      FulfillmentMethod.DELIVERY
-    ) {
-      if (!checkoutData.shippingQuoteId) {
-        throw new Error("shippingQuoteId es requerido para DELIVERY");
-      }
-
-      const { quote, selectedOption } =
-        await shippingQuoteService.validateSelectedQuote({
-          userId: usuarioId,
-          cart: carrito,
-          shippingQuoteId: checkoutData.shippingQuoteId,
-          selectedOptionId: checkoutData.selectedShippingOptionId,
-          selectedServiceType: checkoutData.selectedServiceType,
-        });
-
-      costoEnvio = selectedOption.amount;
-      shippingSnapshot = {
-        provider: "FEDEX",
-        status: "QUOTE_SELECTED",
-        quoteId: checkoutData.shippingQuoteId,
-        selectedOptionId: selectedOption.optionId,
-        selectedServiceType: selectedOption.serviceType,
-        selectedRate: selectedOption,
-        packages: quote.packages,
-        destination: quote.destination,
-      };
-    }
+    const fulfillmentMethod =
+      checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+    const pricing = await checkoutPricingService.calculateCheckoutPricing({
+      userId: usuarioId,
+      cartId: carrito.id,
+      shippingSelection: this.buildShippingSelection(
+        fulfillmentMethod,
+        checkoutData,
+      ),
+      shippingAddress:
+        fulfillmentMethod === FulfillmentMethod.DELIVERY
+          ? this.buildCheckoutShippingAddress(checkoutData.direccionEnvio)
+          : undefined,
+      paymentProvider:
+        checkoutData.metodoPago === MetodoPago.APLAZO ? "APLAZO" : "STRIPE",
+      shippingQuoteId: checkoutData.shippingQuoteId,
+      selectedShippingOptionId: checkoutData.selectedShippingOptionId,
+      selectedServiceType: checkoutData.selectedServiceType,
+    });
 
     // PASO 4: Construir CrearOrdenDTO
     // subtotal, impuestos y total son placeholders — OrdenService los recalcula
     const crearOrdenDTO: CrearOrdenDTO = {
       usuarioId,
-      items: itemsOrden,
-      subtotal: carrito.subtotal,
+      items: pricing.items.map((item) => ({
+        productoId: item.productId,
+        cantidad: item.quantity,
+        precioUnitario: item.unitPriceFinal,
+        subtotal: item.subtotalFinal,
+        ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+      })),
+      subtotal: pricing.subtotalFinal,
       impuestos: 0,
-      total: carrito.total,
-      fulfillmentMethod:
-        checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY,
+      total: pricing.total,
+      fulfillmentMethod,
       direccionEnvio: checkoutData.direccionEnvio,
       pickupLocationId: checkoutData.pickupLocationId,
       pickupContact: checkoutData.pickupContact,
       metodoPago: checkoutData.metodoPago,
-      costoEnvio,
-      shipping: shippingSnapshot,
+      costoEnvio: pricing.shippingTotal,
+      shipping: pricing.shipping,
+      pricingSnapshot: pricing,
+      paymentMetadata: {
+        cartId: carrito.id,
+        shippingProvider: pricing.shipping.provider || "",
+        shippingServiceType: pricing.shipping.serviceType || "",
+        carrierCode: pricing.shipping.carrierCode || "",
+        shippingMethod: pricing.shipping.method,
+      },
+      discountTotal: pricing.discountTotal,
+      subtotalOriginal: pricing.subtotalOriginal,
+      subtotalFinal: pricing.subtotalFinal,
+      shippingTotal: pricing.shippingTotal,
+      currency: pricing.currency,
       shippingQuoteId: checkoutData.shippingQuoteId,
       selectedShippingOptionId: checkoutData.selectedShippingOptionId,
       selectedServiceType: checkoutData.selectedServiceType,
@@ -1033,6 +1034,57 @@ export class CarritoService {
     return {
       subtotal: subtotalRedondeado,
       total: subtotalRedondeado, // Impuestos se aplican en checkout
+    };
+  }
+
+  private buildShippingSelection(
+    fulfillmentMethod: FulfillmentMethod,
+    checkoutData: {
+      shippingSelection?: Partial<CheckoutShippingSelection>;
+      selectedServiceType?: string;
+    },
+  ): CheckoutShippingSelection {
+    if (fulfillmentMethod === FulfillmentMethod.PICKUP) {
+      return { method: "PICKUP" };
+    }
+
+    const incoming = checkoutData.shippingSelection || {};
+    return {
+      method: "FEDEX",
+      provider: "FEDEX",
+      serviceType: incoming.serviceType || checkoutData.selectedServiceType,
+      serviceName: incoming.serviceName,
+      carrierCode: incoming.carrierCode,
+      packagingType: incoming.packagingType,
+      quotedAmount: incoming.quotedAmount,
+      quotedCurrency: incoming.quotedCurrency,
+      transitTime: incoming.transitTime,
+      deliveryTimestamp: incoming.deliveryTimestamp,
+    };
+  }
+
+  private buildCheckoutShippingAddress(
+    address?: DireccionEnvio,
+  ): CheckoutShippingAddress | undefined {
+    if (!address) {
+      return undefined;
+    }
+
+    return {
+      streetLines: [
+        `${address.calle} ${address.numero}`.trim(),
+        address.numeroInterior
+          ? `${address.colonia} Int ${address.numeroInterior}`.trim()
+          : address.colonia,
+        address.referencias || "",
+      ].filter(Boolean),
+      city: address.ciudad,
+      stateOrProvinceCode: address.estado,
+      postalCode: address.codigoPostal,
+      countryCode: "MX",
+      residential: true,
+      addressValidationStatus:
+        address.addressValidationStatus || "USER_CONFIRMED",
     };
   }
 }

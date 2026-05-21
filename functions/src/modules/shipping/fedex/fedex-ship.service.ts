@@ -140,6 +140,16 @@ const isExistingLabel = (shipping: FedexOrderShippingState | undefined, orden: O
       orden.numeroGuia,
   );
 
+const getFedexOrderShippingState = (
+  shipping: Orden["shipping"],
+): FedexOrderShippingState | undefined => {
+  if (!shipping || shipping.provider !== "FEDEX") {
+    return undefined;
+  }
+
+  return shipping as FedexOrderShippingState;
+};
+
 const isPaidPayment = (pago: Pago): boolean =>
   pago.estado === EstadoPago.COMPLETADO || pago.status === PaymentStatus.PAID;
 
@@ -333,7 +343,7 @@ export class FedexShipService {
     }
 
     const order = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
-    const shipping = order.shipping as FedexOrderShippingState | undefined;
+    const shipping = getFedexOrderShippingState(order.shipping);
 
     if (shipping?.provider !== "FEDEX") {
       throw new FedexShipError("La orden no tiene envio FedEx", 400);
@@ -494,7 +504,7 @@ export class FedexShipService {
     }
 
     const orden = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
-    const shipping = orden.shipping;
+    const shipping = getFedexOrderShippingState(orden.shipping);
 
     if (isExistingLabel(shipping, orden)) {
       return {

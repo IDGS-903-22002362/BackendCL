@@ -1,11 +1,23 @@
 import { Request, Response } from "express";
 import { FedexProviderError } from "./fedex/fedex.errors";
-import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
-import { fedexAddressService } from "./fedex/fedex-address.service";
 import {
+  fedexPostalCodeService,
+  FedexPostalValidationError,
+} from "./fedex/fedex-postal.service";
+import {
+  fedexAddressValidationService,
+  FedexAddressValidationError,
+} from "./fedex/fedex-address-validation.service";
+import { FedexRateRequestConfigError } from "./fedex/fedex-rates.mapper";
+import {
+  FedexPublicRateError,
   fedexRatesService,
   FedexRatesUnavailableError,
 } from "./fedex/fedex-rates.service";
+import {
+  fedexServiceAvailabilityService,
+  FedexServiceAvailabilityError,
+} from "./fedex/fedex-service-availability.service";
 import {
   fedexShipService,
   FedexShipError,
@@ -63,25 +75,104 @@ export const quoteFedexRates = async (req: Request, res: Response) => {
   }
 };
 
-export const validateFedexAddress = async (req: Request, res: Response) => {
+export const quoteFedexPublicRates = async (req: Request, res: Response) => {
   try {
-    const result = await fedexAddressService.validateAddress(req.body);
-    return res.status(200).json(result);
+    const result = await fedexRatesService.quotePublicRates(req.body);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
   } catch (error) {
-    if (error instanceof FedexProviderError) {
-      return res.status(502).json({
-        ok: false,
-        provider: "FEDEX",
-        message: "No fue posible validar la dirección con FedEx",
-        details: error.message,
+    if (error instanceof FedexPublicRateError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
       });
     }
 
     return res.status(500).json({
-      ok: false,
-      provider: "FEDEX",
-      message: "No fue posible validar la dirección con FedEx",
-      details: toSafeErrorMessage(error),
+      success: false,
+      code: "FEDEX_SERVICE_UNAVAILABLE",
+      message: "FedEx no esta disponible temporalmente.",
+    });
+  }
+};
+
+export const retrieveFedexServicesAndTransitTimes = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const result =
+      await fedexServiceAvailabilityService.retrieveServicesAndTransitTimes(
+        req.body,
+      );
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof FedexServiceAvailabilityError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      code: "FEDEX_SERVICE_UNAVAILABLE",
+      message: "FedEx no esta disponible temporalmente.",
+    });
+  }
+};
+
+export const validateFedexAddress = async (req: Request, res: Response) => {
+  try {
+    const result = await fedexAddressValidationService.validateAddress(req.body);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof FedexAddressValidationError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      code: "FEDEX_SERVICE_UNAVAILABLE",
+      message: "FedEx no esta disponible temporalmente.",
+    });
+  }
+};
+
+export const validateFedexPostalCode = async (req: Request, res: Response) => {
+  try {
+    const result = await fedexPostalCodeService.validatePostalCode(req.body);
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof FedexPostalValidationError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      code: "FEDEX_SERVICE_UNAVAILABLE",
+      message: "FedEx no esta disponible temporalmente.",
     });
   }
 };
