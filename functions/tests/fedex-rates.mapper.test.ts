@@ -100,12 +100,13 @@ describe("FedEx rates mapper", () => {
     expect(request.accountNumber.value).toBe(getFedexConfig().accountNumber);
     expect(request.rateRequestControlParameters.returnTransitTimes).toBe(true);
     expect(request.requestedShipment.pickupType).toBe(
-      "USE_SCHEDULED_PICKUP",
+      "DROPOFF_AT_FEDEX_LOCATION",
     );
     expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
     expect(request.requestedShipment.rateRequestType).toEqual(["ACCOUNT", "LIST"]);
     expect(request.requestedShipment.preferredCurrency).toBe("MXN");
     expect(request.requestedShipment.totalPackageCount).toBe(1);
+    expect(request.requestedShipment.totalWeight).toBe(1.24);
     expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
     expect(request.requestedShipment.serviceType).toBeUndefined();
     expect(request.requestedShipment.carrierCodes).toBeUndefined();

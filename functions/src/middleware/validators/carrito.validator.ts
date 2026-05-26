@@ -18,6 +18,8 @@ import {
 } from "../../models/orden.model";
 import { pickupContactSchema } from "./orden.validator";
 
+const optionalTrimmedString = z.string().trim().min(1).optional();
+
 const checkoutShippingSelectionSchema = z
   .object({
     method: z.enum(["PICKUP", "FEDEX", "MANUAL"]),
@@ -243,6 +245,43 @@ export const checkoutCarritoSchema = z
 
 export const createCartFedexQuoteSchema = z
   .object({
-    direccionEnvio: direccionEnvioSchema,
+    direccionEnvio: direccionEnvioSchema
+      .extend({
+        stateOrProvinceCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+      })
+      .optional(),
+    shippingAddress: z
+      .object({
+        streetLines: z.array(z.string().trim().min(1)).max(3).optional(),
+        city: optionalTrimmedString,
+        stateOrProvinceCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        residential: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    fedexAddress: z
+      .object({
+        streetLines: z.array(z.string().trim().min(1)).max(3).optional(),
+        city: optionalTrimmedString,
+        stateOrProvinceCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        residential: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    if (!data.direccionEnvio && !data.shippingAddress && !data.fedexAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["direccionEnvio"],
+        message: "SHIPPING_ADDRESS_REQUIRED",
+      });
+    }
+  });

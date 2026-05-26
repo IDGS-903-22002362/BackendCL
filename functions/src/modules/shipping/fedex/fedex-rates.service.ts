@@ -304,10 +304,12 @@ const logSafeRatePayload = (
       },
       streetLines: payload.requestedShipment?.recipient?.address?.streetLines,
       totalPackageCount: payload.requestedShipment?.totalPackageCount,
+      totalWeight: payload.requestedShipment?.totalWeight,
       packages: payload.requestedShipment?.requestedPackageLineItems?.map((p: any) => ({
         groupPackageCount: p.groupPackageCount,
         weight: p.weight,
         dimensions: p.dimensions,
+        declaredValue: p.declaredValue,
         hasPackageType: Boolean(p.packageType),
         hasPackagingType: Boolean(p.packagingType),
       })),

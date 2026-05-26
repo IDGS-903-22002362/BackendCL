@@ -133,6 +133,7 @@ export interface FedexRatePackageInput {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  declaredValue?: number;
 }
 
 export interface FedexRateQuoteInput {
