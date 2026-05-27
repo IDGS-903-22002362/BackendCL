@@ -96,6 +96,7 @@ const createOptionId = (option: {
 const DEFAULT_CARRIER_CODES: FedexCarrierCode[] = ["FDXE", "FDXG"];
 const DEFAULT_RATE_REQUEST_TYPES: FedexRateRequestType[] = ["ACCOUNT", "LIST"];
 const DEFAULT_CURRENCY = "MXN";
+const MX_DECLARED_VALUE_CURRENCY = "NMP";
 const DEFAULT_WEIGHT_UNITS = "KG";
 const DEFAULT_DIMENSION_UNITS = "CM";
 const DEFAULT_PICKUP_TYPE: FedexPickupType = "DROPOFF_AT_FEDEX_LOCATION";
@@ -151,6 +152,19 @@ const toFedexMoney = (value: number): number =>
 const cleanText = (value?: string): string | undefined => {
   const cleaned = value?.trim().replace(/\s+/g, " ");
   return cleaned || undefined;
+};
+
+const resolveDeclaredValueCurrency = (
+  preferredCurrency: string,
+  originCountryCode?: string,
+  destinationCountryCode?: string,
+): string => {
+  const origin = cleanText(originCountryCode)?.toUpperCase();
+  const destination = cleanText(destinationCountryCode)?.toUpperCase();
+
+  return origin === "MX" && destination === "MX"
+    ? MX_DECLARED_VALUE_CURRENCY
+    : preferredCurrency;
 };
 
 const normalizeStreetLines = (streetLines?: string[]): string[] | undefined => {
@@ -457,9 +471,15 @@ export class FedexRatesService {
       : DEFAULT_CARRIER_CODES;
     const pickupType = (dto.pickupType || readDefaultPickupType()) as FedexPickupType;
     const packagingType = dto.packagingType || readDefaultPackagingType();
+    const shipper = getFedexShipperConfig();
+    const declaredValueCurrency = resolveDeclaredValueCurrency(
+      preferredCurrency,
+      shipper.countryCode,
+      recipient.countryCode,
+    );
     const requestedPackageLineItems = this.mapPublicPackages(
       dto.packages,
-      preferredCurrency,
+      declaredValueCurrency,
     );
     const totalPackageCount = requestedPackageLineItems.reduce(
       (sum, item) => sum + item.groupPackageCount,
@@ -471,7 +491,6 @@ export class FedexRatesService {
         0,
       ),
     );
-    const shipper = getFedexShipperConfig();
 
     return {
       accountNumber: {

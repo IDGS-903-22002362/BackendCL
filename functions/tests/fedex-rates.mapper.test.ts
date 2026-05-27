@@ -243,6 +243,42 @@ describe("FedEx rates mapper", () => {
     expect(firstPackage).not.toHaveProperty("packagingType");
   });
 
+  it("keeps MXN as preferredCurrency but uses NMP for MX declared value", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      packages: [{ ...baseInput.packages[0], declaredValue: 1000 }],
+    });
+    const firstPackage = request.requestedShipment.requestedPackageLineItems[0];
+
+    expect(request.requestedShipment.preferredCurrency).toBe("MXN");
+    expect(firstPackage.declaredValue).toEqual({
+      amount: 1000,
+      currency: "NMP",
+    });
+  });
+
+  it("does not reuse the MX declared value currency for non-MX shipments", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      destination: {
+        ...baseInput.destination,
+        stateOrProvinceCode: "TX",
+        postalCode: "75001",
+        countryCode: "US",
+      },
+      packages: [{ ...baseInput.packages[0], declaredValue: 1000 }],
+      currency: "USD",
+    });
+
+    expect(request.requestedShipment.preferredCurrency).toBe("USD");
+    expect(
+      request.requestedShipment.requestedPackageLineItems[0].declaredValue,
+    ).toEqual({
+      amount: 1000,
+      currency: "USD",
+    });
+  });
+
   it("omits serviceType in Caso A unless input or FEDEX_SERVICE_TYPE is configured", () => {
     expect(mapFedexRateRequest(baseInput).requestedShipment.serviceType).toBeUndefined();
 

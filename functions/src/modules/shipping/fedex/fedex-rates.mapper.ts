@@ -70,6 +70,7 @@ const roundWeight = (value: number): number => Math.round(value * 100) / 100;
 const roundDimension = (value: number): number => Math.max(1, Math.ceil(value));
 
 const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+const MX_DECLARED_VALUE_CURRENCY = "NMP";
 
 const BLOCKED_SERVICE_TYPES = new Set([
   "FEDEX_ONE_RATE",
@@ -164,7 +165,23 @@ const mapContact = (address: FedexRateAddressInput): Record<string, unknown> | u
   };
 };
 
-const mapPackage = (item: FedexRatePackageInput, currency: string) => {
+const normalizeCountryCode = (value?: string): string | undefined =>
+  cleanFedexText(value)?.toUpperCase();
+
+const resolveDeclaredValueCurrency = (
+  preferredCurrency: string,
+  originCountryCode?: string,
+  destinationCountryCode?: string,
+): string => {
+  const origin = normalizeCountryCode(originCountryCode);
+  const destination = normalizeCountryCode(destinationCountryCode);
+
+  return origin === "MX" && destination === "MX"
+    ? MX_DECLARED_VALUE_CURRENCY
+    : preferredCurrency;
+};
+
+const mapPackage = (item: FedexRatePackageInput, declaredValueCurrency: string) => {
   const declaredValue =
     typeof item.declaredValue === "number" &&
     Number.isFinite(item.declaredValue) &&
@@ -184,7 +201,9 @@ const mapPackage = (item: FedexRatePackageInput, currency: string) => {
       height: roundDimension(item.heightCm),
       units: "CM" as const,
     },
-    ...(declaredValue ? { declaredValue: { amount: declaredValue, currency } } : {}),
+    ...(declaredValue
+      ? { declaredValue: { amount: declaredValue, currency: declaredValueCurrency } }
+      : {}),
   };
 };
 
@@ -192,8 +211,13 @@ export const mapFedexRateRequest = (
   input: FedexRateQuoteInput,
 ): FedexRateRequestPayload => {
   const config = getFedexConfig();
+  const declaredValueCurrency = resolveDeclaredValueCurrency(
+    input.currency,
+    input.origin.countryCode,
+    input.destination.countryCode,
+  );
   const requestedPackageLineItems = input.packages.map((item) =>
-    mapPackage(item, input.currency),
+    mapPackage(item, declaredValueCurrency),
   );
   const totalWeight = roundWeight(
     requestedPackageLineItems.reduce(
