@@ -36,6 +36,7 @@ const SHIPPING_QUOTES_COLLECTION = "shipping_quotes";
 const PRODUCTOS_COLLECTION = "productos";
 const QUOTE_TTL_MS = 20 * 60 * 1000;
 const PRODUCT_SHIPPING_DATA_MISSING = "PRODUCT_SHIPPING_DATA_MISSING";
+const CART_FEDEX_TEST_CARRIER_CODES = ["FDXE"];
 
 export class ShippingQuoteError extends Error {
   statusCode: number;
@@ -148,6 +149,21 @@ const cleanStreetLines = (streetLines: Array<string | undefined>): string[] =>
     .map(cleanText)
     .filter((value): value is string => Boolean(value));
 
+const dedupeStreetLines = (streetLines: string[]): string[] => {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const line of streetLines) {
+    const key = line.toUpperCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(line);
+    }
+  }
+
+  return deduped;
+};
+
 const buildStreetLinesFromDireccion = (
   address?: CartFedexDireccionEnvio,
 ): string[] =>
@@ -159,6 +175,24 @@ const buildStreetLinesFromDireccion = (
           : address.colonia,
       ])
     : [];
+
+const buildCanonicalStreetLines = (
+  direccionEnvio?: CartFedexDireccionEnvio,
+  fedexAddress?: CartFedexAddressInput,
+  shippingAddress?: CartFedexAddressInput,
+): string[] => {
+  const direccionLines = buildStreetLinesFromDireccion(direccionEnvio);
+  if (direccionLines.length > 0) {
+    return direccionLines.slice(0, 2);
+  }
+
+  return dedupeStreetLines(
+    cleanStreetLines([
+      ...(fedexAddress?.streetLines || []),
+      ...(shippingAddress?.streetLines || []),
+    ]),
+  ).slice(0, 2);
+};
 
 const pickText = (...values: Array<string | undefined | null>): string | undefined => {
   for (const value of values) {
@@ -227,11 +261,11 @@ const buildDestinationFromCartPayload = (
     direccionEnvio?.codigoPostal,
     direccionEnvio?.postalCode,
   );
-  const streetLines = cleanStreetLines([
-    ...(fedexAddress?.streetLines || []),
-    ...(shippingAddress?.streetLines || []),
-    ...buildStreetLinesFromDireccion(direccionEnvio),
-  ]).slice(0, 3);
+  const streetLines = buildCanonicalStreetLines(
+    direccionEnvio,
+    fedexAddress,
+    shippingAddress,
+  );
   const city = pickText(
     fedexAddress?.city,
     shippingAddress?.city,
@@ -275,13 +309,28 @@ const buildDestinationFromCartPayload = (
 
 const buildOrigin = (): FedexRateAddressInput => {
   const shipper = getFedexShipperConfig();
-  return {
+  const origin = {
     postalCode: shipper.postalCode,
     city: shipper.city,
     stateOrProvinceCode: shipper.stateOrProvinceCode,
     countryCode: shipper.countryCode,
     residential: false,
   };
+
+  if (
+    origin.city !== "Leon" ||
+    origin.stateOrProvinceCode !== "GT" ||
+    origin.postalCode !== "37500" ||
+    origin.countryCode !== "MX"
+  ) {
+    throw new ShippingQuoteError(
+      "FedEx shipper origin must resolve to Leon, GT, 37500, MX for Mexico Rates.",
+      422,
+      "FEDEX_RATE_UNPROCESSABLE",
+    );
+  }
+
+  return origin;
 };
 
 const buildOptionId = (option: FedexRateOption): string =>
@@ -327,6 +376,12 @@ const mapFedexRateError = (
   error: FedexProviderError,
 ): { code: string; message: string; statusCode: number } => {
   switch (error.status) {
+    case 400:
+      return {
+        code: "FEDEX_RATE_BAD_REQUEST",
+        message: error.message || "FedEx rechazo la solicitud de cotizacion.",
+        statusCode: 400,
+      };
     case 401:
       return {
         code: "FEDEX_AUTH_FAILED",
@@ -355,11 +410,27 @@ const mapFedexRateError = (
       };
     default:
       return {
-        code: error.status === 400 ? "FEDEX_RATE_UNPROCESSABLE" : "FEDEX_SERVICE_UNAVAILABLE",
+        code: "FEDEX_SERVICE_UNAVAILABLE",
         message: error.message || "FedEx no esta disponible temporalmente.",
-        statusCode: error.status === 400 ? 422 : 503,
+        statusCode: 503,
       };
   }
+};
+
+const sanitizeFedexError = (error: FedexProviderError): Record<string, unknown> => {
+  const original = error.originalError as any;
+  const response = original?.response;
+
+  return {
+    status: error.status,
+    code: error.status,
+    message: error.message,
+    fedexCode: (error.errors?.[0] as any)?.code,
+    fedexMessage: (error.errors?.[0] as any)?.message || error.message,
+    transactionId: error.fedexTransactionId,
+    details: error.errors,
+    responseBody: response?.data,
+  };
 };
 
 export class ShippingQuoteService {
@@ -478,15 +549,20 @@ export class ShippingQuoteService {
     const cartHash = buildShippingCartHash(input.cart);
     const shipDate = new Date().toISOString().slice(0, 10);
     const destination = buildDestinationFromCartPayload(input);
+    const origin = buildOrigin();
 
     const quoteInput: FedexRateQuoteInput = {
-      origin: buildOrigin(),
+      origin,
       destination,
       packages,
       shipDate,
       currency: "MXN",
       rateRequestTypes: ["ACCOUNT", "LIST"],
       useConfiguredServiceType: false,
+      carrierCodes: CART_FEDEX_TEST_CARRIER_CODES,
+      // Temporary Rates probe: if FDXE quotes succeed, declaredValue was likely
+      // the failing field and should only return with a FedEx-valid currency.
+      omitDeclaredValue: true,
     };
 
     console.log("[FedEx Cart Quote Debug]", JSON.stringify({
@@ -508,6 +584,8 @@ export class ShippingQuoteService {
         shippingAddress: input.shippingAddress || null,
         fedexAddress: input.fedexAddress || null,
       },
+      originFinal: origin,
+      destinationFinal: destination,
       normalizedAddress: destination,
       finalStateOrProvinceCode: destination.stateOrProvinceCode,
       recipientAddress: {
@@ -518,7 +596,14 @@ export class ShippingQuoteService {
         countryCode: destination.countryCode,
         residential: destination.residential,
       },
-      packages,
+      finalStreetLines: destination.streetLines,
+      finalCarrierCodes: quoteInput.carrierCodes,
+      packagesFinalForRates: packages.map((item) => ({
+        weightKg: item.weightKg,
+        lengthCm: item.lengthCm,
+        widthCm: item.widthCm,
+        heightCm: item.heightCm,
+      })),
       totalPackageCount: packages.length,
       totalWeight: packages.reduce((sum, item) => sum + item.weightKg, 0),
       ratePayloadInput: {
@@ -528,6 +613,8 @@ export class ShippingQuoteService {
         shipDate: quoteInput.shipDate,
         currency: quoteInput.currency,
         rateRequestTypes: quoteInput.rateRequestTypes,
+        carrierCodes: quoteInput.carrierCodes,
+        omitDeclaredValue: quoteInput.omitDeclaredValue,
       },
     }, null, 2));
 
@@ -538,14 +625,19 @@ export class ShippingQuoteService {
       if (error instanceof FedexProviderError) {
         const mapped = mapFedexRateError(error);
         console.error("[FedEx Cart Quote Provider Error]", {
-          status: error.status,
+          ...sanitizeFedexError(error),
           code: mapped.code,
           message: mapped.message,
-          fedexCode: (error as any).fedexCode,
-          fedexMessage: error.message,
-          transactionId: error.fedexTransactionId,
+          mappedStatusCode: mapped.statusCode,
           recipientAddress: quoteInput.destination,
-          packages,
+          originAddress: quoteInput.origin,
+          carrierCodes: quoteInput.carrierCodes,
+          packagesFinalForRates: packages.map((item) => ({
+            weightKg: item.weightKg,
+            lengthCm: item.lengthCm,
+            widthCm: item.widthCm,
+            heightCm: item.heightCm,
+          })),
           totalPackageCount: packages.length,
           totalWeight: packages.reduce((sum, item) => sum + item.weightKg, 0),
         });

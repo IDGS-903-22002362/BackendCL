@@ -15,6 +15,7 @@ type FedexRateRequestPayload = {
   accountNumber: {
     value: string;
   };
+  carrierCodes?: string[];
   requestedShipment: {
     shipper: {
       address: Record<string, unknown>;
@@ -25,7 +26,6 @@ type FedexRateRequestPayload = {
     };
     pickupType: "DROPOFF_AT_FEDEX_LOCATION";
     serviceType?: string;
-    carrierCodes?: string[];
     packagingType: "YOUR_PACKAGING";
     rateRequestType: string[];
     preferredCurrency: string;
@@ -181,8 +181,13 @@ const resolveDeclaredValueCurrency = (
     : preferredCurrency;
 };
 
-const mapPackage = (item: FedexRatePackageInput, declaredValueCurrency: string) => {
+const mapPackage = (
+  item: FedexRatePackageInput,
+  declaredValueCurrency: string,
+  omitDeclaredValue = false,
+) => {
   const declaredValue =
+    !omitDeclaredValue &&
     typeof item.declaredValue === "number" &&
     Number.isFinite(item.declaredValue) &&
     item.declaredValue > 0
@@ -217,7 +222,7 @@ export const mapFedexRateRequest = (
     input.destination.countryCode,
   );
   const requestedPackageLineItems = input.packages.map((item) =>
-    mapPackage(item, declaredValueCurrency),
+    mapPackage(item, declaredValueCurrency, input.omitDeclaredValue),
   );
   const totalWeight = roundWeight(
     requestedPackageLineItems.reduce(
@@ -235,6 +240,9 @@ export const mapFedexRateRequest = (
     accountNumber: {
       value: config.accountNumber,
     },
+    ...(input.carrierCodes && input.carrierCodes.length > 0
+      ? { carrierCodes: input.carrierCodes }
+      : {}),
     requestedShipment: {
       shipper: {
         address: mapAddress(input.origin),
@@ -245,7 +253,6 @@ export const mapFedexRateRequest = (
       },
       pickupType: "DROPOFF_AT_FEDEX_LOCATION",
       ...(input.serviceType ? { serviceType: input.serviceType } : serviceType ? { serviceType } : {}),
-      ...(input.carrierCodes && input.carrierCodes.length > 0 ? { carrierCodes: input.carrierCodes } : {}),
       packagingType: "YOUR_PACKAGING",
       rateRequestType: input.rateRequestTypes,
       preferredCurrency: input.currency,

@@ -109,7 +109,7 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.totalWeight).toBe(1.24);
     expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
     expect(request.requestedShipment.serviceType).toBeUndefined();
-    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+    expect(request.carrierCodes).toBeUndefined();
   });
 
   it("preserves FedEx-resolved city names without adding carrierCodes", () => {
@@ -134,7 +134,7 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.packagingType).toBe("YOUR_PACKAGING");
     expect(request.requestedShipment.requestedPackageLineItems).toHaveLength(1);
     expect(request.requestedShipment.serviceType).toBeUndefined();
-    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+    expect(request.carrierCodes).toBeUndefined();
   });
 
   it("omits MX states in Caso A", () => {
@@ -154,7 +154,7 @@ describe("FedEx rates mapper", () => {
     expect(request.requestedShipment.shipper.address).not.toHaveProperty("stateOrProvinceCode");
     expect(request.requestedShipment.recipient.address).not.toHaveProperty("stateOrProvinceCode");
     expect(request.requestedShipment.serviceType).toBeUndefined();
-    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+    expect(request.carrierCodes).toBeUndefined();
   });
 
   it("preserves FedEx-resolved MX state without adding serviceType or carrierCodes", () => {
@@ -187,7 +187,7 @@ describe("FedEx rates mapper", () => {
       countryCode: "MX",
     });
     expect(request.requestedShipment.serviceType).toBeUndefined();
-    expect(request.requestedShipment.carrierCodes).toBeUndefined();
+    expect(request.carrierCodes).toBeUndefined();
   });
 
   it("normalizes MX phone and removes empty streetLines", () => {
@@ -277,6 +277,21 @@ describe("FedEx rates mapper", () => {
       amount: 1000,
       currency: "USD",
     });
+  });
+
+  it("sends carrierCodes at the root and can omit declaredValue for cart probes", () => {
+    const request = mapFedexRateRequest({
+      ...baseInput,
+      packages: [{ ...baseInput.packages[0], declaredValue: 499 }],
+      carrierCodes: ["FDXE"],
+      omitDeclaredValue: true,
+    });
+
+    expect(request.carrierCodes).toEqual(["FDXE"]);
+    expect(request.requestedShipment).not.toHaveProperty("carrierCodes");
+    expect(request.requestedShipment.requestedPackageLineItems[0]).not.toHaveProperty(
+      "declaredValue",
+    );
   });
 
   it("omits serviceType in Caso A unless input or FEDEX_SERVICE_TYPE is configured", () => {

@@ -146,6 +146,7 @@ export interface FedexRateQuoteInput {
   serviceType?: string;
   carrierCodes?: string[];
   useConfiguredServiceType?: boolean;
+  omitDeclaredValue?: boolean;
 }
 
 export interface FedexRateSurcharge {

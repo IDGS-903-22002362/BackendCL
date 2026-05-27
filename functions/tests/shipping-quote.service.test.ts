@@ -183,6 +183,8 @@ describe("ShippingQuoteService FedEx packages", () => {
           },
         }),
         useConfiguredServiceType: false,
+        carrierCodes: ["FDXE"],
+        omitDeclaredValue: true,
         rateRequestTypes: ["ACCOUNT", "LIST"],
         packages: [
           {
@@ -279,11 +281,7 @@ describe("ShippingQuoteService FedEx packages", () => {
 
     expect(fedexAddressService.validateAddress).not.toHaveBeenCalled();
     expect(ratesService.quoteRates.mock.calls[0][0].destination).toMatchObject({
-      streetLines: [
-        "BOULEVARD PUMA 102",
-        "Lomas de Echeveste Int 202",
-        "Shipping 1",
-      ],
+      streetLines: ["Puma 102", "Lomas de Echeveste"],
       city: "León de los Aldama",
       stateOrProvinceCode: "GT",
       postalCode: "37208",
@@ -291,7 +289,8 @@ describe("ShippingQuoteService FedEx packages", () => {
       residential: true,
     });
     expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("serviceType");
-    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("carrierCodes");
+    expect(ratesService.quoteRates.mock.calls[0][0].carrierCodes).toEqual(["FDXE"]);
+    expect(ratesService.quoteRates.mock.calls[0][0].omitDeclaredValue).toBe(true);
     expect(ratesService.quoteRates).toHaveBeenCalledTimes(1);
   });
 
@@ -401,8 +400,8 @@ describe("ShippingQuoteService FedEx packages", () => {
       }),
     ).rejects.toMatchObject({
       name: "ShippingQuoteError",
-      code: "FEDEX_RATE_UNPROCESSABLE",
-      statusCode: 422,
+      code: "FEDEX_RATE_BAD_REQUEST",
+      statusCode: 400,
     });
   });
 });
