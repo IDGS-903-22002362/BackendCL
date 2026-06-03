@@ -470,6 +470,45 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionId": "temp_verification_codes",
+      "fields": [
+        {
+          "fieldPath": "email",
+          "mode": "ASCENDING"
+        },
+        {
+          "fieldPath": "code",
+          "mode": "ASCENDING"
+        },
+        {
+          "fieldPath": "isUsed",
+          "mode": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionId": "temp_verification_codes",
+      "fields": [
+        {
+          "fieldPath": "expiresAt",
+          "mode": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionId": "temp_verification_codes",
+      "fields": [
+        {
+          "fieldPath": "email",
+          "mode": "ASCENDING"
+        },
+        {
+          "fieldPath": "isUsed",
+          "mode": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
