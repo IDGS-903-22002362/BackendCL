@@ -7,17 +7,17 @@ const senderName = process.env.BREVO_SENDER_NAME || 'Club León';
 
 export async function sendVerificationEmail(to: string, code: string, nombre?: string) {
     if (!BREVO_API_KEY) {
-        console.error('❌ Brevo no configurado - API key faltante');
+        console.error(' Brevo no configurado - API key faltante');
         return false;
     }
 
     try {
-        const response = await axios.post(
+        await axios.post(
             'https://api.brevo.com/v3/smtp/email',
             {
                 sender: { email: senderEmail, name: senderName },
                 to: [{ email: to, name: nombre || 'Usuario' }],
-                subject: '🔐 Código de verificación - Club León',
+                subject: 'Código de verificación - Club León',
                 htmlContent: `
           <!DOCTYPE html>
           <html>
@@ -38,14 +38,14 @@ export async function sendVerificationEmail(to: string, code: string, nombre?: s
           <body>
             <div class="container">
               <div class="header">
-                <h1>🏆 Club León</h1>
+                <h1>Club León</h1>
               </div>
               <div class="content">
                 <h2>¡Hola ${nombre || 'usuario'}!</h2>
                 <p>Hemos recibido una solicitud para iniciar sesión en tu cuenta. Para continuar, utiliza el siguiente código de verificación:</p>
                 <div class="code">${code}</div>
                 <p>Este código es válido por <strong>10 minutos</strong>. Si no solicitaste este código, puedes ignorar este mensaje.</p>
-                <p>¡Gracias por ser parte de la familia esmeralda! 🦁</p>
+                <p>¡Gracias por ser parte de la familia esmeralda! </p>
               </div>
               <div class="footer">
                 <p>Club León - Pasión que nos une 💚</p>

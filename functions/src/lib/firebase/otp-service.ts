@@ -4,7 +4,7 @@ import { admin } from "../../config/firebase.admin";
 
 const OTP_COLLECTION = "temp_verification_codes";
 const OTP_EXPIRY_MINUTES = 10;
-const OTP_LENGTH = 6;
+//const OTP_LENGTH = 6;
 const MAX_ATTEMPTS = 3;
 const CLEANUP_BATCH_SIZE = 100;
 
