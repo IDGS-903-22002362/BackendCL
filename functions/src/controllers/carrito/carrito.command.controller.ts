@@ -387,6 +387,8 @@ export const createFedexShippingQuote = async (req: Request, res: Response) => {
       userId: usuarioId,
       cart: carrito,
       direccionEnvio: req.body.direccionEnvio,
+      shippingAddress: req.body.shippingAddress,
+      fedexAddress: req.body.fedexAddress,
     });
 
     return res.status(201).json({

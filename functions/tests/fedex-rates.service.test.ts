@@ -84,19 +84,24 @@ describe("FedEx rates service", () => {
         accountNumber: { value: "740561073" },
         requestedShipment: expect.objectContaining({
           packagingType: "YOUR_PACKAGING",
-          pickupType: "USE_SCHEDULED_PICKUP",
+          pickupType: "DROPOFF_AT_FEDEX_LOCATION",
           totalPackageCount: 1,
         }),
       }),
     );
     const payload = client.post.mock.calls[0][1] as any;
     expect(payload.requestedShipment.serviceType).toBeUndefined();
+    expect(payload).not.toHaveProperty("carrierCodes");
+    expect(payload.requestedShipment.requestedPackageLineItems[0]).not.toHaveProperty(
+      "declaredValue",
+    );
     const ratePayloadDebug = JSON.parse((console.log as jest.Mock).mock.calls[0][1]);
     const addressDebug = JSON.parse((console.log as jest.Mock).mock.calls[1][1]);
     const logOutput = JSON.stringify((console.log as jest.Mock).mock.calls);
     expect(logOutput).toContain("[FedEx Rate Payload Debug]");
     expect(logOutput).toContain("[FedEx Address Debug]");
     expect(ratePayloadDebug.accountNumberPresent).toBe(true);
+    expect(ratePayloadDebug.carrierCodes).toEqual([]);
     expect(ratePayloadDebug).not.toHaveProperty("accountNumber");
     expect(addressDebug.destination).toMatchObject({
       postalCode: "06100",
@@ -167,7 +172,7 @@ describe("FedEx rates service", () => {
     const errorDebug = JSON.parse((console.error as jest.Mock).mock.calls[0][1]);
     const errorOutput = JSON.stringify((console.error as jest.Mock).mock.calls);
     expect(errorOutput).toContain("[FedEx Error Raw]");
-    expect(errorDebug.errors).toEqual([
+    expect(errorDebug.details).toEqual([
       {
         code: "INVALID.INPUT.EXCEPTION",
         message: "Invalid recipient postal code",

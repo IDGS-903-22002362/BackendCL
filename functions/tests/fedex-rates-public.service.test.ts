@@ -143,7 +143,7 @@ describe("FedEx public rates service", () => {
       groupPackageCount: 2,
       weight: { units: "KG", value: 1.24 },
       dimensions: { length: 31, width: 21, height: 11, units: "CM" },
-      declaredValue: { amount: 1000, currency: "MXN" },
+      declaredValue: { amount: 1000, currency: "NMP" },
     });
     expect(JSON.stringify((console.log as jest.Mock).mock.calls)).not.toContain(
       "740561073",

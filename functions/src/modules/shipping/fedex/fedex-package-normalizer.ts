@@ -19,6 +19,7 @@ export type FedexPackageDimensions = {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  declaredValue?: number;
 };
 
 export type FedexRequestedPackageLineItem = {
@@ -32,6 +33,10 @@ export type FedexRequestedPackageLineItem = {
     width: number;
     height: number;
     units: "CM";
+  };
+  declaredValue?: {
+    amount: number;
+    currency: "MXN";
   };
   customerReferences?: Array<{
     customerReferenceType: "CUSTOMER_REFERENCE";
@@ -158,6 +163,9 @@ const roundPackageDimensions = (
   lengthCm: Math.ceil(values.lengthCm),
   widthCm: Math.ceil(values.widthCm),
   heightCm: Math.ceil(values.heightCm),
+  ...(typeof values.declaredValue === "number" && values.declaredValue > 0
+    ? { declaredValue: Math.round(values.declaredValue * 100) / 100 }
+    : {}),
 });
 
 const assertFedexLimits = (
@@ -186,6 +194,7 @@ const validateAndNormalize = (
     lengthCm?: number;
     widthCm?: number;
     heightCm?: number;
+    declaredValue?: number;
   },
 ): FedexPackageDimensions => {
   if (
@@ -205,6 +214,7 @@ const validateAndNormalize = (
     lengthCm: values.lengthCm,
     widthCm: values.widthCm,
     heightCm: values.heightCm,
+    declaredValue: values.declaredValue,
   });
 
   assertFedexLimits(productName, dimensions);
@@ -344,6 +354,9 @@ const toLineItem = (
     height: dimensions.heightCm,
     units: "CM",
   },
+  ...(typeof dimensions.declaredValue === "number" && dimensions.declaredValue > 0
+    ? { declaredValue: { amount: dimensions.declaredValue, currency: "MXN" as const } }
+    : {}),
   customerReferences: [
     {
       customerReferenceType: "CUSTOMER_REFERENCE",
@@ -368,7 +381,12 @@ const buildPerUnitPackages = (
 
     for (let index = 0; index < quantity; index += 1) {
       packages.push({
-        dimensions,
+        dimensions: {
+          ...dimensions,
+          ...(typeof product.price === "number" && product.price > 0
+            ? { declaredValue: Math.round(product.price * 100) / 100 }
+            : {}),
+        },
         reference: `producto: ${product.name}`,
       });
     }
@@ -400,6 +418,14 @@ const buildConsolidatedPackage = (
     widthCm: Math.max(...normalized.map((item) => item.dimensions.widthCm)),
     heightCm: normalized.reduce(
       (total, item) => total + item.dimensions.heightCm * item.product.quantity,
+      0,
+    ),
+    declaredValue: normalized.reduce(
+      (total, item) =>
+        total +
+        (typeof item.product.price === "number" && item.product.price > 0
+          ? item.product.price * item.product.quantity
+          : 0),
       0,
     ),
   });

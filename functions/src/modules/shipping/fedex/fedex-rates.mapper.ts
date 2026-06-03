@@ -15,6 +15,7 @@ type FedexRateRequestPayload = {
   accountNumber: {
     value: string;
   };
+  carrierCodes?: string[];
   requestedShipment: {
     shipper: {
       address: Record<string, unknown>;
@@ -23,14 +24,14 @@ type FedexRateRequestPayload = {
       contact?: Record<string, unknown>;
       address: Record<string, unknown>;
     };
-    pickupType: "USE_SCHEDULED_PICKUP";
+    pickupType: "DROPOFF_AT_FEDEX_LOCATION";
     serviceType?: string;
-    carrierCodes?: string[];
     packagingType: "YOUR_PACKAGING";
     rateRequestType: string[];
     preferredCurrency: string;
     shipDateStamp: string;
     totalPackageCount: number;
+    totalWeight: number;
     requestedPackageLineItems: Array<{
       groupPackageCount: number;
       weight: {
@@ -42,6 +43,10 @@ type FedexRateRequestPayload = {
         width: number;
         height: number;
         units: "CM";
+      };
+      declaredValue?: {
+        amount: number;
+        currency: string;
       };
     }>;
   };
@@ -63,6 +68,9 @@ export class FedexRateRequestConfigError extends Error {
 const roundWeight = (value: number): number => Math.round(value * 100) / 100;
 
 const roundDimension = (value: number): number => Math.max(1, Math.ceil(value));
+
+const roundMoney = (value: number): number => Math.round(value * 100) / 100;
+const MX_DECLARED_VALUE_CURRENCY = "NMP";
 
 const BLOCKED_SERVICE_TYPES = new Set([
   "FEDEX_ONE_RATE",
@@ -157,25 +165,71 @@ const mapContact = (address: FedexRateAddressInput): Record<string, unknown> | u
   };
 };
 
-const mapPackage = (item: FedexRatePackageInput) => ({
-  groupPackageCount: 1,
-  weight: {
-    units: "KG" as const,
-    value: Math.max(0.01, roundWeight(item.weightKg)),
-  },
-  dimensions: {
-    length: roundDimension(item.lengthCm),
-    width: roundDimension(item.widthCm),
-    height: roundDimension(item.heightCm),
-    units: "CM" as const,
-  },
-});
+const normalizeCountryCode = (value?: string): string | undefined =>
+  cleanFedexText(value)?.toUpperCase();
+
+const resolveDeclaredValueCurrency = (
+  preferredCurrency: string,
+  originCountryCode?: string,
+  destinationCountryCode?: string,
+): string => {
+  const origin = normalizeCountryCode(originCountryCode);
+  const destination = normalizeCountryCode(destinationCountryCode);
+
+  return origin === "MX" && destination === "MX"
+    ? MX_DECLARED_VALUE_CURRENCY
+    : preferredCurrency;
+};
+
+const mapPackage = (
+  item: FedexRatePackageInput,
+  declaredValueCurrency: string,
+  omitDeclaredValue = false,
+) => {
+  const declaredValue =
+    !omitDeclaredValue &&
+    typeof item.declaredValue === "number" &&
+    Number.isFinite(item.declaredValue) &&
+    item.declaredValue > 0
+      ? roundMoney(item.declaredValue)
+      : undefined;
+
+  return {
+    groupPackageCount: 1,
+    weight: {
+      units: "KG" as const,
+      value: Math.max(0.01, roundWeight(item.weightKg)),
+    },
+    dimensions: {
+      length: roundDimension(item.lengthCm),
+      width: roundDimension(item.widthCm),
+      height: roundDimension(item.heightCm),
+      units: "CM" as const,
+    },
+    ...(declaredValue
+      ? { declaredValue: { amount: declaredValue, currency: declaredValueCurrency } }
+      : {}),
+  };
+};
 
 export const mapFedexRateRequest = (
   input: FedexRateQuoteInput,
 ): FedexRateRequestPayload => {
   const config = getFedexConfig();
-  const requestedPackageLineItems = input.packages.map(mapPackage);
+  const declaredValueCurrency = resolveDeclaredValueCurrency(
+    input.currency,
+    input.origin.countryCode,
+    input.destination.countryCode,
+  );
+  const requestedPackageLineItems = input.packages.map((item) =>
+    mapPackage(item, declaredValueCurrency, input.omitDeclaredValue),
+  );
+  const totalWeight = roundWeight(
+    requestedPackageLineItems.reduce(
+      (sum, item) => sum + item.weight.value * item.groupPackageCount,
+      0,
+    ),
+  );
   const serviceType =
     input.useConfiguredServiceType === false
       ? undefined
@@ -186,6 +240,9 @@ export const mapFedexRateRequest = (
     accountNumber: {
       value: config.accountNumber,
     },
+    ...(input.carrierCodes && input.carrierCodes.length > 0
+      ? { carrierCodes: input.carrierCodes }
+      : {}),
     requestedShipment: {
       shipper: {
         address: mapAddress(input.origin),
@@ -194,14 +251,14 @@ export const mapFedexRateRequest = (
         ...(recipientContact ? { contact: recipientContact } : {}),
         address: mapAddress(input.destination),
       },
-      pickupType: "USE_SCHEDULED_PICKUP",
+      pickupType: "DROPOFF_AT_FEDEX_LOCATION",
       ...(input.serviceType ? { serviceType: input.serviceType } : serviceType ? { serviceType } : {}),
-      ...(input.carrierCodes && input.carrierCodes.length > 0 ? { carrierCodes: input.carrierCodes } : {}),
       packagingType: "YOUR_PACKAGING",
       rateRequestType: input.rateRequestTypes,
       preferredCurrency: input.currency,
       shipDateStamp: input.shipDate,
       totalPackageCount: requestedPackageLineItems.length,
+      totalWeight,
       requestedPackageLineItems,
     },
     rateRequestControlParameters: {

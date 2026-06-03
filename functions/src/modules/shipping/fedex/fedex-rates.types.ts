@@ -133,6 +133,7 @@ export interface FedexRatePackageInput {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  declaredValue?: number;
 }
 
 export interface FedexRateQuoteInput {
@@ -145,6 +146,7 @@ export interface FedexRateQuoteInput {
   serviceType?: string;
   carrierCodes?: string[];
   useConfiguredServiceType?: boolean;
+  omitDeclaredValue?: boolean;
 }
 
 export interface FedexRateSurcharge {

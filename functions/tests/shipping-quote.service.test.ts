@@ -124,6 +124,7 @@ describe("ShippingQuoteService FedEx packages", () => {
       descripcion: "Tarro grande",
       categoriaId: "tarros",
       activo: true,
+      existencias: 10,
       fedexShipping: {
         enabled: true,
         weightKg: 0.9,
@@ -170,7 +171,7 @@ describe("ShippingQuoteService FedEx packages", () => {
           stateOrProvinceCode: "GT",
         }),
         destination: expect.objectContaining({
-          city: "LEON",
+          city: "León de los Aldama",
           postalCode: "37208",
           countryCode: "MX",
           residential: true,
@@ -182,22 +183,36 @@ describe("ShippingQuoteService FedEx packages", () => {
           },
         }),
         useConfiguredServiceType: false,
+        carrierCodes: ["FDXE"],
+        omitDeclaredValue: true,
         rateRequestTypes: ["ACCOUNT", "LIST"],
         packages: [
-          { weightKg: 0.9, lengthCm: 20, widthCm: 20, heightCm: 20 },
+          {
+            weightKg: 0.9,
+            lengthCm: 20,
+            widthCm: 20,
+            heightCm: 20,
+            declaredValue: 100,
+          },
         ],
       }),
     );
     expect(setQuote).toHaveBeenCalledWith(
       expect.objectContaining({
         destination: expect.objectContaining({
-          city: "LEON",
+          city: "León de los Aldama",
           stateOrProvinceCode: "GT",
           postalCode: "37208",
           streetLines: ["Puma 102", "Lomas de Echeveste"],
         }),
         packages: [
-          { weightKg: 0.9, lengthCm: 20, widthCm: 20, heightCm: 20 },
+          {
+            weightKg: 0.9,
+            lengthCm: 20,
+            widthCm: 20,
+            heightCm: 20,
+            declaredValue: 100,
+          },
         ],
       }),
     );
@@ -207,11 +222,12 @@ describe("ShippingQuoteService FedEx packages", () => {
     });
   });
 
-  it("sends the raw frontend address to Address Validation before Rate API", async () => {
+  it("prioritizes fedexAddress over shippingAddress and direccionEnvio for Rates", async () => {
     const { db } = buildDb({
       descripcion: "Tarro grande",
       categoriaId: "tarros",
       activo: true,
+      existencias: 10,
       fedexShipping: {
         enabled: true,
         weightKg: 0.9,
@@ -246,42 +262,44 @@ describe("ShippingQuoteService FedEx packages", () => {
       userId: "user_1",
       cart,
       direccionEnvio: address,
-    });
-
-    expect(fedexAddressService.validateAddress).toHaveBeenCalledWith(
-      expect.objectContaining({
-        address: expect.objectContaining({
-          streetLines: ["Puma 102", "Lomas de Echeveste"],
-          city: address.ciudad,
-          stateOrProvinceCode: address.estado,
-          postalCode: address.codigoPostal,
-          countryCode: "MX",
-          residential: true,
-        }),
-      }),
-    );
-    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("serviceType");
-    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("carrierCodes");
-    expect(ratesService.quoteRates).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns 422 when Address Validation has no usable resolved address", async () => {
-    jest.mocked(fedexAddressService.validateAddress).mockResolvedValue({
-      ...validAddressValidationResult,
-      isValid: false,
-      resolvedAddress: {
-        streetLines: [],
-        city: "",
-        stateOrProvinceCode: "",
-        postalCode: "",
+      shippingAddress: {
+        streetLines: ["Shipping 1"],
+        city: "Queretaro",
+        stateOrProvinceCode: "QE",
+        postalCode: "76000",
+        countryCode: "MX",
+      },
+      fedexAddress: {
+        streetLines: ["BOULEVARD PUMA 102", "Lomas de Echeveste Int 202"],
+        city: "León de los Aldama",
+        stateOrProvinceCode: "GT",
+        postalCode: "37208",
         countryCode: "MX",
         residential: true,
       },
-    } as any);
+    });
+
+    expect(fedexAddressService.validateAddress).not.toHaveBeenCalled();
+    expect(ratesService.quoteRates.mock.calls[0][0].destination).toMatchObject({
+      streetLines: ["Puma 102", "Lomas de Echeveste"],
+      city: "León de los Aldama",
+      stateOrProvinceCode: "GT",
+      postalCode: "37208",
+      countryCode: "MX",
+      residential: true,
+    });
+    expect(ratesService.quoteRates.mock.calls[0][0]).not.toHaveProperty("serviceType");
+    expect(ratesService.quoteRates.mock.calls[0][0].carrierCodes).toEqual(["FDXE"]);
+    expect(ratesService.quoteRates.mock.calls[0][0].omitDeclaredValue).toBe(true);
+    expect(ratesService.quoteRates).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a usable shipping address before calling Rates", async () => {
     const { db } = buildDb({
       descripcion: "Tarro grande",
       categoriaId: "tarros",
       activo: true,
+      existencias: 10,
       fedexShipping: {
         enabled: true,
         weightKg: 0.9,
@@ -297,13 +315,11 @@ describe("ShippingQuoteService FedEx packages", () => {
       service.createFedexCartQuote({
         userId: "user_1",
         cart,
-        direccionEnvio: address,
       }),
     ).rejects.toMatchObject({
       name: "ShippingQuoteError",
-      message:
-        "FedEx no pudo validar la dirección de entrega. Revisa calle, colonia, ciudad y código postal.",
-      statusCode: 422,
+      code: "SHIPPING_ADDRESS_REQUIRED",
+      statusCode: 400,
     });
     expect(ratesService.quoteRates).not.toHaveBeenCalled();
   });
@@ -312,6 +328,7 @@ describe("ShippingQuoteService FedEx packages", () => {
     const { db } = buildDb({
       descripcion: "Membresia digital",
       activo: true,
+      existencias: 0,
       fedexShipping: { enabled: false },
     });
     const ratesService = { quoteRates: jest.fn() };
@@ -334,6 +351,7 @@ describe("ShippingQuoteService FedEx packages", () => {
     const { db } = buildDb({
       descripcion: "Tarro grande",
       activo: true,
+      existencias: 10,
     });
     const service = new ShippingQuoteService(db as any, { quoteRates: jest.fn() } as any);
 
@@ -345,7 +363,7 @@ describe("ShippingQuoteService FedEx packages", () => {
       }),
     ).rejects.toMatchObject({
       name: "ShippingQuoteError",
-      code: "FEDEX_PRODUCT_DIMENSIONS_MISSING",
+      code: "PRODUCT_SHIPPING_DATA_MISSING",
       statusCode: 422,
     });
   });
@@ -355,6 +373,7 @@ describe("ShippingQuoteService FedEx packages", () => {
       descripcion: "Tarro grande",
       categoriaId: "tarros",
       activo: true,
+      existencias: 10,
       fedexShipping: {
         enabled: true,
         weightKg: 0.9,
@@ -381,8 +400,8 @@ describe("ShippingQuoteService FedEx packages", () => {
       }),
     ).rejects.toMatchObject({
       name: "ShippingQuoteError",
-      message: "Invalid service and packaging combination",
-      statusCode: 422,
+      code: "FEDEX_RATE_BAD_REQUEST",
+      statusCode: 400,
     });
   });
 });

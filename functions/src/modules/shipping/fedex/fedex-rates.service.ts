@@ -96,6 +96,7 @@ const createOptionId = (option: {
 const DEFAULT_CARRIER_CODES: FedexCarrierCode[] = ["FDXE", "FDXG"];
 const DEFAULT_RATE_REQUEST_TYPES: FedexRateRequestType[] = ["ACCOUNT", "LIST"];
 const DEFAULT_CURRENCY = "MXN";
+const MX_DECLARED_VALUE_CURRENCY = "NMP";
 const DEFAULT_WEIGHT_UNITS = "KG";
 const DEFAULT_DIMENSION_UNITS = "CM";
 const DEFAULT_PICKUP_TYPE: FedexPickupType = "DROPOFF_AT_FEDEX_LOCATION";
@@ -151,6 +152,19 @@ const toFedexMoney = (value: number): number =>
 const cleanText = (value?: string): string | undefined => {
   const cleaned = value?.trim().replace(/\s+/g, " ");
   return cleaned || undefined;
+};
+
+const resolveDeclaredValueCurrency = (
+  preferredCurrency: string,
+  originCountryCode?: string,
+  destinationCountryCode?: string,
+): string => {
+  const origin = cleanText(originCountryCode)?.toUpperCase();
+  const destination = cleanText(destinationCountryCode)?.toUpperCase();
+
+  return origin === "MX" && destination === "MX"
+    ? MX_DECLARED_VALUE_CURRENCY
+    : preferredCurrency;
 };
 
 const normalizeStreetLines = (streetLines?: string[]): string[] | undefined => {
@@ -272,13 +286,10 @@ const logSafeRatePayload = (
 ): void => {
   console.log("[FedEx Rate Payload Debug]", JSON.stringify({
     accountNumberPresent: Boolean(payload.accountNumber?.value),
+    carrierCodes: payload.carrierCodes || [],
     requestedShipment: {
       hasServiceType: Boolean(payload.requestedShipment?.serviceType),
       serviceType: payload.requestedShipment?.serviceType || null,
-      hasCarrierCode: Boolean((payload.requestedShipment as any)?.carrierCode),
-      carrierCode: (payload.requestedShipment as any)?.carrierCode || null,
-      hasCarrierCodes: Boolean(payload.requestedShipment?.carrierCodes?.length),
-      carrierCodes: payload.requestedShipment?.carrierCodes || [],
       packagingType: payload.requestedShipment?.packagingType,
       pickupType: payload.requestedShipment?.pickupType,
       rateRequestType: payload.requestedShipment?.rateRequestType,
@@ -304,15 +315,57 @@ const logSafeRatePayload = (
       },
       streetLines: payload.requestedShipment?.recipient?.address?.streetLines,
       totalPackageCount: payload.requestedShipment?.totalPackageCount,
+      totalWeight: payload.requestedShipment?.totalWeight,
       packages: payload.requestedShipment?.requestedPackageLineItems?.map((p: any) => ({
         groupPackageCount: p.groupPackageCount,
         weight: p.weight,
         dimensions: p.dimensions,
+        hasDeclaredValue: Boolean(p.declaredValue),
+        declaredValue: p.declaredValue,
         hasPackageType: Boolean(p.packageType),
         hasPackagingType: Boolean(p.packagingType),
       })),
     },
+    sanitizedPayload: {
+      carrierCodes: payload.carrierCodes || [],
+      requestedShipment: {
+        shipper: payload.requestedShipment.shipper,
+        recipient: payload.requestedShipment.recipient,
+        pickupType: payload.requestedShipment.pickupType,
+        packagingType: payload.requestedShipment.packagingType,
+        rateRequestType: payload.requestedShipment.rateRequestType,
+        preferredCurrency: payload.requestedShipment.preferredCurrency,
+        shipDateStamp: payload.requestedShipment.shipDateStamp,
+        totalPackageCount: payload.requestedShipment.totalPackageCount,
+        totalWeight: payload.requestedShipment.totalWeight,
+        requestedPackageLineItems:
+          payload.requestedShipment.requestedPackageLineItems,
+      },
+    },
   }, null, 2));
+};
+
+const sanitizeFedexRateError = (error: any): Record<string, unknown> => {
+  const original = error?.originalError || error;
+  const response = original?.response;
+  const responseBody = response?.data;
+  const errors = error?.errors || responseBody?.errors;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+
+  return {
+    status: error?.status || response?.status,
+    code: responseBody?.code || firstError?.code || error?.code,
+    message: error?.message || responseBody?.message || original?.message,
+    fedexCode: firstError?.code,
+    fedexMessage: firstError?.message || responseBody?.message || error?.message,
+    transactionId:
+      error?.fedexTransactionId ||
+      responseBody?.transactionId ||
+      response?.headers?.["x-customer-transaction-id"] ||
+      response?.headers?.["x-fedex-transaction-id"],
+    details: errors,
+    responseBody,
+  };
 };
 
 export class FedexRatesService {
@@ -387,20 +440,10 @@ export class FedexRatesService {
         requestPayload,
       );
     } catch (error: any) {
-      console.error("[FedEx Error Raw]", JSON.stringify({
-        status: error?.response?.status,
-        statusText: error?.response?.statusText,
-        transactionId:
-          error?.response?.data?.transactionId ||
-          error?.response?.headers?.["x-customer-transaction-id"] ||
-          error?.response?.headers?.["x-fedex-transaction-id"],
-        data: error?.response?.data,
-        errors: error?.response?.data?.errors,
-        message:
-          error?.response?.data?.errors?.[0]?.message ||
-          error?.response?.data?.message ||
-          error?.message,
-      }, null, 2));
+      console.error(
+        "[FedEx Error Raw]",
+        JSON.stringify(sanitizeFedexRateError(error), null, 2),
+      );
       throw error;
     }
     const options = mapFedexRateResponse(response, input.currency).map((option) => ({
@@ -455,9 +498,15 @@ export class FedexRatesService {
       : DEFAULT_CARRIER_CODES;
     const pickupType = (dto.pickupType || readDefaultPickupType()) as FedexPickupType;
     const packagingType = dto.packagingType || readDefaultPackagingType();
+    const shipper = getFedexShipperConfig();
+    const declaredValueCurrency = resolveDeclaredValueCurrency(
+      preferredCurrency,
+      shipper.countryCode,
+      recipient.countryCode,
+    );
     const requestedPackageLineItems = this.mapPublicPackages(
       dto.packages,
-      preferredCurrency,
+      declaredValueCurrency,
     );
     const totalPackageCount = requestedPackageLineItems.reduce(
       (sum, item) => sum + item.groupPackageCount,
@@ -469,7 +518,6 @@ export class FedexRatesService {
         0,
       ),
     );
-    const shipper = getFedexShipperConfig();
 
     return {
       accountNumber: {
