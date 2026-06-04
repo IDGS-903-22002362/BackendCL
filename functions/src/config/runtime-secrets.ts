@@ -67,6 +67,13 @@ export const APLAZO_PAYMENT_SECRETS = [
   "APLAZO_ONLINE_REFUND_STATUS_PATH",
 ] as const;
 
+export const BREVO_SECRETS = [
+  "BREVO_API_KEY",
+  "BREVO_SENDER_EMAIL",
+  "BREVO_SENDER_NAME",
+] as const;
+
+
 export const API_RUNTIME_SECRETS = [
   ...AUTH_SECRETS,
   ...STRIPE_SECRETS,
@@ -75,6 +82,7 @@ export const API_RUNTIME_SECRETS = [
   ...LIGA_MX_SECRETS,
   ...APLAZO_PAYMENT_SECRETS,
   ...LEGACY_CONFIG_SECRETS,
+  ...BREVO_SECRETS,
 ] as const;
 
 export const PAYMENT_EVENT_SECRETS = [
@@ -93,3 +101,4 @@ export const NOTIFICATION_EVENT_SECRETS = [
   ...AI_API_SECRETS,
   ...LEGACY_CONFIG_SECRETS,
 ] as const;
+
