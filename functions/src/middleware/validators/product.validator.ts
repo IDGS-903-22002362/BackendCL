@@ -1,5 +1,39 @@
 import { z } from "zod";
 
+const booleanQuerySchema = z.preprocess((value) => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "si", "sí"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no"].includes(normalized)) {
+      return false;
+    }
+  }
+  return value;
+}, z.boolean());
+
+const numberQuerySchema = (schema: z.ZodNumber) =>
+  z.preprocess((value) => {
+    if (value === undefined || value === "") {
+      return undefined;
+    }
+    return typeof value === "string" ? Number(value) : value;
+  }, schema);
+
+const trimmedOptionalQueryString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .optional();
+
 const inventarioPorTallaItemSchema = z
   .object({
     tallaId: z
@@ -73,6 +107,75 @@ const shippingSchema = z
   })
   .strict();
 
+export const catalogProductQuerySchema = z
+  .object({
+    limit: numberQuerySchema(
+      z
+        .number()
+        .int("limit debe ser un entero")
+        .min(1, "limit debe ser mayor a 0")
+        .max(48, "limit no puede exceder 48"),
+    )
+      .optional()
+      .default(24),
+    cursor: z.string().trim().min(1).max(1200).optional(),
+    category: trimmedOptionalQueryString,
+    categoria: trimmedOptionalQueryString,
+    line: trimmedOptionalQueryString,
+    linea: trimmedOptionalQueryString,
+    talla: trimmedOptionalQueryString,
+    minPrice: numberQuerySchema(
+      z.number().nonnegative("minPrice no puede ser negativo"),
+    ).optional(),
+    maxPrice: numberQuerySchema(
+      z.number().nonnegative("maxPrice no puede ser negativo"),
+    ).optional(),
+    sort: z
+      .enum(["destacados", "precio_asc", "precio_desc", "recientes", "nombre_asc"])
+      .optional()
+      .default("destacados"),
+    q: z.string().trim().min(1).max(80).optional(),
+    onlyOffers: booleanQuerySchema.optional().default(false),
+    onlyAvailable: booleanQuerySchema.optional().default(false),
+  })
+  .strict()
+  .refine(
+    (query) => !(query.category && query.categoria && query.category !== query.categoria),
+    {
+      message: "Usa solo category o categoria con el mismo valor",
+      path: ["category"],
+    },
+  )
+  .refine((query) => !(query.line && query.linea && query.line !== query.linea), {
+    message: "Usa solo line o linea con el mismo valor",
+    path: ["line"],
+  })
+  .refine(
+    (query) =>
+      query.minPrice === undefined ||
+      query.maxPrice === undefined ||
+      query.minPrice <= query.maxPrice,
+    {
+      message: "minPrice no puede ser mayor que maxPrice",
+      path: ["minPrice"],
+    },
+  );
+
+export const adminProductsQuerySchema = z
+  .object({
+    estado: z.enum(["activo", "inactivo", "todos"]).optional().default("todos"),
+  })
+  .strict();
+
+export const updateProductActiveStatusSchema = z
+  .object({
+    activo: z.boolean({
+      required_error: "El campo activo es requerido",
+      invalid_type_error: "El campo activo debe ser un booleano",
+    }),
+  })
+  .strict();
+
 /**
  * Schema para crear un nuevo producto
  * Valida todos los campos requeridos según el modelo Producto
@@ -132,6 +235,13 @@ export const createProductSchema = z
       })
       .int("Las existencias deben ser un número entero")
       .nonnegative("Las existencias no pueden ser negativas"),
+
+    destacado: z
+      .boolean({
+        invalid_type_error: "El campo destacado debe ser un booleano",
+      })
+      .optional()
+      .default(false),
 
     proveedorId: z
       .string({
@@ -270,6 +380,12 @@ export const updateProductSchema = z
       })
       .int("Las existencias deben ser un número entero")
       .nonnegative("Las existencias no pueden ser negativas")
+      .optional(),
+
+    destacado: z
+      .boolean({
+        invalid_type_error: "El campo destacado debe ser un booleano",
+      })
       .optional(),
 
     proveedorId: z

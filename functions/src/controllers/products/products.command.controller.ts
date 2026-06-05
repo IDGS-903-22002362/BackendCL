@@ -93,6 +93,40 @@ export const update = async (req: Request, res: Response) => {
   }
 };
 
+export const setActiveStatus = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { activo } = req.body;
+    const productoActualizado = await productService.setProductActiveStatus(
+      id,
+      activo,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: activo
+        ? "Producto activado exitosamente"
+        : "Producto ocultado exitosamente",
+      data: productoActualizado,
+    });
+  } catch (error) {
+    console.error("Error en PATCH /api/productos/:id/estado:", error);
+    const statusCode =
+      error instanceof Error && error.message.toLowerCase().includes("no encontrado")
+        ? 404
+        : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Producto no encontrado"
+          : "Error al actualizar estado del producto",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
 export const remove = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

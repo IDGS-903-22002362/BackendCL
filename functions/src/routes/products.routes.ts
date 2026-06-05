@@ -11,6 +11,7 @@ import * as debugController from "../controllers/products/products.debug.control
 import {
   validateBody,
   validateParams,
+  validateQuery,
 } from "../middleware/validation.middleware";
 import {
   createProductSchema,
@@ -19,6 +20,9 @@ import {
   updateProductStockSchema,
   replaceSizeInventorySchema,
   rateProductSchema,
+  catalogProductQuerySchema,
+  adminProductsQuerySchema,
+  updateProductActiveStatusSchema,
 } from "../middleware/validators/product.validator";
 import {
   idParamSchema,
@@ -121,6 +125,20 @@ router.get("/debug", debugController.debugFirestore);
  *         $ref: '#/components/responses/500ServerError'
  */
 router.get("/", queryController.getAll);
+
+router.get(
+  "/catalogo",
+  validateQuery(catalogProductQuerySchema),
+  queryController.getCatalog,
+);
+
+router.get(
+  "/admin",
+  authMiddleware,
+  requireAdmin,
+  validateQuery(adminProductsQuerySchema),
+  queryController.getAdminProducts,
+);
 
 /**
  * @swagger
@@ -554,6 +572,15 @@ router.put(
   validateParams(idParamSchema),
   validateBody(updateProductSchema),
   commandController.update,
+);
+
+router.patch(
+  "/:id/estado",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  validateBody(updateProductActiveStatusSchema),
+  commandController.setActiveStatus,
 );
 
 /**

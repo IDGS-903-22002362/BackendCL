@@ -1,7 +1,9 @@
 import { Request, Response } from "express";
 import favoritoService from "../../services/favorito.service";
-import productService from "../../services/product.service";
+import productService, { CatalogQueryError } from "../../services/product.service";
 import productRatingService from "../../services/product-rating.service";
+import { CatalogQuery } from "../../models/product-catalog.model";
+import { AdminProductsQuery } from "../../models/product-admin.model";
 
 /**
  * Controller: Products Query (Lectura)
@@ -20,6 +22,52 @@ export const getAll = async (_req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: "Error al obtener los productos",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getCatalog = async (req: Request, res: Response) => {
+  try {
+    const catalog = await productService.listCatalogProducts(
+      req.query as unknown as CatalogQuery,
+    );
+
+    return res.status(200).json(catalog);
+  } catch (error) {
+    console.error("Error en GET /api/productos/catalogo:", error);
+
+    if (error instanceof CatalogQueryError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener el catalogo de productos",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getAdminProducts = async (req: Request, res: Response) => {
+  try {
+    const productos = await productService.getAdminProducts(
+      req.query as unknown as AdminProductsQuery,
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: productos.length,
+      data: productos,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/productos/admin:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener productos para admin",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }
