@@ -79,15 +79,18 @@ export function calcularPrecioFinal(
 }
 
 export function tieneStockOferta(oferta: Oferta): boolean {
-  if (!oferta.hastaAgotarExistencias) {
+  const stockLimiteOferta = oferta.stockLimiteOferta;
+
+  if (typeof stockLimiteOferta !== "number") {
     return true;
   }
 
-  if (typeof oferta.stockLimiteOferta !== "number") {
-    return false;
-  }
+  const stockVendido =
+    typeof oferta.stockVendidoOferta === "number"
+      ? oferta.stockVendidoOferta
+      : 0;
 
-  return oferta.stockVendidoOferta < oferta.stockLimiteOferta;
+  return stockVendido < stockLimiteOferta;
 }
 
 export function esOfertaVigente(

@@ -35,6 +35,7 @@ import paymentsV2Routes from "./payments-v2.routes";
 import adminPaymentsRoutes from "./admin-payments.routes";
 import webhooksRoutes from "./webhooks.routes";
 import ofertasRoutes from "./ofertas.routes";
+import codigosPromocionRoutes from "./codigos-promocion.routes";
 import bannerRoutes from "./banner.routes";
 import pickupLocationsRoutes from "./pickup-locations.routes";
 import adminPickupLocationsRoutes from "./admin-pickup-locations.routes";
@@ -71,9 +72,11 @@ router.use("/beneficios", beneficiosRoutes);
 router.use("/liga-mx", ligaMxRoutes);
 router.use("/banners", bannerRoutes);
 router.use("/ofertas", ofertasRoutes);
+
+router.use("/banners", bannerRoutes);
+router.use("/ofertas", ofertasRoutes);
+router.use("/codigos-promocion", codigosPromocionRoutes);
 router.use("/pickup-locations", pickupLocationsRoutes);
-router.use("/admin/pickup-locations", adminPickupLocationsRoutes);
-router.use("/admin/pickup-orders", adminPickupOrdersRoutes);
 
 // Futuros módulos:
 

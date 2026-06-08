@@ -142,19 +142,7 @@ export const createOfertaSchema = z
       message: "Debes seleccionar al menos un elemento según el alcance de la oferta",
       path: ["aplicaA"],
     }
-  )
-  .refine(
-    (data) => {
-      if (data.hastaAgotarExistencias === true) {
-        return typeof data.stockLimiteOferta === "number";
-      }
 
-      return true;
-    },
-    {
-      message: "Si la oferta es hasta agotar existencias, debes definir stockLimiteOferta",
-      path: ["stockLimiteOferta"],
-    }
   );
 
 export const updateOfertaSchema = z
@@ -276,19 +264,7 @@ export const updateOfertaSchema = z
       message: "Debes seleccionar al menos un elemento según el alcance de la oferta",
       path: ["aplicaA"],
     }
-  )
-  .refine(
-    (data) => {
-      if (data.hastaAgotarExistencias === true) {
-        return typeof data.stockLimiteOferta === "number";
-      }
 
-      return true;
-    },
-    {
-      message: "Si la oferta es hasta agotar existencias, debes definir stockLimiteOferta",
-      path: ["stockLimiteOferta"],
-    }
   );
 
 export const calcularPreciosOfertaSchema = z

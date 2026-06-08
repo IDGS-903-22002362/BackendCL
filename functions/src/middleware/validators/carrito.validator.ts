@@ -136,9 +136,18 @@ export const checkoutCarritoSchema = z
       }),
     }),
 
-    costoEnvio: z
+       costoEnvio: z
       .number()
       .nonnegative("El costo de envío no puede ser negativo")
+      .optional(),
+
+    codigoPromocion: z
+      .string({
+        invalid_type_error: "El código promocional debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El código promocional no puede estar vacío")
+      .max(50, "El código promocional es demasiado largo")
       .optional(),
 
     notas: z

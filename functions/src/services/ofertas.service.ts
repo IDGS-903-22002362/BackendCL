@@ -16,6 +16,7 @@ import { firestoreTienda } from "../config/firebase";
 import {
   CalcularPrecioOfertaItemDto,
   CreateOfertaDto,
+  FechaOfertaInput,
   Oferta,
   PrecioOfertaCalculado,
   ResultadoCalculoOfertas,
@@ -60,8 +61,36 @@ function toDate(value: FechaFirestore): Date {
   return new Date(0);
 }
 
-function toTimestamp(value: string): Timestamp {
-  return Timestamp.fromDate(new Date(value));
+function toTimestamp(value: FechaOfertaInput, campo = "fecha"): Timestamp {
+  const fecha = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(fecha.getTime())) {
+    throw new Error(`${campo} no tiene un formato válido`);
+  }
+
+  return Timestamp.fromDate(fecha);
+}
+
+function toDateInput(value: FechaOfertaInput, campo = "fecha"): Date {
+  const fecha = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(fecha.getTime())) {
+    throw new Error(`${campo} no tiene un formato válido`);
+  }
+
+  return fecha;
+}
+
+function validarRangoFechasOferta(
+  fechaInicio: FechaOfertaInput,
+  fechaFin: FechaOfertaInput
+): void {
+  const inicio = toDateInput(fechaInicio, "fechaInicio");
+  const fin = toDateInput(fechaFin, "fechaFin");
+
+  if (fin.getTime() <= inicio.getTime()) {
+    throw new Error("La fecha de fin debe ser posterior a la fecha de inicio");
+  }
 }
 
 function stringArrayOrUndefined(value: unknown): string[] | undefined {
@@ -214,6 +243,8 @@ export class OfertasService {
     data.productoIds
   );
 
+  validarRangoFechasOferta(data.fechaInicio, data.fechaFin);
+
   const docRef = await this.ofertasCollection.add({
       titulo: data.titulo,
       descripcion: data.descripcion ?? null,
@@ -230,8 +261,8 @@ export class OfertasService {
       categoriaIds: data.categoriaIds ?? [],
       lineaIds: data.lineaIds ?? [],
 
-      fechaInicio: toTimestamp(data.fechaInicio),
-      fechaFin: toTimestamp(data.fechaFin),
+      fechaInicio: toTimestamp(data.fechaInicio, "fechaInicio"),
+      fechaFin: toTimestamp(data.fechaFin, "fechaFin"),
 
       hastaAgotarExistencias: data.hastaAgotarExistencias ?? false,
       stockLimiteOferta: data.stockLimiteOferta ?? null,
@@ -280,6 +311,11 @@ await this.validarProductosActivosParaOferta(
   data.productoIds ?? ofertaActual.productoIds
 );
 
+const fechaInicioParaValidar = data.fechaInicio ?? ofertaActual.fechaInicio;
+const fechaFinParaValidar = data.fechaFin ?? ofertaActual.fechaFin;
+
+validarRangoFechasOferta(fechaInicioParaValidar, fechaFinParaValidar);
+
 const payload: Record<string, unknown> = {
   ...data,
   updatedAt: FieldValue.serverTimestamp(),
@@ -287,12 +323,12 @@ const payload: Record<string, unknown> = {
 };
 
     if (data.fechaInicio) {
-      payload.fechaInicio = toTimestamp(data.fechaInicio);
-    }
+  payload.fechaInicio = toTimestamp(data.fechaInicio, "fechaInicio");
+}
 
-    if (data.fechaFin) {
-      payload.fechaFin = toTimestamp(data.fechaFin);
-    }
+if (data.fechaFin) {
+  payload.fechaFin = toTimestamp(data.fechaFin, "fechaFin");
+}
 
     await this.ofertasCollection.doc(id).update(payload);
 
@@ -397,19 +433,15 @@ const payload: Record<string, unknown> = {
 
       const oferta = this.mapOfertaDoc(snapshot);
 
-      if (!oferta.hastaAgotarExistencias) {
-        return;
-      }
-
       if (typeof oferta.stockLimiteOferta !== "number") {
-        throw new Error("La oferta no tiene stock límite configurado");
-      }
+  return;
+}
 
-      const nuevoStockVendido = oferta.stockVendidoOferta + cantidad;
+const nuevoStockVendido = oferta.stockVendidoOferta + cantidad;
 
-      if (nuevoStockVendido > oferta.stockLimiteOferta) {
-        throw new Error("La oferta ya no tiene stock disponible");
-      }
+if (nuevoStockVendido > oferta.stockLimiteOferta) {
+  throw new Error("La oferta ya no tiene stock disponible");
+}
 
       transaction.update(docRef, {
         stockVendidoOferta: FieldValue.increment(cantidad),

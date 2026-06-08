@@ -69,9 +69,24 @@ export enum FulfillmentStatus {
 export interface ItemOrden {
   productoId: string; // Referencia al documento en colección 'productos'
   cantidad: number; // Cantidad de unidades del producto
-  precioUnitario: number; // Precio unitario al momento de la compra (snapshot)
-  subtotal: number; // cantidad * precioUnitario
+
+  // Precio final cobrado al momento de la compra.
+  // Se mantiene para compatibilidad con órdenes existentes.
+  precioUnitario: number;
+
+  // Subtotal final cobrado: cantidad * precioUnitario final.
+  subtotal: number;
+
   tallaId?: string; // ID de la talla seleccionada (opcional, si aplica)
+
+  // Campos opcionales para snapshot de ofertas/descuentos.
+  // Son opcionales para no romper órdenes antiguas.
+  precioUnitarioOriginal?: number;
+  precioUnitarioFinal?: number;
+  descuentoUnitario?: number;
+  descuentoTotal?: number;
+  ofertaAplicadaId?: string | null;
+  ofertaTitulo?: string | null;
 }
 
 /**
@@ -150,8 +165,16 @@ export interface Orden {
   paymentMetadata?: Record<string, unknown>; // Metadata usada para conciliación
   numeroGuia?: string; // Número de guía de envío
   transportista?: string; // Nombre del transportista
-  costoEnvio?: number; // Costo de envío (si aplica)
+    costoEnvio?: number; // Costo de envío (si aplica)
   notas?: string; // Notas adicionales del cliente
+
+  // Campos opcionales para códigos promocionales.
+  // Se guardan como snapshot de auditoría para saber qué código afectó la orden.
+  codigoPromocion?: string;
+  codigoPromocionId?: string | null;
+  codigoPromocionTitulo?: string | null;
+  descuentoCodigoPromocion?: number;
+
   deliveredAt?: Timestamp; // Fecha efectiva en la que la orden quedó entregada
 
   // Campos de auditoría
@@ -176,6 +199,7 @@ export interface CrearOrdenDTO {
   pickupLocationId?: string;
   pickupContact?: PickupContact;
   costoEnvio?: number;
+  codigoPromocion?: string;
   notas?: string;
 }
 

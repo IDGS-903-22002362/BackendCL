@@ -9,6 +9,8 @@ export type AlcanceOferta =
   | "lineas"
   | "todo";
 
+export type FechaOfertaInput = string | Date;
+
 export interface Oferta {
   id: string;
 
@@ -64,8 +66,8 @@ export interface CreateOfertaDto {
   categoriaIds?: string[];
   lineaIds?: string[];
 
-  fechaInicio: string;
-  fechaFin: string;
+  fechaInicio: FechaOfertaInput;
+  fechaFin: FechaOfertaInput;
 
   hastaAgotarExistencias?: boolean;
   stockLimiteOferta?: number | null;
@@ -93,8 +95,8 @@ export interface UpdateOfertaDto {
   categoriaIds?: string[];
   lineaIds?: string[];
 
-  fechaInicio?: string;
-  fechaFin?: string;
+  fechaInicio?: FechaOfertaInput;
+  fechaFin?: FechaOfertaInput;
 
   hastaAgotarExistencias?: boolean;
   stockLimiteOferta?: number | null;

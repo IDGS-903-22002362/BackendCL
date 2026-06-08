@@ -888,14 +888,15 @@ export class CarritoService {
   async checkout(
     usuarioId: string,
     checkoutData: {
-      fulfillmentMethod?: FulfillmentMethod;
-      direccionEnvio?: DireccionEnvio;
-      pickupLocationId?: string;
-      pickupContact?: PickupContact;
-      metodoPago: MetodoPago;
-      costoEnvio?: number;
-      notas?: string;
-    },
+  fulfillmentMethod?: FulfillmentMethod;
+  direccionEnvio?: DireccionEnvio;
+  pickupLocationId?: string;
+  pickupContact?: PickupContact;
+  metodoPago: MetodoPago;
+  costoEnvio?: number;
+  codigoPromocion?: string;
+  notas?: string;
+},
   ): Promise<Orden> {
     console.log(`🛒 Iniciando checkout para usuario: ${usuarioId}`);
 
@@ -927,20 +928,21 @@ export class CarritoService {
     // PASO 4: Construir CrearOrdenDTO
     // subtotal, impuestos y total son placeholders — OrdenService los recalcula
     const crearOrdenDTO: CrearOrdenDTO = {
-      usuarioId,
-      items: itemsOrden,
-      subtotal: carrito.subtotal,
-      impuestos: 0,
-      total: carrito.total,
-      fulfillmentMethod:
-        checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY,
-      direccionEnvio: checkoutData.direccionEnvio,
-      pickupLocationId: checkoutData.pickupLocationId,
-      pickupContact: checkoutData.pickupContact,
-      metodoPago: checkoutData.metodoPago,
-      costoEnvio: checkoutData.costoEnvio,
-      notas: checkoutData.notas,
-    };
+  usuarioId,
+  items: itemsOrden,
+  subtotal: carrito.subtotal,
+  impuestos: 0,
+  total: carrito.total,
+  fulfillmentMethod:
+    checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY,
+  direccionEnvio: checkoutData.direccionEnvio,
+  pickupLocationId: checkoutData.pickupLocationId,
+  pickupContact: checkoutData.pickupContact,
+  metodoPago: checkoutData.metodoPago,
+  costoEnvio: checkoutData.costoEnvio,
+  codigoPromocion: checkoutData.codigoPromocion,
+  notas: checkoutData.notas,
+};
 
     // PASO 5: Crear orden (valida stock, recalcula precios, decrementa stock)
     // Si falla aquí, el carrito queda intacto (rollback natural)

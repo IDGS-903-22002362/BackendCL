@@ -114,6 +114,12 @@ import {
   listarOfertasQuerySchema,
   updateOfertaSchema,
 } from "../middleware/validators/ofertas.validator";
+import {
+  createCodigoPromocionSchema,
+  updateCodigoPromocionSchema,
+  listCodigosPromocionQuerySchema,
+  validarCodigoPromocionSchema,
+} from "../middleware/validators/codigos-promocion.validator";
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
  * Genera documentación interactiva de la API con integración automática de schemas Zod
@@ -198,6 +204,10 @@ const swaggerDefinition = {
 {
   name: "Ofertas",
   description: "Gestión de ofertas, descuentos y cálculo de precios promocionales",
+},
+{
+  name: "Codigos Promocionales",
+  description: "Gestión de códigos promocionales y validación de descuentos",
 },
 {
   name: "Orders",
@@ -482,6 +492,85 @@ ofertaTitulo: {
     subtotalOriginal: { type: "number", example: 2599.98 },
     subtotalFinal: { type: "number", example: 2079.98 },
     ahorroTotal: { type: "number", example: 520 },
+  },
+},
+
+CreateCodigoPromocion: zodToJsonSchema(createCodigoPromocionSchema),
+UpdateCodigoPromocion: zodToJsonSchema(updateCodigoPromocionSchema),
+ValidarCodigoPromocion: zodToJsonSchema(validarCodigoPromocionSchema),
+ListCodigosPromocionQuery: zodToJsonSchema(listCodigosPromocionQuerySchema),
+
+CodigoPromocion: {
+  type: "object",
+  properties: {
+    id: { type: "string", example: "cod_promo_123" },
+    codigo: { type: "string", example: "DESCUENTO20" },
+    descripcion: {
+      type: "string",
+      example: "Código promocional para cliente VIP",
+    },
+    estado: {
+      type: "boolean",
+      example: true,
+    },
+    tipoDescuento: {
+      type: "string",
+      enum: ["precio_fijo", "porcentaje", "monto"],
+      example: "porcentaje",
+    },
+    valorDescuento: { type: "number", example: 20 },
+    usoMaximo: {
+      type: "integer",
+      nullable: true,
+      example: 100,
+    },
+    usoActual: { type: "integer", example: 23 },
+    fechaInicio: {
+      type: "string",
+      format: "date-time",
+      example: "2026-05-01T00:00:00.000Z",
+    },
+    fechaFin: {
+      type: "string",
+      format: "date-time",
+      example: "2026-05-31T23:59:59.000Z",
+    },
+    aplicaA: {
+      type: "string",
+      enum: ["productos", "categorias", "lineas", "todo"],
+      example: "productos",
+    },
+    productoIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["prod_123", "prod_456"],
+    },
+    categoriaIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["cat_jerseys"],
+    },
+    lineaIds: {
+      type: "array",
+      items: { type: "string" },
+      example: ["linea_ropa"],
+    },
+    deletedAt: {
+      type: "string",
+      format: "date-time",
+      nullable: true,
+      example: null,
+    },
+    createdAt: {
+      type: "string",
+      format: "date-time",
+      example: "2026-04-29T16:00:00.000Z",
+    },
+    updatedAt: {
+      type: "string",
+      format: "date-time",
+      example: "2026-04-29T16:30:00.000Z",
+    },
   },
 },
 
