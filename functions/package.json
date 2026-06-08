@@ -23,8 +23,9 @@
   "dependencies": {
     "@google/genai": "^1.44.0",
     "@google/generative-ai": "^0.24.1",
+    "@sendinblue/client": "^3.3.1",
     "@types/busboy": "^1.5.4",
-    "axios": "^1.13.5",
+    "axios": "^1.16.1",
     "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -46,7 +47,7 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^9.0.1",
-    "zod": "^3.25.76",
+    "zod": "^3.22.4",
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {

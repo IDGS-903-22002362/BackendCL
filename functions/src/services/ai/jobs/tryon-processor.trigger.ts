@@ -1,32 +1,24 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { assertAiConfig } from "../../../config/ai.config";
 import { STORE_FIRESTORE_DATABASE } from "../../../config/firestore.constants";
+import { AI_TRIGGER_SECRETS } from "../../../config/runtime-secrets";
 import logger from "../../../utils/logger";
 import tryOnWorkflowService from "./tryon-workflow.service";
 
 const triggerLogger = logger.child({ component: "tryon-processor-trigger" });
+const vertexTryOnServiceAccount = process.env.VERTEX_TRYON_SERVICE_ACCOUNT;
 
 export const processTryOnJobTrigger = onDocumentCreated(
   {
     document: "tryon_jobs/{jobId}",
     database: STORE_FIRESTORE_DATABASE,
     region: process.env.GCP_REGION || "us-central1",
-    secrets: [
-      "GCP_PROJECT_ID",
-      "GCP_REGION",
-      "VERTEX_TRYON_MODEL",
-      "AI_PREVIEW_MOCKUP_MODEL",
-      "AI_PREVIEW_MOCKUP_API_VERSION",
-      "AI_PREVIEW_MOCKUP_TIMEOUT_MS",
-      "AI_PREVIEW_MOCKUP_FALLBACK_MODEL",
-      "AI_PREVIEW_MOCKUP_FALLBACK_REGION",
-      "AI_PREVIEW_MOCKUP_FALLBACK_API_VERSION",
-      "AI_STORAGE_BUCKET",
-      "GCS_TRYON_BUCKET",
-    ],
     timeoutSeconds: 300,
     memory: "1GiB",
-    serviceAccount: "vertex-tryon-sa@e-comerce-leon.iam.gserviceaccount.com",
+    ...(vertexTryOnServiceAccount
+      ? { serviceAccount: vertexTryOnServiceAccount }
+      : {}),
+    secrets: [...AI_TRIGGER_SECRETS],
   },
   async (event) => {
     assertAiConfig({

@@ -12,6 +12,17 @@ import {
   StockMinimoPorTalla,
 } from "../models/producto.model";
 import {
+  CatalogCursor,
+  CatalogProductCardDTO,
+  CatalogQuery,
+  CatalogResponse,
+  CatalogSort,
+} from "../models/product-catalog.model";
+import {
+  AdminProductListItemDTO,
+  AdminProductsQuery,
+} from "../models/product-admin.model";
+import {
   AlertaStockProducto,
   AlertaStockTalla,
   ListarAlertasStockQuery,
@@ -33,6 +44,18 @@ const DEFAULT_PRODUCT_RATING_SUMMARY: ProductRatingSummary = {
   average: 0,
   count: 0,
 };
+const CATEGORIAS_COLLECTION = "categorias";
+const LINEAS_COLLECTION = "lineas";
+const CURSOR_VERSION = 1;
+
+export class CatalogQueryError extends Error {
+  statusCode = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogQueryError";
+  }
+}
 
 export interface UpdateProductStockDTO {
   cantidadNueva: number;
@@ -163,6 +186,59 @@ export class ProductService {
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
+  }
+
+  private buildSlug(value: string): string {
+    return (
+      this.normalizeSearchText(value)
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "producto"
+    );
+  }
+
+  private buildProductSearchText(product: Pick<Producto, "descripcion" | "clave" | "categoriaId" | "lineaId">): string {
+    return this.normalizeSearchText(
+      [product.descripcion, product.clave, product.categoriaId, product.lineaId]
+        .filter(Boolean)
+        .join(" "),
+    );
+  }
+
+  private encodeCatalogCursor(cursor: CatalogCursor): string {
+    return Buffer.from(JSON.stringify(cursor), "utf8")
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  private decodeCatalogCursor(cursor: string): CatalogCursor {
+    try {
+      const normalized = cursor.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = normalized.padEnd(
+        normalized.length + ((4 - (normalized.length % 4)) % 4),
+        "=",
+      );
+      const parsed = JSON.parse(Buffer.from(padded, "base64").toString("utf8"));
+
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        parsed.v !== CURSOR_VERSION ||
+        typeof parsed.sort !== "string" ||
+        typeof parsed.filters !== "object" ||
+        parsed.filters === null ||
+        typeof parsed.last !== "object" ||
+        parsed.last === null ||
+        typeof parsed.last.id !== "string"
+      ) {
+        throw new Error("invalid cursor shape");
+      }
+
+      return parsed as CatalogCursor;
+    } catch (_error) {
+      throw new CatalogQueryError("cursor invalido");
+    }
   }
 
   private getSizeStock(product: Producto, sizeId?: string): number {
@@ -337,6 +413,19 @@ export class ProductService {
       precioPublico: data.precioPublico,
       precioCompra: data.precioCompra,
       existencias,
+      slug:
+        typeof data.slug === "string" && data.slug.trim()
+          ? data.slug.trim()
+          : this.buildSlug(String(data.descripcion ?? id)),
+      searchText:
+        typeof data.searchText === "string" && data.searchText.trim()
+          ? data.searchText.trim()
+          : undefined,
+      disponible:
+        typeof data.disponible === "boolean"
+          ? data.disponible
+          : existencias > 0,
+      destacado: data.destacado === true,
       proveedorId: data.proveedorId,
       tallaIds,
       inventarioPorTalla,
@@ -349,6 +438,12 @@ export class ProductService {
       imagenes: data.imagenes || [],
       detalleIds: Array.isArray(data.detalleIds) ? data.detalleIds : [],
       ratingSummary,
+      ...(data.fedexShipping && typeof data.fedexShipping === "object"
+        ? { fedexShipping: data.fedexShipping }
+        : {}),
+      ...(data.shipping && typeof data.shipping === "object"
+        ? { shipping: data.shipping }
+        : {}),
       activo: data.activo,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
@@ -638,6 +733,315 @@ export class ProductService {
     }
   }
 
+  private getCatalogSortConfig(sort: CatalogSort): {
+    field: string;
+    direction: FirebaseFirestore.OrderByDirection;
+  } {
+    switch (sort) {
+      case "precio_asc":
+        return { field: "precioPublico", direction: "asc" };
+      case "precio_desc":
+        return { field: "precioPublico", direction: "desc" };
+      case "recientes":
+        return { field: "createdAt", direction: "desc" };
+      case "nombre_asc":
+        return { field: "descripcion", direction: "asc" };
+      case "destacados":
+      default:
+        return { field: "createdAt", direction: "desc" };
+    }
+  }
+
+  private normalizeCatalogFilters(query: CatalogQuery): CatalogCursor["filters"] {
+    return {
+      category: query.category || query.categoria,
+      line: query.line || query.linea,
+      talla: query.talla,
+      minPrice: query.minPrice,
+      maxPrice: query.maxPrice,
+      q: query.q ? this.normalizeSearchText(query.q) : undefined,
+      onlyOffers: query.onlyOffers,
+      onlyAvailable: query.onlyAvailable,
+    };
+  }
+
+  private assertCursorMatchesQuery(
+    cursor: CatalogCursor,
+    sort: CatalogSort,
+    filters: CatalogCursor["filters"],
+  ): void {
+    if (
+      cursor.sort !== sort ||
+      JSON.stringify(cursor.filters) !== JSON.stringify(filters)
+    ) {
+      throw new CatalogQueryError(
+        "cursor no corresponde a los filtros actuales",
+      );
+    }
+  }
+
+  private toCatalogOrderValue(
+    product: Producto,
+    sortField: string,
+  ): string | number | boolean | null {
+    if (sortField === "createdAt") {
+      const value = product.createdAt;
+      return typeof value?.toMillis === "function" ? value.toMillis() : null;
+    }
+
+    if (sortField === "destacado") {
+      return product.destacado === true;
+    }
+
+    const record = product as unknown as Record<string, unknown>;
+    const value = record[sortField];
+
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    return null;
+  }
+
+  private getCursorStartAfterValue(
+    value: CatalogCursor["last"]["value"],
+    sortField: string,
+  ): string | number | boolean | FirebaseFirestore.Timestamp | null {
+    if (sortField === "createdAt") {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new CatalogQueryError("cursor invalido para ordenamiento");
+      }
+
+      return admin.firestore.Timestamp.fromMillis(value);
+    }
+
+    return value;
+  }
+
+  private async loadCatalogLabels(): Promise<{
+    categorias: Map<string, string>;
+    lineas: Map<string, string>;
+  }> {
+    const [categorySnapshot, lineSnapshot] = await Promise.all([
+      firestoreTienda.collection(CATEGORIAS_COLLECTION).get(),
+      firestoreTienda.collection(LINEAS_COLLECTION).get(),
+    ]);
+
+    const categorias = new Map<string, string>();
+    categorySnapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      if (data.activo !== false && typeof data.nombre === "string") {
+        categorias.set(doc.id, data.nombre);
+      }
+    });
+
+    const lineas = new Map<string, string>();
+    lineSnapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      if (data.activo !== false && typeof data.nombre === "string") {
+        lineas.set(doc.id, data.nombre);
+      }
+    });
+
+    return { categorias, lineas };
+  }
+
+  private toCatalogCard(
+    product: Producto,
+    labels: { categorias: Map<string, string>; lineas: Map<string, string> },
+  ): CatalogProductCardDTO {
+    const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
+    const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
+
+    return {
+      id: product.id || "",
+      slug: product.slug || this.buildSlug(product.descripcion || product.id || "producto"),
+      nombre: product.descripcion || "",
+      categoria: product.categoriaId || "",
+      categoriaLabel:
+        labels.categorias.get(product.categoriaId) || product.categoriaId || "",
+      linea: product.lineaId || "",
+      lineaLabel: labels.lineas.get(product.lineaId) || product.lineaId || "",
+      precioOriginal,
+      precioFinal: precioOriginal,
+      tieneOferta: false,
+      ofertaAplicadaId: null,
+      ofertaTitulo: null,
+      descuentoTotal: 0,
+      imagenPrincipal:
+        Array.isArray(product.imagenes) && product.imagenes.length > 0
+          ? product.imagenes[0]
+          : null,
+      stockTotal,
+      disponible:
+        typeof product.disponible === "boolean"
+          ? product.disponible
+          : stockTotal > 0,
+      destacado: product.destacado === true,
+    };
+  }
+
+  async listCatalogProducts(query: CatalogQuery): Promise<CatalogResponse> {
+    if (query.onlyOffers) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const filters = this.normalizeCatalogFilters(query);
+    const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : query.sort;
+    const sortConfig = filters.q
+      ? { field: "searchText", direction: "asc" as const }
+      : this.getCatalogSortConfig(effectiveSort);
+
+    if (
+      (filters.minPrice !== undefined || filters.maxPrice !== undefined) &&
+      !["precio_asc", "precio_desc"].includes(effectiveSort)
+    ) {
+      throw new CatalogQueryError(
+        "minPrice/maxPrice requieren sort=precio_asc o sort=precio_desc",
+      );
+    }
+
+    let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true);
+
+    if (filters.category) {
+      firestoreQuery = firestoreQuery.where("categoriaId", "==", filters.category);
+    }
+
+    if (filters.line) {
+      firestoreQuery = firestoreQuery.where("lineaId", "==", filters.line);
+    }
+
+    if (filters.talla) {
+      firestoreQuery = firestoreQuery.where(
+        "tallaIds",
+        "array-contains",
+        filters.talla,
+      );
+    }
+
+    if (filters.onlyAvailable) {
+      firestoreQuery = firestoreQuery.where("disponible", "==", true);
+    }
+
+    if (filters.minPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        ">=",
+        filters.minPrice,
+      );
+    }
+
+    if (filters.maxPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        "<=",
+        filters.maxPrice,
+      );
+    }
+
+    if (filters.q) {
+      firestoreQuery = firestoreQuery
+        .where("searchText", ">=", filters.q)
+        .where("searchText", "<=", `${filters.q}\uf8ff`);
+    }
+
+    firestoreQuery = firestoreQuery
+      .orderBy(sortConfig.field, sortConfig.direction)
+      .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
+
+    if (query.cursor) {
+      const cursor = this.decodeCatalogCursor(query.cursor);
+      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
+      firestoreQuery = firestoreQuery.startAfter(
+        this.getCursorStartAfterValue(cursor.last.value, sortConfig.field),
+        cursor.last.id,
+      );
+    }
+
+    const snapshot = await firestoreQuery.limit(query.limit + 1).get();
+    const docs = snapshot.docs.slice(0, query.limit);
+    const hasMore = snapshot.docs.length > query.limit;
+    const labels = await this.loadCatalogLabels();
+    const products = docs.map((doc) => this.normalizeProduct(doc.id, doc.data()));
+    const items = products.map((product) => this.toCatalogCard(product, labels));
+    const lastProduct = products[products.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && lastProduct
+          ? this.encodeCatalogCursor({
+              v: CURSOR_VERSION,
+              sort: effectiveSort,
+              filters,
+              last: {
+                value: this.toCatalogOrderValue(lastProduct, sortConfig.field),
+                id: lastProduct.id || "",
+              },
+            })
+          : null,
+    };
+  }
+
+  private toAdminProductListItem(product: Producto): AdminProductListItemDTO {
+    const existencias = Math.max(0, Math.floor(Number(product.existencias || 0)));
+
+    return {
+      id: product.id || "",
+      clave: product.clave || "",
+      descripcion: product.descripcion || "",
+      slug: product.slug || this.buildSlug(product.descripcion || product.id || "producto"),
+      lineaId: product.lineaId || "",
+      categoriaId: product.categoriaId || "",
+      precioPublico: Math.max(0, Number(product.precioPublico || 0)),
+      existencias,
+      disponible:
+        typeof product.disponible === "boolean"
+          ? product.disponible
+          : existencias > 0,
+      destacado: product.destacado === true,
+      activo: product.activo === true,
+      imagenPrincipal:
+        Array.isArray(product.imagenes) && product.imagenes.length > 0
+          ? product.imagenes[0]
+          : null,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+    };
+  }
+
+  async getAdminProducts(
+    query: AdminProductsQuery,
+  ): Promise<AdminProductListItemDTO[]> {
+    let firestoreQuery: FirebaseFirestore.Query =
+      firestoreTienda.collection(PRODUCTOS_COLLECTION);
+
+    if (query.estado === "activo") {
+      firestoreQuery = firestoreQuery.where("activo", "==", true);
+    } else if (query.estado === "inactivo") {
+      firestoreQuery = firestoreQuery.where("activo", "==", false);
+    }
+
+    const snapshot = await firestoreQuery.orderBy("updatedAt", "desc").get();
+    return snapshot.docs
+      .map((doc) => this.normalizeProduct(doc.id, doc.data()))
+      .map((product) => this.toAdminProductListItem(product));
+  }
+
+  async setProductActiveStatus(
+    productId: string,
+    activo: boolean,
+  ): Promise<Producto> {
+    return this.updateProduct(productId, { activo });
+  }
+
   /**
    * Crea un nuevo producto
    * @param productoData - Datos del producto a crear
@@ -682,11 +1086,22 @@ export class ProductService {
         .collection(PRODUCTOS_COLLECTION)
         .add({
           ...productoData,
+          slug: productoData.slug || this.buildSlug(productoData.descripcion),
+          searchText:
+            productoData.searchText ||
+            this.buildProductSearchText({
+              descripcion: productoData.descripcion,
+              clave: productoData.clave,
+              categoriaId: productoData.categoriaId,
+              lineaId: productoData.lineaId,
+            }),
           tallaIds,
           inventarioPorTalla,
           stockMinimoGlobal,
           stockMinimoPorTalla,
           existencias,
+          disponible: existencias > 0,
+          destacado: productoData.destacado === true,
           ratingSummary: productoData.ratingSummary || DEFAULT_PRODUCT_RATING_SUMMARY,
           ratingTotalScore: 0,
           createdAt: now,
@@ -788,6 +1203,22 @@ export class ProductService {
           updateData.existencias ?? productoActual.existencias,
         ),
       };
+      payload.disponible = (payload.existencias ?? 0) > 0;
+      payload.slug =
+        updateData.slug ||
+        this.buildSlug(updateData.descripcion || productoActual.descripcion);
+      payload.searchText =
+        updateData.searchText ||
+        this.buildProductSearchText({
+          descripcion: updateData.descripcion || productoActual.descripcion,
+          clave: updateData.clave || productoActual.clave,
+          categoriaId: updateData.categoriaId || productoActual.categoriaId,
+          lineaId: updateData.lineaId || productoActual.lineaId,
+        });
+      payload.destacado =
+        updateData.destacado !== undefined
+          ? updateData.destacado === true
+          : productoActual.destacado === true;
 
       if (updateData.stockMinimoPorTalla !== undefined) {
         payload.stockMinimoPorTalla = stockMinimoPorTalla;
@@ -1021,6 +1452,7 @@ export class ProductService {
               inventarioPorTalla: inventarioPorTallaActualizado,
               tallaIds: tallaIdsProducto,
               existencias: existenciasActualizadas,
+              disponible: existenciasActualizadas > 0,
               updatedAt: now,
             });
           } else {
@@ -1037,6 +1469,7 @@ export class ProductService {
               tallaIds: [],
               inventarioPorTalla: [],
               existencias: existenciasActualizadas,
+              disponible: existenciasActualizadas > 0,
               updatedAt: now,
             });
           }
@@ -1272,6 +1705,7 @@ export class ProductService {
             tallaIds,
             inventarioPorTalla: inventarioNuevo,
             existencias,
+            disponible: existencias > 0,
             updatedAt: now,
           });
 
@@ -1422,6 +1856,7 @@ export class ProductService {
 
         transaction.update(docRef, {
           existencias: nuevasExistencias,
+          disponible: nuevasExistencias > 0,
           updatedAt: admin.firestore.Timestamp.now(),
         });
 
@@ -1473,6 +1908,7 @@ export class ProductService {
 
         transaction.update(docRef, {
           existencias: nuevasExistencias,
+          disponible: nuevasExistencias > 0,
           updatedAt: admin.firestore.Timestamp.now(),
         });
 

@@ -7,6 +7,7 @@ import {
   COLECCION_PAGOS,
   EstadoPago,
   Pago,
+  PaymentPricingSnapshot,
   ProveedorPago,
 } from "../models/pago.model";
 import { RolUsuario } from "../models/usuario.model";
@@ -20,9 +21,15 @@ import {
   getStripeWebhookSecret,
 } from "../lib/stripe";
 import pickupOrderService from "./pickup-order.service";
+import paidOrderFinalizerService from "./paid-order-finalizer.service";
+import {
+  shippingRefundGuardService,
+  ShippingRefundGuardError,
+} from "./shipping-refund-guard.service";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
+const SHIPPING_EVENTS_COLLECTION = "shipping_events";
 const STRIPE_WEBHOOK_EVENTS_COLLECTION = "stripe_webhook_events";
 const STRIPE_PAYMENT_START_LOCKS_COLLECTION = "stripe_payment_start_locks";
 
@@ -476,6 +483,156 @@ class PagoService {
     return getStripeCurrency();
   }
 
+  private buildCompactPaymentMetadata(order: Orden): Record<string, string> {
+    return {
+      cartId:
+        typeof order.paymentMetadata?.cartId === "string"
+          ? String(order.paymentMetadata.cartId)
+          : "",
+      orderId: order.id || "",
+      fulfillmentMethod: order.fulfillmentMethod || "DELIVERY",
+      pickupLocationId: order.pickupLocationId || "",
+      shippingProvider:
+        typeof order.shipping?.provider === "string" ? order.shipping.provider : "",
+      shippingServiceType:
+        typeof order.shipping?.serviceType === "string"
+          ? order.shipping.serviceType
+          : "",
+      carrierCode:
+        typeof order.shipping?.carrierCode === "string"
+          ? order.shipping.carrierCode
+          : "",
+      shippingTotal: String(order.costoEnvio || 0),
+      discountTotal: String(order.discountTotal || 0),
+    };
+  }
+
+  private buildOrderPricingSnapshot(order: Orden): PaymentPricingSnapshot {
+    const snapshotItems = order.pricingSnapshot?.items || [];
+
+    return {
+      subtotalMinor: Math.round(order.subtotal * 100),
+      taxMinor: Math.round(order.impuestos * 100),
+      shippingMinor: Math.round((order.costoEnvio || 0) * 100),
+      totalMinor: Math.round(order.total * 100),
+      currency: (order.currency || "MXN").toUpperCase(),
+      items: order.items.map((item) => {
+        const snapshotItem = snapshotItems.find(
+          (pricingItem) =>
+            pricingItem.productId === item.productoId &&
+            (pricingItem.tallaId || "") === (item.tallaId || ""),
+        );
+
+        return {
+          productoId: item.productoId,
+          cantidad: item.cantidad,
+          precioUnitarioMinor: Math.round(item.precioUnitario * 100),
+          subtotalMinor: Math.round(item.subtotal * 100),
+          tallaId: item.tallaId,
+          name: snapshotItem?.productName,
+          sku: snapshotItem?.sku,
+          precioUnitarioOriginalMinor:
+            typeof snapshotItem?.unitPriceOriginal === "number"
+              ? Math.round(snapshotItem.unitPriceOriginal * 100)
+              : Math.round(item.precioUnitario * 100),
+          precioUnitarioFinalMinor:
+            typeof snapshotItem?.unitPriceFinal === "number"
+              ? Math.round(snapshotItem.unitPriceFinal * 100)
+              : Math.round(item.precioUnitario * 100),
+          subtotalOriginalMinor:
+            typeof snapshotItem?.subtotalOriginal === "number"
+              ? Math.round(snapshotItem.subtotalOriginal * 100)
+              : Math.round(item.subtotal * 100),
+          subtotalFinalMinor:
+            typeof snapshotItem?.subtotalFinal === "number"
+              ? Math.round(snapshotItem.subtotalFinal * 100)
+              : Math.round(item.subtotal * 100),
+          discountMinor:
+            typeof snapshotItem?.discountTotal === "number"
+              ? Math.round(snapshotItem.discountTotal * 100)
+              : 0,
+          weightKg: snapshotItem?.weightKg,
+          lengthCm: snapshotItem?.lengthCm,
+          widthCm: snapshotItem?.widthCm,
+          heightCm: snapshotItem?.heightCm,
+          requiresShipping: snapshotItem?.requiereEnvio,
+        };
+      }),
+      subtotalOriginalMinor:
+        typeof order.subtotalOriginal === "number"
+          ? Math.round(order.subtotalOriginal * 100)
+          : Math.round(order.subtotal * 100),
+      subtotalFinalMinor:
+        typeof order.subtotalFinal === "number"
+          ? Math.round(order.subtotalFinal * 100)
+          : Math.round(order.subtotal * 100),
+      discountMinor:
+        typeof order.discountTotal === "number"
+          ? Math.round(order.discountTotal * 100)
+          : 0,
+      shipping: order.shipping
+        ? {
+            method:
+              typeof order.shipping.method === "string"
+                ? order.shipping.method
+                : undefined,
+            provider:
+              typeof order.shipping.provider === "string"
+                ? order.shipping.provider
+                : undefined,
+            serviceType:
+              typeof order.shipping.serviceType === "string"
+                ? order.shipping.serviceType
+                : undefined,
+            serviceName:
+              typeof order.shipping.serviceName === "string"
+                ? order.shipping.serviceName
+                : undefined,
+            carrierCode:
+              typeof order.shipping.carrierCode === "string"
+                ? order.shipping.carrierCode
+                : undefined,
+            packagingType:
+              typeof order.shipping.packagingType === "string"
+                ? order.shipping.packagingType
+                : undefined,
+            amountMinor: Math.round((order.costoEnvio || 0) * 100),
+            currency: (order.currency || "MXN").toUpperCase(),
+            transitTime:
+              typeof order.shipping.transitTime === "string"
+                ? order.shipping.transitTime
+                : undefined,
+            deliveryTimestamp:
+              typeof order.shipping.deliveryTimestamp === "string"
+                ? order.shipping.deliveryTimestamp
+                : undefined,
+            deliveryDayOfWeek:
+              typeof order.shipping.deliveryDayOfWeek === "string"
+                ? order.shipping.deliveryDayOfWeek
+                : undefined,
+            addressValidationStatus:
+              typeof order.shipping.addressValidationStatus === "string"
+                ? order.shipping.addressValidationStatus
+                : undefined,
+            rateTransactionId:
+              typeof order.shipping.rateTransactionId === "string"
+                ? order.shipping.rateTransactionId
+                : undefined,
+            availabilityTransactionId:
+              typeof order.shipping.availabilityTransactionId === "string"
+                ? order.shipping.availabilityTransactionId
+                : undefined,
+            quotedAt:
+              typeof order.shipping.quotedAt === "string"
+                ? order.shipping.quotedAt
+                : undefined,
+          }
+        : undefined,
+      warnings: order.pricingSnapshot?.warnings || [],
+      calculatedAt: order.pricingSnapshot?.calculatedAt,
+    };
+  }
+
   private async getOrderForPayment(
     orderId: string,
     userId: string,
@@ -738,18 +895,15 @@ class PagoService {
         }
 
         const now = admin.firestore.Timestamp.now();
-        const cartId =
-          typeof ordenData.paymentMetadata?.cartId === "string"
-            ? (ordenData.paymentMetadata.cartId as string)
-            : undefined;
-
-        const paymentMetadata = {
-          ...(cartId ? { cartId } : {}),
-          orderId,
-          userId,
-          fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
-          pickupLocationId: ordenData.pickupLocationId || "",
-        };
+        const paymentMetadata = this.buildCompactPaymentMetadata({
+          ...ordenData,
+          id: orderId,
+        });
+        const pricingSnapshot = this.buildOrderPricingSnapshot({
+          ...ordenData,
+          id: orderId,
+        });
+        const cartId = paymentMetadata.cartId || undefined;
 
         const pagoDraft: Omit<Pago, "id"> = {
           ordenId: orderId,
@@ -762,6 +916,7 @@ class PagoService {
           idempotencyKey: resolvedIdempotencyKey,
           stripeCustomerId,
           metadata: paymentMetadata,
+          pricingSnapshot,
           createdAt: now,
           updatedAt: now,
         };
@@ -788,10 +943,15 @@ class PagoService {
                 pagoId: pagoRef.id,
                 cartId: cartId || "",
                 fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
-                pickupLocationId: ordenData.pickupLocationId || "",
-              },
+              pickupLocationId: ordenData.pickupLocationId || "",
+              shippingProvider: paymentMetadata.shippingProvider,
+              shippingServiceType: paymentMetadata.shippingServiceType,
+              carrierCode: paymentMetadata.carrierCode,
+              shippingTotal: paymentMetadata.shippingTotal,
+              discountTotal: paymentMetadata.discountTotal,
             },
-            { idempotencyKey: resolvedIdempotencyKey },
+          },
+          { idempotencyKey: resolvedIdempotencyKey },
           );
 
           const estadoPago = mapPaymentIntentStatusToEstadoPago(
@@ -1023,18 +1183,15 @@ class PagoService {
       }
 
       const now = admin.firestore.Timestamp.now();
-      const cartId =
-        typeof ordenData.paymentMetadata?.cartId === "string"
-          ? (ordenData.paymentMetadata.cartId as string)
-          : undefined;
-
-      const paymentMetadata = {
-        ...(cartId ? { cartId } : {}),
-        orderId,
-        userId,
-        fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
-        pickupLocationId: ordenData.pickupLocationId || "",
-      };
+      const paymentMetadata = this.buildCompactPaymentMetadata({
+        ...ordenData,
+        id: orderId,
+      });
+      const pricingSnapshot = this.buildOrderPricingSnapshot({
+        ...ordenData,
+        id: orderId,
+      });
+      const cartId = paymentMetadata.cartId || undefined;
 
       const pagoDraft: Omit<Pago, "id"> = {
         ordenId: orderId,
@@ -1047,6 +1204,7 @@ class PagoService {
         idempotencyKey: resolvedIdempotencyKey,
         stripeCustomerId,
         metadata: paymentMetadata,
+        pricingSnapshot,
         createdAt: now,
         updatedAt: now,
       };
@@ -1076,6 +1234,51 @@ class PagoService {
           },
         }));
 
+      if (ordenData.costoEnvio && ordenData.costoEnvio > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: Math.round(ordenData.costoEnvio * 100),
+            product_data: {
+              name: "Envio FedEx",
+              metadata: {
+                provider: String(ordenData.shipping?.provider || "FEDEX"),
+                quoteId: String(ordenData.shipping?.quoteId || ""),
+                serviceType: String(ordenData.shipping?.serviceType || ""),
+                carrierCode: String(ordenData.shipping?.carrierCode || ""),
+              },
+            },
+          },
+        });
+      }
+
+      if (ordenData.impuestos && ordenData.impuestos > 0) {
+        lineItems.push({
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: Math.round(ordenData.impuestos * 100),
+            product_data: {
+              name: "Impuestos",
+            },
+          },
+        });
+      }
+
+      const checkoutLineAmount = lineItems.reduce((total, item) => {
+        const unitAmount = item.price_data?.unit_amount || 0;
+        const quantity = typeof item.quantity === "number" ? item.quantity : 1;
+        return total + unitAmount * quantity;
+      }, 0);
+
+      if (checkoutLineAmount !== amount) {
+        throw new ApiError(
+          409,
+          "El total de Stripe Checkout no coincide con el total de la orden",
+        );
+      }
+
       const session = await stripe.checkout.sessions.create(
         {
           mode: "payment",
@@ -1090,6 +1293,11 @@ class PagoService {
             cartId: cartId || "",
             fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
             pickupLocationId: ordenData.pickupLocationId || "",
+            shippingProvider: paymentMetadata.shippingProvider,
+            shippingServiceType: paymentMetadata.shippingServiceType,
+            carrierCode: paymentMetadata.carrierCode,
+            shippingTotal: paymentMetadata.shippingTotal,
+            discountTotal: paymentMetadata.discountTotal,
           },
           payment_intent_data: {
             metadata: {
@@ -1099,6 +1307,11 @@ class PagoService {
               cartId: cartId || "",
               fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
               pickupLocationId: ordenData.pickupLocationId || "",
+              shippingProvider: paymentMetadata.shippingProvider,
+              shippingServiceType: paymentMetadata.shippingServiceType,
+              carrierCode: paymentMetadata.carrierCode,
+              shippingTotal: paymentMetadata.shippingTotal,
+              discountTotal: paymentMetadata.discountTotal,
             },
           },
         },
@@ -1376,6 +1589,41 @@ class PagoService {
       throw new ApiError(400, "El monto de reembolso debe ser mayor a 0");
     }
 
+    const ordenGuardDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(pago.ordenId)
+      .get();
+    if (!ordenGuardDoc.exists) {
+      throw new ApiError(
+        404,
+        `Orden asociada con ID "${pago.ordenId}" no encontrada`,
+      );
+    }
+
+    try {
+      await shippingRefundGuardService.ensureShipmentCanProceedToRefund({
+        orderId: pago.ordenId,
+        order: ordenGuardDoc.data() as Orden,
+        reason: refundReason,
+        requestedByUid,
+      });
+    } catch (error) {
+      if (error instanceof ShippingRefundGuardError) {
+        throw new ApiError(error.statusCode, error.message);
+      }
+      throw error;
+    }
+
+    await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+      orderId: pago.ordenId,
+      provider: ProveedorPago.STRIPE,
+      type: "REFUND_REQUESTED",
+      reason: refundReason,
+      refundAmount: refundAmountToApply,
+      createdBy: requestedByUid,
+      createdAt: admin.firestore.Timestamp.now(),
+    });
+
     let refund: Stripe.Refund;
     try {
       refund = await stripe.refunds.create({
@@ -1458,6 +1706,17 @@ class PagoService {
       refundId: refund.id,
       refundAmount: refund.amount / 100,
       requestedByUid,
+    });
+
+    await firestoreTienda.collection(SHIPPING_EVENTS_COLLECTION).add({
+      orderId: pago.ordenId,
+      provider: ProveedorPago.STRIPE,
+      type: "REFUND_COMPLETED",
+      refundId: refund.id,
+      refundAmount: refund.amount / 100,
+      reason: refundReason,
+      createdBy: requestedByUid,
+      createdAt: admin.firestore.Timestamp.now(),
     });
 
     return {
@@ -1759,6 +2018,11 @@ class PagoService {
       source: "stripe",
       sourceEventId: event.id,
     });
+    await paidOrderFinalizerService.finalizePaidOrder({
+      orderId: pagoMatch.ordenId,
+      provider: "stripe",
+      sourceEventId: event.id,
+    });
     if (orderData?.usuarioId) {
       await this.enqueueOrderConfirmedNotification(
         pagoMatch.ordenId,
@@ -1917,6 +2181,11 @@ class PagoService {
     await pickupOrderService.finalizePaidPickupOrder({
       orderId: pagoMatch.ordenId,
       source: "stripe",
+      sourceEventId: event.id,
+    });
+    await paidOrderFinalizerService.finalizePaidOrder({
+      orderId: pagoMatch.ordenId,
+      provider: "stripe",
       sourceEventId: event.id,
     });
     if (orderData?.usuarioId) {

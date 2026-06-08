@@ -167,8 +167,8 @@ export const registerOrLogin = async (req: Request, res: Response) => {
           } catch (createUserError: unknown) {
             const createUserCode =
               createUserError &&
-              typeof createUserError === "object" &&
-              "code" in createUserError
+                typeof createUserError === "object" &&
+                "code" in createUserError
                 ? String((createUserError as { code?: string }).code || "")
                 : "";
 
@@ -401,3 +401,5 @@ export const registerOrLogin = async (req: Request, res: Response) => {
     });
   }
 };
+
+

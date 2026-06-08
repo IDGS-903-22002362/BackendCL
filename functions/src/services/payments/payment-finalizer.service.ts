@@ -22,6 +22,7 @@ import posSaleRepository from "./pos-sale.repository";
 import inventoryService from "../inventory.service";
 import ordenService from "../orden.service";
 import pickupOrderService from "../pickup-order.service";
+import paidOrderFinalizerService from "../paid-order-finalizer.service";
 
 const ORDENES_COLLECTION = "ordenes";
 
@@ -151,6 +152,13 @@ export class PaymentFinalizerService {
             source: "aplazo",
             sourceEventId: context.eventId,
             paymentAttemptId: attempt.id,
+          });
+          await paidOrderFinalizerService.finalizePaidOrder({
+            orderId: attempt.ordenId,
+            provider: "aplazo",
+            sourceEventId: context.eventId,
+            paymentAttemptId: attempt.id,
+            requestedBy: context.requestedBy,
           });
         } else {
           await this.cancelOrderReservation(attempt, targetStatus, context);

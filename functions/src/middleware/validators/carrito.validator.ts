@@ -18,6 +18,23 @@ import {
 } from "../../models/orden.model";
 import { pickupContactSchema } from "./orden.validator";
 
+const optionalTrimmedString = z.string().trim().min(1).optional();
+
+const checkoutShippingSelectionSchema = z
+  .object({
+    method: z.enum(["PICKUP", "FEDEX", "MANUAL"]),
+    provider: z.literal("FEDEX").optional(),
+    serviceType: z.string().trim().min(1).max(120).optional(),
+    serviceName: z.string().trim().min(1).max(160).optional(),
+    carrierCode: z.string().trim().min(1).max(20).optional(),
+    packagingType: z.string().trim().min(1).max(80).optional(),
+    quotedAmount: z.number().nonnegative().optional(),
+    quotedCurrency: z.string().trim().min(3).max(3).optional(),
+    transitTime: z.string().trim().min(1).max(80).optional(),
+    deliveryTimestamp: z.string().trim().min(1).max(80).optional(),
+  })
+  .strict();
+
 /**
  * Schema para agregar un item al carrito
  * POST /api/carrito/items
@@ -136,19 +153,18 @@ export const checkoutCarritoSchema = z
       }),
     }),
 
-       costoEnvio: z
+    costoEnvio: z
       .number()
       .nonnegative("El costo de envío no puede ser negativo")
       .optional(),
 
-    codigoPromocion: z
-      .string({
-        invalid_type_error: "El código promocional debe ser una cadena de texto",
-      })
-      .trim()
-      .min(1, "El código promocional no puede estar vacío")
-      .max(50, "El código promocional es demasiado largo")
-      .optional(),
+    shippingQuoteId: z.string().trim().min(1).max(160).optional(),
+
+    selectedShippingOptionId: z.string().trim().min(1).max(160).optional(),
+
+    selectedServiceType: z.string().trim().min(1).max(120).optional(),
+
+    shippingSelection: checkoutShippingSelectionSchema.optional(),
 
     notas: z
       .string()
@@ -165,6 +181,41 @@ export const checkoutCarritoSchema = z
         path: ["direccionEnvio"],
         message: "La dirección de envío es requerida para DELIVERY",
       });
+    }
+
+    if (method === FulfillmentMethod.DELIVERY) {
+      if (typeof data.costoEnvio === "number") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["costoEnvio"],
+          message:
+            "El costo de envio se calcula en backend; usa shippingQuoteId",
+        });
+      }
+
+      const shippingSelectionMethod = data.shippingSelection?.method;
+
+      if (!data.shippingQuoteId && shippingSelectionMethod !== "FEDEX") {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["shippingQuoteId"],
+          message:
+            "shippingQuoteId es requerido para DELIVERY salvo que uses shippingSelection FEDEX",
+        });
+      }
+
+      if (
+        !data.selectedShippingOptionId &&
+        !data.selectedServiceType &&
+        !data.shippingSelection?.serviceType
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectedShippingOptionId"],
+          message:
+            "selectedShippingOptionId, selectedServiceType o shippingSelection.serviceType es requerido para DELIVERY",
+        });
+      }
     }
 
     if (method === FulfillmentMethod.PICKUP) {
@@ -189,5 +240,48 @@ export const checkoutCarritoSchema = z
           message: "PICKUP no permite costo de envío",
         });
       }
+    }
+  });
+
+export const createCartFedexQuoteSchema = z
+  .object({
+    direccionEnvio: direccionEnvioSchema
+      .extend({
+        stateOrProvinceCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+      })
+      .optional(),
+    shippingAddress: z
+      .object({
+        streetLines: z.array(z.string().trim().min(1)).max(3).optional(),
+        city: optionalTrimmedString,
+        stateOrProvinceCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        residential: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+    fedexAddress: z
+      .object({
+        streetLines: z.array(z.string().trim().min(1)).max(3).optional(),
+        city: optionalTrimmedString,
+        stateOrProvinceCode: optionalTrimmedString,
+        postalCode: optionalTrimmedString,
+        countryCode: optionalTrimmedString,
+        residential: z.boolean().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .strict()
+  .superRefine((data, ctx) => {
+    if (!data.direccionEnvio && !data.shippingAddress && !data.fedexAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["direccionEnvio"],
+        message: "SHIPPING_ADDRESS_REQUIRED",
+      });
     }
   });

@@ -30,8 +30,10 @@ import {
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import pickupLocationService from "./pickup-location.service";
-import { ofertasService } from "./ofertas.service";
-import { codigosPromocionService } from "./codigos-promocion.service";
+import {
+  shippingRefundGuardService,
+  ShippingRefundGuardError,
+} from "./shipping-refund-guard.service";
 
 /**
  * Colección de órdenes en Firestore
@@ -43,27 +45,6 @@ const PRODUCTOS_COLLECTION = "productos";
  * Constantes de negocio
  */
 const TASA_IVA = 0; // 0% temporal (cambiar a 0.16 cuando se requiera 16%)
-function roundCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-function getProductStringArray(producto: Producto, keys: string[]): string[] {
-  const record = producto as unknown as Record<string, unknown>;
-
-  for (const key of keys) {
-    const value = record[key];
-
-    if (Array.isArray(value)) {
-      return value.map((entry) => String(entry)).filter(Boolean);
-    }
-
-    if (typeof value === "string" && value.trim()) {
-      return [value.trim()];
-    }
-  }
-
-  return [];
-}
 
 /**
  * Clase OrdenService
@@ -171,14 +152,39 @@ export class OrdenService {
       const itemsValidados: ItemOrden[] = [];
       let subtotalCalculado = 0;
       const requestedByVariant = new Map<string, number>();
+      const pricingItemsByVariant = new Map(
+        (data.pricingSnapshot?.items || []).map((item) => [
+          `${item.productId}::${item.tallaId ?? "__GLOBAL__"}`,
+          item,
+        ]),
+      );
       const fulfillmentMethod =
-  data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+        data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
 
-const codigoPromocion = data.codigoPromocion?.trim().toUpperCase() || "";
+      if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+        throw new Error("La dirección de envío es requerida para DELIVERY");
+      }
 
-if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
-  throw new Error("La dirección de envío es requerida para DELIVERY");
-}
+      if (fulfillmentMethod === FulfillmentMethod.DELIVERY) {
+        const shipping = data.shipping as Record<string, any> | undefined;
+        const selectedRate = shipping?.selectedRate as
+          | { amount?: number; serviceType?: string }
+          | undefined;
+
+        if (
+          shipping?.provider !== "FEDEX" ||
+          shipping?.status !== "QUOTE_SELECTED" ||
+          !shipping?.quoteId ||
+          !selectedRate ||
+          typeof selectedRate.amount !== "number" ||
+          selectedRate.amount < 0 ||
+          !selectedRate.serviceType
+        ) {
+          throw new Error(
+            "DELIVERY requiere una cotización FedEx válida generada por backend",
+          );
+        }
+      }
 
       let pickupLocationSnapshot: Orden["pickupLocation"] | undefined;
       if (fulfillmentMethod === FulfillmentMethod.PICKUP) {
@@ -211,78 +217,8 @@ if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
         };
       }
 
-             // Calcular precios con ofertas desde backend antes de construir la orden.
-      // Esto evita confiar en precios enviados desde frontend.
-      const calculoOfertas = await ofertasService.calcularPreciosCarrito(
-        data.items.map((item) => ({
-          productoId: item.productoId,
-          cantidad: item.cantidad,
-          ...(item.tallaId?.trim() ? { tallaId: item.tallaId.trim() } : {}),
-        })),
-      );
-
-      // Si viene código promocional, lo validamos sobre el precio final con ofertas.
-      // Así el backend cobra exactamente lo mismo que el checkout mostró.
-      const calculoCodigo = codigoPromocion
-        ? await codigosPromocionService.validar({
-            codigo: codigoPromocion,
-            items: await Promise.all(
-              data.items.map(async (item, index) => {
-                const precioOferta = calculoOfertas.items[index];
-
-                if (!precioOferta || precioOferta.productoId !== item.productoId) {
-                  throw new Error(
-                    `No se pudo calcular el precio base para validar el código del producto "${item.productoId}"`,
-                  );
-                }
-
-                const productoDoc = await firestoreTienda
-                  .collection(PRODUCTOS_COLLECTION)
-                  .doc(item.productoId)
-                  .get();
-
-                if (!productoDoc.exists) {
-                  throw new Error(
-                    `El producto con ID "${item.productoId}" no existe en el catálogo`,
-                  );
-                }
-
-                const producto = productoDoc.data() as Producto;
-
-                return {
-                  productoId: item.productoId,
-                  cantidad: item.cantidad,
-                  precioUnitario: precioOferta.precioFinal,
-                  ...(item.tallaId?.trim()
-                    ? { tallaId: item.tallaId.trim() }
-                    : {}),
-                  categoriaIds: getProductStringArray(producto, [
-                    "categoriaIds",
-                    "categoriasIds",
-                    "categoryIds",
-                    "categoriaId",
-                    "categoryId",
-                  ]),
-                  lineaIds: getProductStringArray(producto, [
-                    "lineaIds",
-                    "lineasIds",
-                    "lineIds",
-                    "lineaId",
-                    "lineId",
-                  ]),
-                };
-              }),
-            ),
-          })
-        : null;
-
-      if (calculoCodigo && !calculoCodigo.valido) {
-        throw new Error(
-          calculoCodigo.mensaje || "El código promocional no es válido.",
-        );
-      }
-
-      for (const [index, item] of data.items.entries()) {        // Obtener producto desde Firestore
+      for (const item of data.items) {
+        // Obtener producto desde Firestore
         const productoDoc = await firestoreTienda
           .collection(PRODUCTOS_COLLECTION)
           .doc(item.productoId)
@@ -319,78 +255,47 @@ if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
         }
         requestedByVariant.set(variantKey, requestedTotal);
 
-               // Recalcular precios desde el servidor usando ofertas.
-        // precioUnitario queda como precio final cobrado para mantener compatibilidad.
-        const precioOferta = calculoOfertas.items[index];
-
-        if (!precioOferta || precioOferta.productoId !== item.productoId) {
-          throw new Error(
-            `No se pudo calcular el precio con oferta para el producto "${item.productoId}"`,
-          );
-        }
-
-               const precioCodigo = calculoCodigo?.items?.[index] ?? null;
-
-        if (
-          calculoCodigo &&
-          (!precioCodigo || precioCodigo.productoId !== item.productoId)
-        ) {
-          throw new Error(
-            `No se pudo aplicar el código promocional al producto "${item.productoId}"`,
-          );
-        }
-
-        const precioUnitarioOriginal = precioOferta.precioOriginal;
-        const precioUnitarioFinal = roundCurrency(
-          Number(precioCodigo?.precioFinal ?? precioOferta.precioFinal),
+        // Preferir snapshot server-side de checkout cuando exista.
+        const pricingSnapshotItem = pricingItemsByVariant.get(
+          `${item.productoId}::${stockContext.tallaId ?? "__GLOBAL__"}`,
         );
-        const subtotalItem = roundCurrency(
-          Number(precioCodigo?.subtotalFinal ?? precioOferta.subtotalFinal),
-        );
-
-        const descuentoUnitario = roundCurrency(
-          Math.max(0, precioUnitarioOriginal - precioUnitarioFinal),
-        );
-
-        const descuentoTotal = roundCurrency(
-          Math.max(0, precioOferta.subtotalOriginal - subtotalItem),
-        );
+        const precioUnitario =
+          typeof pricingSnapshotItem?.unitPriceFinal === "number"
+            ? pricingSnapshotItem.unitPriceFinal
+            : producto.precioPublico;
+        const subtotalItem =
+          typeof pricingSnapshotItem?.subtotalFinal === "number"
+            ? pricingSnapshotItem.subtotalFinal
+            : precioUnitario * item.cantidad;
 
         const itemValidado: ItemOrden = {
           productoId: item.productoId,
           cantidad: item.cantidad,
-
-          // Compatibilidad con órdenes existentes:
-          // precioUnitario y subtotal representan el precio final cobrado.
-          precioUnitario: precioUnitarioFinal,
-          subtotal: subtotalItem,
-
-          // Snapshot de oferta/descuento aplicado.
-          precioUnitarioOriginal,
-          precioUnitarioFinal,
-          descuentoUnitario,
-          descuentoTotal,
-          ofertaAplicadaId: precioOferta.ofertaAplicadaId ?? null,
-          ofertaTitulo: precioOferta.ofertaTitulo ?? null,
-
-          ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}),
+          precioUnitario: precioUnitario, // Precio del servidor
+          subtotal: subtotalItem, // Cálculo del servidor
+          ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}), // Opcional
         };
 
         itemsValidados.push(itemValidado);
         subtotalCalculado += subtotalItem;
 
-                console.log(
-          `  ✓ Item validado: ${producto.descripcion} x${item.cantidad} = $${subtotalItem.toFixed(2)} ` +
-            `(original: $${precioOferta.subtotalOriginal.toFixed(2)}, descuento total: $${descuentoTotal.toFixed(2)})`,
+        console.log(
+          `  ✓ Item validado: ${producto.descripcion} x${item.cantidad} = $${subtotalItem.toFixed(2)}`,
         );
       }
 
       // PASO 2: Calcular totales
       const impuestosCalculados = subtotalCalculado * TASA_IVA; // 0% por ahora
       const costoEnvioCalculado =
-        fulfillmentMethod === FulfillmentMethod.PICKUP ? 0 : data.costoEnvio ?? 0;
+        fulfillmentMethod === FulfillmentMethod.PICKUP
+          ? 0
+          : typeof data.pricingSnapshot?.shippingTotal === "number"
+            ? data.pricingSnapshot.shippingTotal
+            : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
       const totalCalculado =
-        subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
+        typeof data.pricingSnapshot?.total === "number"
+          ? data.pricingSnapshot.total
+          : subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
 
       console.log(`💰 Totales calculados:`);
       console.log(`   Subtotal: $${subtotalCalculado.toFixed(2)}`);
@@ -421,18 +326,24 @@ if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
               pickupContact: data.pickupContact,
             }
           : {}),
-                costoEnvio: costoEnvioCalculado,
-        notas: data.notas,
-        ...(calculoCodigo && codigoPromocion
-          ? {
-              codigoPromocion,
-              codigoPromocionId: calculoCodigo.codigoPromocionId,
-              codigoPromocionTitulo: calculoCodigo.codigoTitulo,
-              descuentoCodigoPromocion: roundCurrency(
-                calculoCodigo.descuentoTotal,
-              ),
-            }
+        costoEnvio: costoEnvioCalculado,
+        ...(data.shipping ? { shipping: data.shipping } : {}),
+        ...(data.pricingSnapshot ? { pricingSnapshot: data.pricingSnapshot } : {}),
+        ...(data.paymentMetadata ? { paymentMetadata: data.paymentMetadata } : {}),
+        ...(typeof data.discountTotal === "number"
+          ? { discountTotal: data.discountTotal }
           : {}),
+        ...(typeof data.subtotalOriginal === "number"
+          ? { subtotalOriginal: data.subtotalOriginal }
+          : {}),
+        ...(typeof data.subtotalFinal === "number"
+          ? { subtotalFinal: data.subtotalFinal }
+          : {}),
+        ...(typeof data.shippingTotal === "number"
+          ? { shippingTotal: data.shippingTotal }
+          : {}),
+        ...(data.currency ? { currency: data.currency } : {}),
+        notas: data.notas,
         createdAt: now,
         updatedAt: now,
       };
@@ -1024,6 +935,20 @@ if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
       }
 
       console.log(`  ✓ Estado validado: ${orden.estado} (puede cancelarse)`);
+
+      try {
+        await shippingRefundGuardService.ensureShipmentCanProceedToRefund({
+          orderId: ordenId,
+          order: orden,
+          reason: "Cancelación de orden",
+          requestedByUid: usuarioActual.uid,
+        });
+      } catch (error) {
+        if (error instanceof ShippingRefundGuardError) {
+          throw new Error(error.message);
+        }
+        throw error;
+      }
 
       // PASO 5: Restaurar stock de productos y registrar devoluciones
       console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);

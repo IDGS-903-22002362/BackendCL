@@ -1,4 +1,5 @@
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { AUTH_SECRETS } from "./config/runtime-secrets";
 import pickupOrderService from "./services/pickup-order.service";
 
 export const expirePickupOrders = onSchedule(
@@ -8,7 +9,7 @@ export const expirePickupOrders = onSchedule(
     region: process.env.GCP_REGION || "us-central1",
     timeoutSeconds: 300,
     memory: "256MiB",
-    secrets: ["JWT_SECRET"],
+    secrets: [...AUTH_SECRETS],
   },
   async () => {
     await pickupOrderService.expireOverduePickups();

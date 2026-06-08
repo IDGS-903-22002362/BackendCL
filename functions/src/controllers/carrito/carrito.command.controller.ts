@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 import carritoService from "../../services/carrito.service";
+import { CheckoutFlowError } from "../../models/checkout-pricing.model";
+import {
+  shippingQuoteService,
+  ShippingQuoteError,
+} from "../../modules/shipping/shipping-quote.service";
 
 /**
  * Controller: Carrito Command (Escritura)
@@ -326,6 +331,15 @@ export const checkout = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error en POST /api/carrito/checkout:", error);
 
+    if (error instanceof CheckoutFlowError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code,
+        message: error.message,
+        ...(error.data ? { data: error.data } : {}),
+      });
+    }
+
     let statusCode = 500;
     if (error instanceof Error) {
       const msg = error.message.toLowerCase();
@@ -354,6 +368,48 @@ export const checkout = async (req: Request, res: Response) => {
         statusCode === 500 && error instanceof Error
           ? error.message
           : undefined,
+    });
+  }
+};
+
+export const createFedexShippingQuote = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "Se requiere autenticación para cotizar envío",
+      });
+    }
+
+    const usuarioId = req.user.uid as string;
+    const carrito = await carritoService.getOrCreateCart(usuarioId);
+    const quote = await shippingQuoteService.createFedexCartQuote({
+      userId: usuarioId,
+      cart: carrito,
+      direccionEnvio: req.body.direccionEnvio,
+      shippingAddress: req.body.shippingAddress,
+      fedexAddress: req.body.fedexAddress,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Cotización FedEx generada exitosamente",
+      data: quote,
+    });
+  } catch (error) {
+    const statusCode =
+      error instanceof ShippingQuoteError ? error.statusCode : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      provider: "FEDEX",
+      message:
+        error instanceof Error
+          ? error.message
+          : "No fue posible cotizar envío FedEx",
+      ...(error instanceof ShippingQuoteError && error.code
+        ? { code: error.code }
+        : {}),
     });
   }
 };

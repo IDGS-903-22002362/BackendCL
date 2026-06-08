@@ -1,50 +1,30 @@
 /**
- * Modelos para gestión de órdenes de compra
- * Sistema de pedidos para la tienda del Club León
- *
- * RELACIONES:
- * - usuarioId → Colección 'usuarios' (Firebase Auth UID)
- * - items[].productoId → Colección 'productos'
- *
- * INTEGRACIÓN FUTURA:
- * - Sistema de pagos (transaccionId, referenciaPago)
- * - Sistema de envíos (numeroGuia, transportista)
- * - Notificaciones (email por cambio de estado)
- *
- * ESTRATEGIA DE DATOS:
- * - NO usar soft delete (activo: boolean)
- * - Órdenes canceladas mantienen estado CANCELADA
- * - Nunca eliminar órdenes (audit trail)
- * - Reserva de stock TBD en capa de servicio
- * - Timestamps: Firestore Timestamp.now()
+ * Modelos para gestion de ordenes de compra.
  */
 
 import { Timestamp } from "firebase-admin/firestore";
+import {
+  CheckoutAddressValidationStatus,
+  CheckoutPricingSnapshot,
+  CheckoutShippingSnapshot,
+} from "./checkout-pricing.model";
 
-/**
- * Enum para estados de la orden
- * Define el ciclo de vida de una orden desde su creación hasta su cumplimiento
- */
 export enum EstadoOrden {
-  PENDIENTE = "PENDIENTE", // Orden creada, esperando confirmación de pago
-  CONFIRMADA = "CONFIRMADA", // Pago confirmado, lista para procesar
-  EN_PROCESO = "EN_PROCESO", // Orden en preparación/empaque
-  ENVIADA = "ENVIADA", // Orden enviada al cliente
-  ENTREGADA = "ENTREGADA", // Orden entregada exitosamente
-  CANCELADA = "CANCELADA", // Orden cancelada (por usuario o admin)
+  PENDIENTE = "PENDIENTE",
+  CONFIRMADA = "CONFIRMADA",
+  EN_PROCESO = "EN_PROCESO",
+  ENVIADA = "ENVIADA",
+  ENTREGADA = "ENTREGADA",
+  CANCELADA = "CANCELADA",
 }
 
-/**
- * Enum para métodos de pago disponibles
- * Define las opciones de pago aceptadas por la tienda
- */
 export enum MetodoPago {
-  TARJETA = "TARJETA", // Tarjeta de crédito/débito
-  APLAZO = "APLAZO", // Crédito Aplazo
-  TRANSFERENCIA = "TRANSFERENCIA", // Transferencia bancaria
-  EFECTIVO = "EFECTIVO", // Pago en efectivo contra entrega
-  PAYPAL = "PAYPAL", // PayPal
-  MERCADOPAGO = "MERCADOPAGO", // Mercado Pago
+  TARJETA = "TARJETA",
+  APLAZO = "APLAZO",
+  TRANSFERENCIA = "TRANSFERENCIA",
+  EFECTIVO = "EFECTIVO",
+  PAYPAL = "PAYPAL",
+  MERCADOPAGO = "MERCADOPAGO",
 }
 
 export enum FulfillmentMethod {
@@ -62,48 +42,26 @@ export enum FulfillmentStatus {
   CANCELED = "CANCELED",
 }
 
-/**
- * Interface para items individuales de la orden
- * Representa cada producto incluido en la orden con su cantidad y precio
- */
 export interface ItemOrden {
-  productoId: string; // Referencia al documento en colección 'productos'
-  cantidad: number; // Cantidad de unidades del producto
-
-  // Precio final cobrado al momento de la compra.
-  // Se mantiene para compatibilidad con órdenes existentes.
+  productoId: string;
+  cantidad: number;
   precioUnitario: number;
-
-  // Subtotal final cobrado: cantidad * precioUnitario final.
   subtotal: number;
-
-  tallaId?: string; // ID de la talla seleccionada (opcional, si aplica)
-
-  // Campos opcionales para snapshot de ofertas/descuentos.
-  // Son opcionales para no romper órdenes antiguas.
-  precioUnitarioOriginal?: number;
-  precioUnitarioFinal?: number;
-  descuentoUnitario?: number;
-  descuentoTotal?: number;
-  ofertaAplicadaId?: string | null;
-  ofertaTitulo?: string | null;
+  tallaId?: string;
 }
 
-/**
- * Interface para dirección de envío
- * Estructura completa para direcciones de envío en México
- */
 export interface DireccionEnvio {
-  nombre: string; // Nombre completo de quien recibe
-  telefono: string; // Teléfono de contacto (10 dígitos)
-  calle: string; // Nombre de la calle
-  numero: string; // Número exterior (puede incluir letra)
-  numeroInterior?: string; // Número interior (opcional)
-  colonia: string; // Colonia o barrio
-  ciudad: string; // Ciudad o municipio
-  estado: string; // Estado de la república
-  codigoPostal: string; // Código postal (5 dígitos)
-  referencias?: string; // Referencias adicionales para encontrar la dirección
+  nombre: string;
+  telefono: string;
+  calle: string;
+  numero: string;
+  numeroInterior?: string;
+  colonia: string;
+  ciudad: string;
+  estado: string;
+  codigoPostal: string;
+  referencias?: string;
+  addressValidationStatus?: CheckoutAddressValidationStatus;
 }
 
 export interface PickupLocationSnapshot {
@@ -127,21 +85,17 @@ export interface PickupContact {
   email?: string;
 }
 
-/**
- * Interface principal de Orden
- * Representa una orden de compra en la colección 'ordenes' de Firestore
- */
 export interface Orden {
-  id?: string; // ID del documento en Firestore (opcional al crear)
-  usuarioId: string; // UID de Firebase Auth del usuario que realiza la compra
-  items: ItemOrden[]; // Array de productos en la orden
-  subtotal: number; // Suma de todos los subtotales de items
-  impuestos: number; // IVA u otros impuestos aplicables
-  total: number; // subtotal + impuestos + envío (si aplica)
-  estado: EstadoOrden; // Estado actual de la orden
-  direccionEnvio?: DireccionEnvio; // Dirección de entrega (requerida para DELIVERY)
-  metodoPago: MetodoPago; // Método de pago seleccionado
-  fulfillmentMethod?: FulfillmentMethod; // Default legacy: DELIVERY
+  id?: string;
+  usuarioId: string;
+  items: ItemOrden[];
+  subtotal: number;
+  impuestos: number;
+  total: number;
+  estado: EstadoOrden;
+  direccionEnvio?: DireccionEnvio;
+  metodoPago: MetodoPago;
+  fulfillmentMethod?: FulfillmentMethod;
   fulfillmentStatus?: FulfillmentStatus;
   pickupLocationId?: string;
   pickupLocation?: PickupLocationSnapshot;
@@ -155,58 +109,55 @@ export interface Orden {
   pickedUpBy?: string;
   deliveredByStaffUid?: string;
   pickupExpiresAt?: Timestamp;
-
-  // Campos opcionales para integración futura
-  transaccionId?: string; // ID de transacción de la pasarela de pago
-  referenciaPago?: string; // Referencia adicional del pago
-  stripePaymentIntentId?: string; // ID del PaymentIntent en Stripe
-  stripeCheckoutSessionId?: string; // ID de Checkout Session en Stripe
-  stripeCustomerId?: string; // Stripe Customer asociado al usuario
-  paymentMetadata?: Record<string, unknown>; // Metadata usada para conciliación
-  numeroGuia?: string; // Número de guía de envío
-  transportista?: string; // Nombre del transportista
-    costoEnvio?: number; // Costo de envío (si aplica)
-  notas?: string; // Notas adicionales del cliente
-
-  // Campos opcionales para códigos promocionales.
-  // Se guardan como snapshot de auditoría para saber qué código afectó la orden.
-  codigoPromocion?: string;
-  codigoPromocionId?: string | null;
-  codigoPromocionTitulo?: string | null;
-  descuentoCodigoPromocion?: number;
-
-  deliveredAt?: Timestamp; // Fecha efectiva en la que la orden quedó entregada
-
-  // Campos de auditoría
-  createdAt: Timestamp; // Fecha de creación de la orden
-  updatedAt: Timestamp; // Fecha de última actualización
+  transaccionId?: string;
+  referenciaPago?: string;
+  stripePaymentIntentId?: string;
+  stripeCheckoutSessionId?: string;
+  stripeCustomerId?: string;
+  paymentMetadata?: Record<string, unknown>;
+  numeroGuia?: string;
+  transportista?: string;
+  costoEnvio?: number;
+  shipping?: CheckoutShippingSnapshot | Record<string, any>;
+  pricingSnapshot?: CheckoutPricingSnapshot;
+  discountTotal?: number;
+  subtotalOriginal?: number;
+  subtotalFinal?: number;
+  shippingTotal?: number;
+  currency?: string;
+  notas?: string;
+  deliveredAt?: Timestamp;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }
 
-/**
- * DTO para crear una nueva orden
- * Omite campos autogenerados como id, createdAt, updatedAt
- */
 export interface CrearOrdenDTO {
   usuarioId: string;
   items: ItemOrden[];
   subtotal: number;
   impuestos: number;
   total: number;
-  estado?: EstadoOrden; // Opcional, por defecto PENDIENTE
+  estado?: EstadoOrden;
   direccionEnvio?: DireccionEnvio;
   metodoPago: MetodoPago;
   fulfillmentMethod?: FulfillmentMethod;
   pickupLocationId?: string;
   pickupContact?: PickupContact;
   costoEnvio?: number;
-  codigoPromocion?: string;
+  shipping?: CheckoutShippingSnapshot | Record<string, any>;
+  pricingSnapshot?: CheckoutPricingSnapshot;
+  paymentMetadata?: Record<string, unknown>;
+  discountTotal?: number;
+  subtotalOriginal?: number;
+  subtotalFinal?: number;
+  shippingTotal?: number;
+  currency?: string;
+  shippingQuoteId?: string;
+  selectedShippingOptionId?: string;
+  selectedServiceType?: string;
   notas?: string;
 }
 
-/**
- * DTO para actualizar una orden existente
- * Todos los campos son opcionales para permitir actualizaciones parciales
- */
 export interface ActualizarOrdenDTO {
   estado?: EstadoOrden;
   transaccionId?: string;
@@ -218,10 +169,6 @@ export interface ActualizarOrdenDTO {
   fulfillmentStatus?: FulfillmentStatus;
 }
 
-/**
- * Interface para orden con información populada
- * Útil para respuestas de API que incluyan datos relacionados
- */
 export interface OrdenDetallada extends Orden {
   usuario?: {
     nombre: string;

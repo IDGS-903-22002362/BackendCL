@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
 import pointsService from "../../services/puntos.service";
+import { admin } from "../../config/firebase.admin";
 
 /**
  * Controller: Users Command (Escritura)
@@ -244,5 +245,119 @@ export const sumarPuntos = async (req: Request, res: Response) => {
     } catch (error) {
         console.error("Error al sumar puntos:", error);
         return res.status(500).json({ success: false, message: "Error interno" });
+    }
+};
+
+
+//Eliminación de cuenta por parte del usuario (solicitud de eliminación)
+export const solicitarEliminacionCuenta = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+
+        // Verificar si ya existe una solicitud pendiente
+        const usuario = await userAppService.getUserByUid(uid);
+        if (usuario?.solicitudEliminacion?.estado === "pendiente") {
+            return res.status(400).json({
+                success: false,
+                message: "Ya tienes una solicitud de eliminación pendiente. Puedes cancelarla si cambias de opinión.",
+            });
+        }
+
+        const now = admin.firestore.Timestamp.now();
+        // 30 días en milisegundos
+        const fechaProgramada = admin.firestore.Timestamp.fromDate(
+            new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        );
+
+        const solicitud = {
+            fechaSolicitud: now,
+            fechaProgramada,
+            estado: "pendiente" as const,
+        };
+
+        await userAppService.updateByUid(uid, {
+            solicitudEliminacion: solicitud,
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Solicitud de eliminación de cuenta registrada. Tu cuenta será eliminada permanentemente en 30 días. Puedes cancelar la solicitud en cualquier momento antes de esa fecha.",
+            fechaProgramada: fechaProgramada.toDate().toISOString(),
+        });
+    } catch (error) {
+        console.error("Error al solicitar eliminación:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al procesar la solicitud",
+        });
+    }
+};
+
+export const cancelarEliminacionCuenta = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const usuario = await userAppService.getUserByUid(uid);
+        if (!usuario) {
+            return res.status(404).json({ success: false, message: "Usuario no encontrado" });
+        }
+
+        if (!usuario.solicitudEliminacion || usuario.solicitudEliminacion.estado !== "pendiente") {
+            return res.status(400).json({
+                success: false,
+                message: "No hay una solicitud de eliminación pendiente",
+            });
+        }
+
+        // Eliminar el campo solicitudEliminacion (se puede borrar completamente o cambiar estado a cancelada)
+        await userAppService.updateByUid(uid, {
+            solicitudEliminacion: admin.firestore.FieldValue.delete(),
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Solicitud de eliminación cancelada. Tu cuenta permanecerá activa sin cambios.",
+        });
+    } catch (error) {
+        console.error("Error al cancelar eliminación:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al cancelar la solicitud",
+        });
+    }
+};
+
+export const obtenerEstadoEliminacion = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const usuario = await userAppService.getUserByUid(uid);
+        if (!usuario) {
+            return res.status(404).json({ success: false, message: "Usuario no encontrado" });
+        }
+
+        const solicitud = usuario.solicitudEliminacion;
+        if (!solicitud || solicitud.estado !== "pendiente") {
+            return res.status(200).json({
+                success: true,
+                tieneSolicitudPendiente: false,
+            });
+        }
+
+        const ahora = Date.now();
+        const fechaProgramadaMs = solicitud.fechaProgramada.toDate().getTime();
+        const diasRestantes = Math.max(0, Math.ceil((fechaProgramadaMs - ahora) / (1000 * 60 * 60 * 24)));
+
+        return res.status(200).json({
+            success: true,
+            tieneSolicitudPendiente: true,
+            fechaSolicitud: solicitud.fechaSolicitud.toDate().toISOString(),
+            fechaProgramada: solicitud.fechaProgramada.toDate().toISOString(),
+            diasRestantes,
+        });
+    } catch (error) {
+        console.error("Error al obtener estado de eliminación:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al obtener el estado",
+        });
     }
 };

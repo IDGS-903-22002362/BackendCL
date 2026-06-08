@@ -36,6 +36,7 @@ export interface UsuarioApp {
   edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
   genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
+  solicitudEliminacion?: SolicitudEliminacion; // Información sobre solicitud de eliminación de cuenta
   historialPuntos?: HistorialPuntosUsuario;
   bonoBienvenidaOtorgadoAt?: Timestamp;
   createdAt: Timestamp; // Fecha de registro
@@ -164,4 +165,10 @@ export interface CanjeProducto {
   ubicacionEntrega?: string;
   createdAt: Timestamp;
   entregadoAt?: Timestamp;
+}
+
+export interface SolicitudEliminacion {
+  fechaSolicitud: Timestamp;
+  fechaProgramada: Timestamp;
+  estado: "pendiente" | "cancelada" | "completada" | "error";
 }

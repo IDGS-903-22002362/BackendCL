@@ -33,6 +33,27 @@ export interface ProductRatingSummary {
   updatedAt?: Timestamp;
 }
 
+export interface FedexProductShipping {
+  enabled?: boolean;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+  packageType?: "YOUR_PACKAGING";
+  declaredValue?: number;
+  countryOfManufacture?: "MX";
+  customsDescription?: string;
+  hsCode?: string;
+}
+
+export interface ProductShipping {
+  requiresShipping?: boolean;
+  weightKg?: number;
+  lengthCm?: number;
+  widthCm?: number;
+  heightCm?: number;
+}
+
 /**
  * Interface principal de Producto
  * Representa un artículo en la colección 'productos' de Firestore
@@ -41,11 +62,15 @@ export interface Producto {
   id?: string; // ID del documento en Firestore (opcional al crear)
   clave: string; // SKU único asignado por el administrador
   descripcion: string; // Nombre/descripción del producto
+  slug?: string;
+  searchText?: string;
   lineaId: string; // Referencia a documento en colección 'lineas'
   categoriaId: string; // Referencia a documento en colección 'categorias'
   precioPublico: number; // Precio de venta al público
   precioCompra: number; // Costo de adquisición
   existencias: number; // Stock total general (suma de todos los stocks)
+  disponible?: boolean;
+  destacado?: boolean;
   proveedorId: string; // Referencia a documento en colección 'proveedores'
   tallaIds: string[]; // Array de IDs de tallas disponibles
   inventarioPorTalla: InventarioPorTalla[]; // Stock por talla (fuente de verdad)
@@ -54,6 +79,8 @@ export interface Producto {
   imagenes: string[]; // Array de URLs de imágenes del producto
   detalleIds: string[]; // Array de IDs de detalles relacionados (opcional)
   ratingSummary: ProductRatingSummary; // Resumen denormalizado de calificaciones
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo: boolean; // Si el producto está disponible para venta
   createdAt: Timestamp; // Fecha de creación
   updatedAt: Timestamp; // Fecha de última actualización
@@ -66,11 +93,15 @@ export interface Producto {
 export interface CrearProductoDTO {
   clave: string;
   descripcion: string;
+  slug?: string;
+  searchText?: string;
   lineaId: string;
   categoriaId: string;
   precioPublico: number;
   precioCompra: number;
   existencias: number;
+  disponible?: boolean;
+  destacado?: boolean;
   proveedorId: string;
   tallaIds: string[];
   inventarioPorTalla: InventarioPorTalla[];
@@ -79,6 +110,8 @@ export interface CrearProductoDTO {
   imagenes: string[];
   detalleIds: string[];
   ratingSummary?: ProductRatingSummary;
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo: boolean;
 }
 
@@ -89,11 +122,15 @@ export interface CrearProductoDTO {
 export interface ActualizarProductoDTO {
   clave?: string;
   descripcion?: string;
+  slug?: string;
+  searchText?: string;
   lineaId?: string;
   categoriaId?: string;
   precioPublico?: number;
   precioCompra?: number;
   existencias?: number;
+  disponible?: boolean;
+  destacado?: boolean;
   proveedorId?: string;
   tallaIds?: string[];
   inventarioPorTalla?: InventarioPorTalla[];
@@ -102,6 +139,8 @@ export interface ActualizarProductoDTO {
   imagenes?: string[];
   detalleIds?: string[];
   ratingSummary?: ProductRatingSummary;
+  fedexShipping?: FedexProductShipping;
+  shipping?: ProductShipping;
   activo?: boolean;
 }
 

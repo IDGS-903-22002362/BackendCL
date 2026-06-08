@@ -936,6 +936,56 @@ router.post(
   assignPointsBySale
 );
 
+/**
+ * @swagger
+ * /api/usuarios/me/solicitar-eliminacion:
+ *   post:
+ *     summary: Solicita la eliminación definitiva de la cuenta después de 30 días
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Solicitud registrada
+ *       400:
+ *         description: Ya existe una solicitud pendiente
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ */
+router.post("/me/solicitar-eliminacion", authMiddleware, commandController.solicitarEliminacionCuenta);
+
+
+
+/**
+ * @swagger
+ * /api/usuarios/me/cancelar-eliminacion:
+ *   post:
+ *     summary: Cancela una solicitud de eliminación pendiente
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Solicitud cancelada
+ *       400:
+ *         description: No hay solicitud pendiente
+ */
+router.post("/me/cancelar-eliminacion", authMiddleware, commandController.cancelarEliminacionCuenta);
+
+/**
+ * @swagger
+ * /api/usuarios/me/estado-eliminacion:
+ *   get:
+ *     summary: Obtiene el estado de la solicitud de eliminación
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Estado actual
+ */
+router.get("/me/estado-eliminacion", authMiddleware, commandController.obtenerEstadoEliminacion);
+
 
 
 router.put('/:id/reactivar', authMiddleware, commandController.reactivate);
