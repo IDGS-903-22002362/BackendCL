@@ -3,6 +3,7 @@ jest.mock("../src/services/product.service", () => ({
   default: {
     getProductById: jest.fn(),
     updateProduct: jest.fn(),
+    setProductActiveStatus: jest.fn(),
   },
 }));
 
@@ -16,7 +17,10 @@ jest.mock("../src/services/storage.service", () => ({
 import os from "os";
 import path from "path";
 import { promises as fs } from "fs";
-import { uploadImages } from "../src/controllers/products/products.command.controller";
+import {
+  setActiveStatus,
+  uploadImages,
+} from "../src/controllers/products/products.command.controller";
 import productService from "../src/services/product.service";
 import storageService from "../src/services/storage.service";
 
@@ -131,5 +135,85 @@ describe("products.command.controller uploadImages", () => {
     expect(mockedStorageService.uploadMultipleFilesFromPath).not.toHaveBeenCalled();
     expect((res as any).status).toHaveBeenCalledWith(404);
     await expect(fs.access(tempFilePath)).rejects.toThrow();
+  });
+});
+
+describe("products.command.controller setActiveStatus", () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("oculta un producto desde admin", async () => {
+    mockedProductService.setProductActiveStatus.mockResolvedValue({
+      id: "prod_1",
+      activo: false,
+    } as never);
+
+    const req = {
+      params: { id: "prod_1" },
+      body: { activo: false },
+    } as unknown as Parameters<typeof setActiveStatus>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof setActiveStatus>[1];
+
+    await setActiveStatus(req, res);
+
+    expect(mockedProductService.setProductActiveStatus).toHaveBeenCalledWith(
+      "prod_1",
+      false,
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: true,
+      message: "Producto ocultado exitosamente",
+      data: {
+        id: "prod_1",
+        activo: false,
+      },
+    });
+  });
+
+  it("reactiva un producto desde admin", async () => {
+    mockedProductService.setProductActiveStatus.mockResolvedValue({
+      id: "prod_1",
+      activo: true,
+    } as never);
+
+    const req = {
+      params: { id: "prod_1" },
+      body: { activo: true },
+    } as unknown as Parameters<typeof setActiveStatus>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof setActiveStatus>[1];
+
+    await setActiveStatus(req, res);
+
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: true,
+      message: "Producto activado exitosamente",
+      data: {
+        id: "prod_1",
+        activo: true,
+      },
+    });
+  });
+
+  it("responde 404 si el producto no existe", async () => {
+    mockedProductService.setProductActiveStatus.mockRejectedValue(
+      new Error("Producto con ID missing no encontrado"),
+    );
+
+    const req = {
+      params: { id: "missing" },
+      body: { activo: false },
+    } as unknown as Parameters<typeof setActiveStatus>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof setActiveStatus>[1];
+
+    await setActiveStatus(req, res);
+
+    expect((res as any).status).toHaveBeenCalledWith(404);
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: false,
+      message: "Producto no encontrado",
+      error: "Producto con ID missing no encontrado",
+    });
   });
 });

@@ -30,6 +30,7 @@ import { processNotificationEventTrigger } from "./services/notifications/notifi
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
+import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
 
 let apiAiConfigValidated = false;
 
@@ -73,3 +74,4 @@ export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
+export const userLevelSyncFunction = syncUserLevelOnPointsChange;
