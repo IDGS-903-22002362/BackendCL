@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import Busboy from "busboy";
 import { Storage } from "@google-cloud/storage";
-import { v4 as uuidv4 } from "uuid";
+//import { v4 as uuidv4 } from "uuid";
 
 // Configuración
 const storage = new Storage();
-const bucket = storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
 
 interface MulterFile {
     fieldname: string;

@@ -8,15 +8,15 @@ const GALERIA_COLLECTION = "galeria";
 class GalleryService {
 
     private collection = firestoreApp.collection(GALERIA_COLLECTION);
-    private extractFilePathFromUrl(url: string): string | null {
-        try {
-            const decoded = decodeURIComponent(url);
-            const match = decoded.match(/\/o\/(.*?)\?/);
-            return match ? match[1] : null;
-        } catch {
-            return null;
-        }
-    }
+    //private extractFilePathFromUrl(url: string): string | null {
+    //try {
+    // const decoded = decodeURIComponent(url);
+    // const match = decoded.match(/\/o\/(.*?)\?/);
+    // return match ? match[1] : null;
+    //} catch {
+    //return null;
+    //}
+    //}
 
     private mapDoc(doc: FirebaseFirestore.DocumentSnapshot): Galeria {
 

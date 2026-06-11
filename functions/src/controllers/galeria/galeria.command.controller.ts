@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import galleryService from "../../services/galeria.service";
-import storageAppService from "../../services/storageApp.service";
+//import storageAppService from "../../services/storageApp.service";
 import { firestoreApp } from "../../config/app.firebase";
 import { deleteGalleryImageSchema, deleteGalleryVideoSchema } from "../../middleware/validators/gallery.validator";
 import { admin } from "../../config/firebase.admin";
@@ -9,7 +9,7 @@ import { Storage } from "@google-cloud/storage";
 import { getStorage } from "firebase-admin/storage";
 
 const storage = new Storage();
-const bucket = storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
 
 export const create = async (req: Request, res: Response): Promise<Response> => {
     try {
