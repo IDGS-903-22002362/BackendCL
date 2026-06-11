@@ -8,6 +8,7 @@ import multer from "multer";
 import * as command from "../controllers/galeria/galeria.command.controller";
 import * as query from "../controllers/galeria/galeria.query.controller";
 import { authMiddleware } from "../utils/middlewares";
+import { handleMultipart } from "../middleware/multipart-handler";
 
 const router = Router();
 
@@ -144,7 +145,11 @@ router.get("/:id", query.getById);
 router.post(
     "/:id/imagenes",
     authMiddleware,
-    upload.array("imagenes", 10),
+    handleMultipart({
+        maxFiles: 10,
+        maxFileSize: 20 * 1024 * 1024, // 20MB
+        allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
+    }),
     command.uploadImages
 );
 
@@ -185,7 +190,11 @@ router.post(
 router.post(
     "/:id/videos",
     authMiddleware,
-    upload.array("videos", 5),
+    handleMultipart({
+        maxFiles: 5,
+        maxFileSize: 100 * 1024 * 1024, // 100MB para videos
+        allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"]
+    }),
     command.uploadVideos
 );
 

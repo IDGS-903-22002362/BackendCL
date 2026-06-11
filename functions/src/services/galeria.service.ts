@@ -1,3 +1,4 @@
+import { getStorage } from "firebase-admin/storage";
 import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import { Galeria } from "../models/galeria.model";
@@ -97,7 +98,6 @@ class GalleryService {
 
 
     async deleteImage(id: string, imageUrl: string) {
-
         const docRef = this.collection.doc(id);
         const snapshot = await docRef.get();
 
@@ -105,14 +105,25 @@ class GalleryService {
             throw new Error("Galería no encontrada");
         }
 
-        // borrar de storage
-        const filePath = this.extractFilePathFromUrl(imageUrl);
+        // 🔑 Extraer el path del archivo desde la URL de Firebase Storage
+        try {
+            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const urlObj = new URL(imageUrl);
+            const pathParts = urlObj.pathname.split('/');
+            // La URL es: https://storage.googleapis.com/BUCKET_NAME/ruta/al/archivo
+            const filePath = pathParts.slice(2).join('/'); // Remover /BUCKET_NAME/
 
-        if (filePath) {
-            await admin.storage().bucket().file(filePath).delete().catch(() => { });
+            if (filePath) {
+                const file = bucket.file(filePath);
+                await file.delete().catch(err => {
+                    console.warn("No se pudo eliminar archivo de storage:", err.message);
+                });
+            }
+        } catch (error) {
+            console.warn("Error al extraer path de URL:", error);
         }
 
-        // borrar del documento
+        // Eliminar del documento
         await docRef.update({
             imagenes: admin.firestore.FieldValue.arrayRemove(imageUrl),
             updatedAt: admin.firestore.Timestamp.now(),
@@ -122,7 +133,6 @@ class GalleryService {
     }
 
     async deleteVideo(id: string, videoUrl: string) {
-
         const docRef = this.collection.doc(id);
         const snapshot = await docRef.get();
 
@@ -130,14 +140,24 @@ class GalleryService {
             throw new Error("Galería no encontrada");
         }
 
-        // borrar de storage
-        const filePath = this.extractFilePathFromUrl(videoUrl);
+        // 🔑 Extraer el path del archivo desde la URL
+        try {
+            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const urlObj = new URL(videoUrl);
+            const pathParts = urlObj.pathname.split('/');
+            const filePath = pathParts.slice(2).join('/');
 
-        if (filePath) {
-            await admin.storage().bucket().file(filePath).delete().catch(() => { });
+            if (filePath) {
+                const file = bucket.file(filePath);
+                await file.delete().catch(err => {
+                    console.warn("No se pudo eliminar archivo de storage:", err.message);
+                });
+            }
+        } catch (error) {
+            console.warn("Error al extraer path de URL:", error);
         }
 
-        // borrar del documento
+        // Eliminar del documento
         await docRef.update({
             videos: admin.firestore.FieldValue.arrayRemove(videoUrl),
             updatedAt: admin.firestore.Timestamp.now(),

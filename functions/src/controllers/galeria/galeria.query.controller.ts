@@ -4,9 +4,7 @@ import galleryService from "../../services/galeria.service";
 export const getAll = async (_req: Request, res: Response): Promise<Response> => {
 
     try {
-
         const galleries = await galleryService.getAll();
-
         return res.status(200).json({
             success: true,
             count: galleries.length,
@@ -19,9 +17,7 @@ export const getAll = async (_req: Request, res: Response): Promise<Response> =>
             success: false,
             message: "Error al obtener galerías"
         });
-
     }
-
 };
 
 export const getById = async (req: Request, res: Response): Promise<Response> => {
