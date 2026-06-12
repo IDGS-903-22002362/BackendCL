@@ -103,6 +103,11 @@ export const handleMultipart = (options: {
                     }
                 });
         });
+        console.log("rawBody exists:", !!(req as any).rawBody);
+
+        if ((req as any).rawBody) {
+            console.log("rawBody length:", (req as any).rawBody.length);
+        }
 
         req.pipe(busboy);
     };
