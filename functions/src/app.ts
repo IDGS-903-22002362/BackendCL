@@ -26,7 +26,7 @@ const isNotMultipart = (req: express.Request) => {
 
 app.use((req, res, next) => {
   if (isNotMultipart(req)) {
-    express.json({ limit: "50mb" })(req, res, next);
+    express.json({ limit: "500mb" })(req, res, next);
   } else {
     next();
   }
@@ -34,7 +34,7 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (isNotMultipart(req)) {
-    express.urlencoded({ limit: "50mb", extended: true })(req, res, next);
+    express.urlencoded({ limit: "500mb", extended: true })(req, res, next);
   } else {
     next();
   }
