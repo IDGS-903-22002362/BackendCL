@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { promises as fs } from "fs";
 import categoryService from "../../services/category.service";
+import storageService from "../../services/storage.service";
 
 /**
  * Crea una nueva categoría
@@ -79,6 +81,90 @@ export const update = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Error al actualizar la categoría",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const uploadImage = async (req: Request, res: Response) => {
+  const file = req.file || ((req.files as Express.Multer.File[]) || [])[0];
+
+  try {
+    const { id } = req.params;
+
+    if (!file) {
+      return res
+        .status(400)
+        .json({ success: false, message: "No se envio imagen" });
+    }
+
+    const categoria = await categoryService.getCategoryById(id);
+    if (!categoria) {
+      return res.status(404).json({
+        success: false,
+        message: `Categoria con ID "${id}" no encontrada`,
+      });
+    }
+
+    const imageUrl = await storageService.uploadFileFromPath(
+      file.path,
+      file.originalname,
+      "categorias",
+      file.mimetype,
+    );
+    const categoriaActualizada = await categoryService.updateCategory(id, {
+      imagenPrincipal: imageUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Imagen principal de categoria actualizada exitosamente",
+      data: { url: imageUrl, categoria: categoriaActualizada },
+    });
+  } catch (error) {
+    console.error("Error en POST /api/categorias/:id/imagen:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al subir la imagen principal de la categoria",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  } finally {
+    if (file?.path) {
+      await fs.unlink(file.path).catch(() => undefined);
+    }
+  }
+};
+
+export const deleteImage = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const categoria = await categoryService.getCategoryById(id);
+
+    if (!categoria) {
+      return res.status(404).json({
+        success: false,
+        message: `Categoria con ID "${id}" no encontrada`,
+      });
+    }
+
+    if (categoria.imagenPrincipal?.includes("storage.googleapis.com")) {
+      await storageService.deleteFile(categoria.imagenPrincipal);
+    }
+
+    const categoriaActualizada = await categoryService.updateCategory(id, {
+      imagenPrincipal: null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Imagen principal de categoria eliminada exitosamente",
+      data: categoriaActualizada,
+    });
+  } catch (error) {
+    console.error("Error en DELETE /api/categorias/:id/imagen:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al eliminar la imagen principal de la categoria",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }

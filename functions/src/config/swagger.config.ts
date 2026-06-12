@@ -1213,6 +1213,11 @@ const swaggerDefinition = {
           id: { type: "string", example: "jersey" },
           codigo: { type: "integer", example: 1 },
           nombre: { type: "string", example: "Jersey Oficial" },
+          imagenPrincipal: {
+            type: "string",
+            nullable: true,
+            example: "https://storage.googleapis.com/bucket/lineas/imagen.jpg",
+          },
           activo: { type: "boolean", example: true },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },
@@ -1223,6 +1228,11 @@ const swaggerDefinition = {
         properties: {
           id: { type: "string", example: "jersey_hombre" },
           nombre: { type: "string", example: "Jersey Hombre" },
+          imagenPrincipal: {
+            type: "string",
+            nullable: true,
+            example: "https://storage.googleapis.com/bucket/categorias/imagen.jpg",
+          },
           lineaId: { type: "string", example: "jersey" },
           orden: { type: "integer", example: 1 },
         },
