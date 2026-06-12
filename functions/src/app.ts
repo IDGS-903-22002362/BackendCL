@@ -18,8 +18,27 @@ app.use(requestContextMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
 app.use("/api/webhooks/aplazo", express.raw({ type: "application/json" }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+const isNotMultipart = (req: express.Request) => {
+  const contentType = req.headers["content-type"] || "";
+  return !contentType.includes("multipart/form-data");
+};
+
+app.use((req, res, next) => {
+  if (isNotMultipart(req)) {
+    express.json({ limit: "50mb" })(req, res, next);
+  } else {
+    next();
+  }
+});
+
+app.use((req, res, next) => {
+  if (isNotMultipart(req)) {
+    express.urlencoded({ limit: "50mb", extended: true })(req, res, next);
+  } else {
+    next();
+  }
+});
 
 // Morgan: Logger de peticiones HTTP (solo en desarrollo)
 if (process.env.NODE_ENV === "development") {
