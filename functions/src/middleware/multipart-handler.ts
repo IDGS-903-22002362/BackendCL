@@ -1,11 +1,5 @@
 import { Request, Response, NextFunction } from "express";
 import Busboy from "busboy";
-import { Storage } from "@google-cloud/storage";
-//import { v4 as uuidv4 } from "uuid";
-
-// Configuración
-const storage = new Storage();
-storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
 
 interface MulterFile {
     fieldname: string;
@@ -21,7 +15,7 @@ export const handleMultipart = (options: {
     maxFileSize?: number;
     allowedMimeTypes?: string[];
 }) => {
-    return async (req: Request, res: Response, next: NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction) => {
         const contentType = req.headers["content-type"];
 
         if (!contentType || !contentType.includes("multipart/form-data")) {
@@ -32,42 +26,51 @@ export const handleMultipart = (options: {
             headers: req.headers,
             limits: {
                 files: options.maxFiles || 10,
-                fileSize: options.maxFileSize || 20 * 1024 * 1024, // 20MB default
+                fileSize: options.maxFileSize || 20 * 1024 * 1024,
             },
         });
 
         const files: MulterFile[] = [];
         const fields: Record<string, any> = {};
         let errorOccurred = false;
+        // ✅ Rastrear promesas de cada archivo para esperar que terminen
+        const filePromises: Promise<void>[] = [];
 
         busboy.on("file", (fieldname, file, info) => {
             const { filename, encoding, mimeType } = info;
 
-            // Validar tipo de archivo
             if (options.allowedMimeTypes && !options.allowedMimeTypes.includes(mimeType)) {
                 file.resume();
                 return;
             }
 
-            const chunks: Buffer[] = [];
-            let fileSize = 0;
+            // ✅ Cada archivo es una promesa que resuelve en su evento "end"
+            const filePromise = new Promise<void>((resolve, reject) => {
+                const chunks: Buffer[] = [];
+                let fileSize = 0;
 
-            file.on("data", (chunk: Buffer) => {
-                chunks.push(chunk);
-                fileSize += chunk.length;
-            });
-
-            file.on("end", () => {
-                const buffer = Buffer.concat(chunks);
-                files.push({
-                    fieldname,
-                    originalname: filename,
-                    encoding,
-                    mimetype: mimeType,
-                    buffer,
-                    size: fileSize,
+                file.on("data", (chunk: Buffer) => {
+                    chunks.push(chunk);
+                    fileSize += chunk.length;
                 });
+
+                file.on("end", () => {
+                    const buffer = Buffer.concat(chunks);
+                    files.push({
+                        fieldname,
+                        originalname: filename,
+                        encoding,
+                        mimetype: mimeType,
+                        buffer,
+                        size: fileSize,
+                    });
+                    resolve();
+                });
+
+                file.on("error", reject);
             });
+
+            filePromises.push(filePromise);
         });
 
         busboy.on("field", (fieldname, value) => {
@@ -75,25 +78,32 @@ export const handleMultipart = (options: {
         });
 
         busboy.on("error", (error) => {
-            console.error("Busboy error:", error);
-            errorOccurred = true;
-            if (!res.headersSent) {
-                res.status(400).json({
-                    success: false,
-                    message: "Error al procesar archivos",
-                });
+            if (!errorOccurred) {
+                errorOccurred = true;
+                next(new Error("Error al procesar archivos: " + (error as Error).message));
             }
         });
 
+        // ✅ Esperar TODAS las promesas de archivos antes de llamar next()
         busboy.on("close", () => {
-            if (!errorOccurred && !res.headersSent) {
-                req.files = files as any;
-                req.body = fields;
-                next();
-            }
+            if (errorOccurred) return;
+
+            Promise.all(filePromises)
+                .then(() => {
+                    if (!errorOccurred && !res.headersSent) {
+                        req.files = files as any;
+                        req.body = { ...req.body, ...fields };
+                        next();
+                    }
+                })
+                .catch((err) => {
+                    if (!errorOccurred) {
+                        errorOccurred = true;
+                        next(new Error("Error leyendo archivos: " + err.message));
+                    }
+                });
         });
 
-        // Pipe request to busboy
         req.pipe(busboy);
     };
 };
