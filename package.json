@@ -34,6 +34,7 @@
     "@types/multer": "^2.0.0",
     "@types/uuid": "^10.0.0",
     "axios": "^1.16.1",
+    "busboy": "^1.6.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -50,6 +51,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/helmet": "^0.0.48",
