@@ -38,6 +38,7 @@ export const handleMultipart = (options: {
 
         const files: MulterFile[] = [];
         const fields: Record<string, any> = {};
+        let errorOccurred = false;
 
         busboy.on("file", (fieldname, file, info) => {
             const { filename, encoding, mimeType } = info;
@@ -75,16 +76,21 @@ export const handleMultipart = (options: {
 
         busboy.on("error", (error) => {
             console.error("Busboy error:", error);
-            res.status(400).json({
-                success: false,
-                message: "Error al procesar archivos",
-            });
+            errorOccurred = true;
+            if (!res.headersSent) {
+                res.status(400).json({
+                    success: false,
+                    message: "Error al procesar archivos",
+                });
+            }
         });
 
         busboy.on("close", () => {
-            req.files = files as any;
-            req.body = fields;
-            next();
+            if (!errorOccurred && !res.headersSent) {
+                req.files = files as any;
+                req.body = fields;
+                next();
+            }
         });
 
         // Pipe request to busboy
