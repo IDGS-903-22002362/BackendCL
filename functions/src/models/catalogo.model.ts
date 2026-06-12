@@ -13,6 +13,7 @@ export interface Linea {
   id?: string;
   codigo: number;
   nombre: string;
+  imagenPrincipal?: string | null;
   activo?: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
@@ -25,6 +26,7 @@ export interface Linea {
 export interface Categoria {
   id?: string;
   nombre: string; // Nombre de la categoría
+  imagenPrincipal?: string | null;
   lineaId?: string; // Opcional: asociar categoría a una línea específica
   orden?: number; // Opcional: para ordenar en UI
 }
@@ -61,10 +63,12 @@ export interface Talla {
 export interface CrearLineaDTO {
   codigo: number;
   nombre: string;
+  imagenPrincipal?: string | null;
 }
 
 export interface CrearCategoriaDTO {
   nombre: string;
+  imagenPrincipal?: string | null;
   lineaId?: string;
   orden?: number;
 }

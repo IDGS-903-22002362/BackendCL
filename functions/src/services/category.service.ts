@@ -25,6 +25,7 @@ class CategoryService {
           return {
             id: doc.id,
             nombre: data.nombre,
+            imagenPrincipal: data.imagenPrincipal ?? null,
             lineaId: data.lineaId,
             orden: data.orden,
             activo: data.activo ?? true,
@@ -67,6 +68,7 @@ class CategoryService {
       return {
         id: doc.id,
         nombre: data.nombre,
+        imagenPrincipal: data.imagenPrincipal ?? null,
         lineaId: data.lineaId,
         orden: data.orden,
       };
@@ -94,6 +96,7 @@ class CategoryService {
           return {
             id: doc.id,
             nombre: data.nombre,
+            imagenPrincipal: data.imagenPrincipal ?? null,
             lineaId: data.lineaId,
             orden: data.orden,
             activo: data.activo ?? true,
@@ -123,7 +126,7 @@ class CategoryService {
    */
   async createCategory(
     categoria: Pick<Categoria, "nombre"> &
-      Partial<Pick<Categoria, "lineaId" | "orden">>,
+      Partial<Pick<Categoria, "imagenPrincipal" | "lineaId" | "orden">>,
   ): Promise<Categoria> {
     try {
       const now = admin.firestore.Timestamp.now();
@@ -164,6 +167,7 @@ class CategoryService {
       // Crear el documento
       const categoriaData = {
         nombre: categoria.nombre,
+        imagenPrincipal: categoria.imagenPrincipal ?? null,
         lineaId: categoria.lineaId || null,
         orden: categoria.orden || null,
         activo: true,
@@ -176,6 +180,7 @@ class CategoryService {
       return {
         id: docId,
         nombre: categoria.nombre,
+        imagenPrincipal: categoria.imagenPrincipal ?? null,
         lineaId: categoria.lineaId,
         orden: categoria.orden,
       };
@@ -195,7 +200,9 @@ class CategoryService {
    */
   async updateCategory(
     id: string,
-    updateData: Partial<Pick<Categoria, "nombre" | "lineaId" | "orden">>,
+    updateData: Partial<
+      Pick<Categoria, "nombre" | "imagenPrincipal" | "lineaId" | "orden">
+    >,
   ): Promise<Categoria> {
     try {
       const docRef = firestoreTienda.collection(CATEGORIAS_COLLECTION).doc(id);
@@ -236,6 +243,7 @@ class CategoryService {
       return {
         id: updatedDoc.id,
         nombre: data.nombre,
+        imagenPrincipal: data.imagenPrincipal ?? null,
         lineaId: data.lineaId,
         orden: data.orden,
       };
@@ -290,6 +298,7 @@ class CategoryService {
           return {
             id: doc.id,
             nombre: data.nombre,
+            imagenPrincipal: data.imagenPrincipal ?? null,
             lineaId: data.lineaId,
             orden: data.orden,
             activo: data.activo ?? true,
