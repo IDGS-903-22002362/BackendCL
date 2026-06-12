@@ -118,13 +118,19 @@ export interface Orden {
   numeroGuia?: string;
   transportista?: string;
   costoEnvio?: number;
-  shipping?: CheckoutShippingSnapshot | Record<string, any>;
+   shipping?: CheckoutShippingSnapshot | Record<string, any>;
   pricingSnapshot?: CheckoutPricingSnapshot;
+
   discountTotal?: number;
   subtotalOriginal?: number;
   subtotalFinal?: number;
   shippingTotal?: number;
   currency?: string;
+
+  codigoPromocion?: string;
+  codigoPromocionId?: string;
+  codigoPromocionTitulo?: string;
+  descuentoCodigoPromocion?: number;
   notas?: string;
   deliveredAt?: Timestamp;
   createdAt: Timestamp;
@@ -138,8 +144,9 @@ export interface CrearOrdenDTO {
   impuestos: number;
   total: number;
   estado?: EstadoOrden;
-  direccionEnvio?: DireccionEnvio;
+    direccionEnvio?: DireccionEnvio;
   metodoPago: MetodoPago;
+  codigoPromocion?: string;
   fulfillmentMethod?: FulfillmentMethod;
   pickupLocationId?: string;
   pickupContact?: PickupContact;

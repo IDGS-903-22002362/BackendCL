@@ -30,6 +30,7 @@ import {
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import pickupLocationService from "./pickup-location.service";
+import { codigosPromocionService } from "./codigos-promocion.service";
 import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
@@ -45,6 +46,29 @@ const PRODUCTOS_COLLECTION = "productos";
  * Constantes de negocio
  */
 const TASA_IVA = 0; // 0% temporal (cambiar a 0.16 cuando se requiera 16%)
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+
+  return [];
+}
+
+function buildVariantKey(productoId: string, tallaId?: string) {
+  return `${productoId}::${tallaId ?? "__GLOBAL__"}`;
+}
 
 /**
  * Clase OrdenService
@@ -150,8 +174,31 @@ export class OrdenService {
 
       // PASO 1: Validar y obtener información de todos los productos
       const itemsValidados: ItemOrden[] = [];
-      let subtotalCalculado = 0;
-      const requestedByVariant = new Map<string, number>();
+let subtotalCalculado = 0;
+let descuentoCodigoPromocion = 0;
+let codigoPromocionSnapshot:
+  | {
+      codigo: string;
+      codigoPromocionId?: string;
+      titulo?: string;
+    }
+  | undefined;
+
+const codigoPromocion =
+  typeof data.codigoPromocion === "string"
+    ? data.codigoPromocion.trim().toUpperCase()
+    : "";
+
+const itemsParaCodigoPromocion: Array<{
+  productoId: string;
+  cantidad: number;
+  precioUnitario: number;
+  tallaId?: string | null;
+  categoriaIds: string[];
+  lineaIds: string[];
+}> = [];
+
+const requestedByVariant = new Map<string, number>();
       const pricingItemsByVariant = new Map(
         (data.pricingSnapshot?.items || []).map((item) => [
           `${item.productId}::${item.tallaId ?? "__GLOBAL__"}`,
@@ -277,12 +324,121 @@ export class OrdenService {
         };
 
         itemsValidados.push(itemValidado);
-        subtotalCalculado += subtotalItem;
+subtotalCalculado += subtotalItem;
 
-        console.log(
-          `  ✓ Item validado: ${producto.descripcion} x${item.cantidad} = $${subtotalItem.toFixed(2)}`,
-        );
+itemsParaCodigoPromocion.push({
+  productoId: item.productoId,
+  cantidad: item.cantidad,
+  precioUnitario,
+  tallaId: stockContext.tallaId ?? null,
+  categoriaIds: [
+    ...toStringArray((producto as any).categoriaIds),
+    ...toStringArray((producto as any).categoriasIds),
+    ...toStringArray((producto as any).categoryIds),
+    ...toStringArray((producto as any).categoriaId),
+  ],
+  lineaIds: [
+    ...toStringArray((producto as any).lineaIds),
+    ...toStringArray((producto as any).lineasIds),
+    ...toStringArray((producto as any).lineIds),
+    ...toStringArray((producto as any).lineaId),
+  ],
+});
+
+console.log(
+  `  ✓ Item validado: ${producto.descripcion} x${item.cantidad} = $${subtotalItem.toFixed(2)}`,
+);
       }
+
+      if (codigoPromocion) {
+  const resultadoCodigo = await codigosPromocionService.validar({
+    codigo: codigoPromocion,
+    items: itemsParaCodigoPromocion,
+  });
+
+  const codigoValido =
+    resultadoCodigo.valido !== false &&
+    Number(resultadoCodigo.descuentoTotal || 0) > 0 &&
+    Number(resultadoCodigo.subtotalFinal || 0) > 0 &&
+    Number(resultadoCodigo.subtotalFinal || 0) < subtotalCalculado;
+
+  if (!codigoValido) {
+    throw new Error(
+      resultadoCodigo.mensaje ||
+        "El código promocional no aplica para esta orden",
+    );
+  }
+
+  descuentoCodigoPromocion = roundCurrency(
+    Number(resultadoCodigo.descuentoTotal || 0),
+  );
+
+  const itemsCodigo = Array.isArray(resultadoCodigo.items)
+    ? resultadoCodigo.items
+    : [];
+
+  const codigoItemsByVariant = new Map(
+    itemsCodigo.map((item: any) => [
+      buildVariantKey(
+        String(item.productoId ?? item.productId ?? ""),
+        item.tallaId ?? undefined,
+      ),
+      item,
+    ]),
+  );
+
+  let subtotalRecalculadoConCodigo = 0;
+
+  for (const itemValidado of itemsValidados) {
+    const codigoItem = codigoItemsByVariant.get(
+      buildVariantKey(itemValidado.productoId, itemValidado.tallaId),
+    );
+
+    if (!codigoItem) {
+      subtotalRecalculadoConCodigo += itemValidado.subtotal;
+      continue;
+    }
+
+    const subtotalFinalCodigo = Number(codigoItem.subtotalFinal);
+    const precioFinalCodigo = Number(
+      codigoItem.precioFinal ??
+        codigoItem.precioUnitarioFinal ??
+        (Number.isFinite(subtotalFinalCodigo)
+          ? subtotalFinalCodigo / itemValidado.cantidad
+          : NaN),
+    );
+
+    if (
+      Number.isFinite(subtotalFinalCodigo) &&
+      subtotalFinalCodigo >= 0 &&
+      Number.isFinite(precioFinalCodigo) &&
+      precioFinalCodigo >= 0
+    ) {
+      itemValidado.precioUnitario = roundCurrency(precioFinalCodigo);
+      itemValidado.subtotal = roundCurrency(subtotalFinalCodigo);
+    }
+
+    subtotalRecalculadoConCodigo += itemValidado.subtotal;
+  }
+
+  subtotalCalculado = roundCurrency(
+    Number(resultadoCodigo.subtotalFinal || subtotalRecalculadoConCodigo),
+  );
+
+  codigoPromocionSnapshot = {
+  codigo: codigoPromocion,
+  ...(resultadoCodigo.codigoPromocionId
+    ? { codigoPromocionId: resultadoCodigo.codigoPromocionId }
+    : {}),
+  ...(resultadoCodigo.codigoTitulo
+    ? { titulo: resultadoCodigo.codigoTitulo }
+    : {}),
+};
+
+  console.log(
+    `🏷️ Código promocional aplicado: ${codigoPromocion} | Descuento: $${descuentoCodigoPromocion.toFixed(2)} | Subtotal final: $${subtotalCalculado.toFixed(2)}`,
+  );
+}
 
       // PASO 2: Calcular totales
       const impuestosCalculados = subtotalCalculado * TASA_IVA; // 0% por ahora
@@ -292,10 +448,9 @@ export class OrdenService {
           : typeof data.pricingSnapshot?.shippingTotal === "number"
             ? data.pricingSnapshot.shippingTotal
             : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
-      const totalCalculado =
-        typeof data.pricingSnapshot?.total === "number"
-          ? data.pricingSnapshot.total
-          : subtotalCalculado + impuestosCalculados + costoEnvioCalculado;
+      const totalCalculado = roundCurrency(
+  subtotalCalculado + impuestosCalculados + costoEnvioCalculado,
+);
 
       console.log(`💰 Totales calculados:`);
       console.log(`   Subtotal: $${subtotalCalculado.toFixed(2)}`);
@@ -330,15 +485,27 @@ export class OrdenService {
         ...(data.shipping ? { shipping: data.shipping } : {}),
         ...(data.pricingSnapshot ? { pricingSnapshot: data.pricingSnapshot } : {}),
         ...(data.paymentMetadata ? { paymentMetadata: data.paymentMetadata } : {}),
-        ...(typeof data.discountTotal === "number"
-          ? { discountTotal: data.discountTotal }
-          : {}),
-        ...(typeof data.subtotalOriginal === "number"
-          ? { subtotalOriginal: data.subtotalOriginal }
-          : {}),
-        ...(typeof data.subtotalFinal === "number"
-          ? { subtotalFinal: data.subtotalFinal }
-          : {}),
+        ...(typeof data.discountTotal === "number" || descuentoCodigoPromocion > 0
+  ? {
+      discountTotal: roundCurrency(
+        Number(data.discountTotal || 0) + descuentoCodigoPromocion,
+      ),
+    }
+  : {}),
+...(descuentoCodigoPromocion > 0
+  ? { descuentoCodigoPromocion }
+  : {}),
+...(codigoPromocionSnapshot
+  ? {
+      codigoPromocion: codigoPromocionSnapshot.codigo,
+      codigoPromocionId: codigoPromocionSnapshot.codigoPromocionId,
+      codigoPromocionTitulo: codigoPromocionSnapshot.titulo,
+    }
+  : {}),
+...(typeof data.subtotalOriginal === "number"
+  ? { subtotalOriginal: data.subtotalOriginal }
+  : {}),
+subtotalFinal: subtotalCalculado,
         ...(typeof data.shippingTotal === "number"
           ? { shippingTotal: data.shippingTotal }
           : {}),

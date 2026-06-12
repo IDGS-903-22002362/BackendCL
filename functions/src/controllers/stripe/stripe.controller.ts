@@ -133,18 +133,21 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
       idempotencyKey: getOptionalIdempotencyKey(req),
     });
 
-    return res.status(result.created ? 201 : 200).json({
-      success: true,
-      message: result.created
-        ? "Checkout Session creada exitosamente"
-        : "Checkout Session reutilizada por idempotencia",
-      data: {
-        sessionId: result.sessionId,
-        url: result.url,
-        paymentId: result.pagoId,
-        stripeCustomerId: result.stripeCustomerId,
-      },
-    });
+   return res.status(result.created ? 201 : 200).json({
+  success: true,
+  message: result.created
+    ? "Checkout Session creada exitosamente"
+    : "Checkout Session reutilizada por idempotencia",
+  data: {
+    sessionId: result.sessionId,
+    clientSecret: result.clientSecret,
+    url: result.url,
+    pagoId: result.pagoId,
+    paymentId: result.pagoId,
+    stripeCustomerId: result.stripeCustomerId,
+    created: result.created,
+  },
+});
   } catch (error) {
     if (error instanceof ApiError) {
       return res.status(error.statusCode).json({

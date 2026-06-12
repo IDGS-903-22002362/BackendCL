@@ -207,6 +207,167 @@ const pickIdentifier = (payload: unknown, keys: string[]): string | undefined =>
   return undefined;
 };
 
+const isHttpUrl = (value: unknown): string | undefined => {
+  const normalized = toTrimmedString(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return /^https?:\/\//i.test(normalized) ? normalized : undefined;
+};
+
+const getHeaderValue = (
+  headers: unknown,
+  name: string,
+): string | undefined => {
+  if (!headers) {
+    return undefined;
+  }
+
+  const maybeHeaders = headers as {
+    get?: (key: string) => unknown;
+    [key: string]: unknown;
+  };
+
+  if (typeof maybeHeaders.get === "function") {
+    const fromGet = maybeHeaders.get(name);
+    const normalizedFromGet = toTrimmedString(fromGet);
+
+    if (normalizedFromGet) {
+      return normalizedFromGet;
+    }
+  }
+
+  const lowerName = name.toLowerCase();
+
+  if (isRecord(headers)) {
+    const direct =
+      headers[name] ??
+      headers[lowerName] ??
+      headers[name.toUpperCase()];
+
+    if (Array.isArray(direct)) {
+      return toTrimmedString(direct[0]);
+    }
+
+    return toTrimmedString(direct);
+  }
+
+  return undefined;
+};
+
+const findRedirectUrlDeep = (
+  payload: unknown,
+  depth = 0,
+): string | undefined => {
+  if (depth > 5 || payload === null || payload === undefined) {
+    return undefined;
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const found = findRedirectUrlDeep(item, depth + 1);
+      if (found) {
+        return found;
+      }
+    }
+
+    return undefined;
+  }
+
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  const preferredKeys = [
+    "redirectUrl",
+    "redirect_url",
+    "redirectURL",
+    "checkoutUrl",
+    "checkout_url",
+    "checkoutURL",
+    "paymentUrl",
+    "payment_url",
+    "paymentURL",
+    "paymentLink",
+    "payment_link",
+    "checkoutLink",
+    "checkout_link",
+    "authorizationUrl",
+    "authorization_url",
+    "hostedCheckoutUrl",
+    "hosted_checkout_url",
+    "href",
+  ];
+
+  for (const key of preferredKeys) {
+    const value = isHttpUrl(payload[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(payload)) {
+    const normalizedKey = key.toLowerCase();
+
+    if (
+      normalizedKey.includes("checkout") ||
+      normalizedKey.includes("redirect") ||
+      normalizedKey.includes("payment") ||
+      normalizedKey.includes("link")
+    ) {
+      const directValue = isHttpUrl(value);
+      if (directValue) {
+        return directValue;
+      }
+
+      const nestedValue = findRedirectUrlDeep(value, depth + 1);
+      if (nestedValue) {
+        return nestedValue;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const resolveAplazoRedirectUrl = (
+  rawData: unknown,
+  headers: unknown,
+): string | undefined => {
+  const fromBody =
+    pickString(rawData, [
+      "redirectUrl",
+      "redirect_url",
+      "redirectURL",
+      "url",
+      "checkoutUrl",
+      "checkout_url",
+      "checkoutURL",
+      "link",
+      "paymentLink",
+      "payment_link",
+      "paymentUrl",
+      "payment_url",
+      "checkoutLink",
+      "checkout_link",
+      "authorizationUrl",
+      "authorization_url",
+      "hostedCheckoutUrl",
+      "hosted_checkout_url",
+    ]) || findRedirectUrlDeep(rawData);
+
+  if (fromBody) {
+    return fromBody;
+  }
+
+  return (
+    isHttpUrl(getHeaderValue(headers, "location")) ||
+    isHttpUrl(getHeaderValue(headers, "Location"))
+  );
+};
+
 const getRecordArray = (payload: unknown): JsonRecord[] => {
   if (Array.isArray(payload)) {
     return payload.filter(isRecord);
@@ -759,18 +920,25 @@ const buildOnlineAplazoPayload = (
 ): JsonRecord => {
   const pricingSnapshot = input.pricingSnapshot;
   const currency = normalizeCurrencyOrThrow(input.currency);
-  const subtotalMinor = pricingSnapshot?.subtotalMinor || input.amountMinor;
-  const taxMinor = pricingSnapshot?.taxMinor || 0;
-  const shippingMinor = pricingSnapshot?.shippingMinor || 0;
-  const composedMinor = subtotalMinor + taxMinor + shippingMinor;
-  const discountMinor = Math.max(0, composedMinor - input.amountMinor);
-  const products = buildProducts(pricingSnapshot, TODO_PRODUCTS_ONLINE);
-  const productsMinor = products.reduce((sum, product) => {
-    const quantity = toNumber(product.count) || 0;
-    const unitPrice = toNumber(product.price) || 0;
-    return sum + Math.round(unitPrice * 100) * quantity;
-  }, 0);
-  const recomposedMinor = productsMinor + taxMinor + shippingMinor - discountMinor;
+const taxMinor = pricingSnapshot?.taxMinor || 0;
+const shippingMinor = pricingSnapshot?.shippingMinor || 0;
+
+const products = buildProducts(pricingSnapshot, TODO_PRODUCTS_ONLINE);
+
+const productsMinor = products.reduce((sum, product) => {
+  const quantity = toNumber(product.count) || 0;
+  const unitPrice = toNumber(product.price) || 0;
+
+  return sum + Math.round(unitPrice * 100) * quantity;
+}, 0);
+
+const discountMinor = Math.max(
+  0,
+  productsMinor + taxMinor + shippingMinor - input.amountMinor,
+);
+
+const recomposedMinor =
+  productsMinor + taxMinor + shippingMinor - discountMinor;
 
   if (recomposedMinor !== input.amountMinor) {
     throw new PaymentApiError(
@@ -1217,11 +1385,15 @@ export class AplazoProvider implements PaymentProvider {
         }),
       );
       const response = await this.request(apiBaseUrl, contract.timeoutMs, {
-        method: "post",
-        url: createPath,
-        headers,
-        data: requestPayload,
-      });
+  method: "post",
+  url: createPath,
+  headers,
+  data: requestPayload,
+  maxRedirects: 0,
+  validateStatus: (status) => {
+    return (status >= 200 && status < 300) || status === 302 || status === 303;
+  },
+});
       aplazoLogger.info("Aplazo response received", {
         channel: "online",
         url: `${apiBaseUrl}${createPath}`,
@@ -1230,30 +1402,82 @@ export class AplazoProvider implements PaymentProvider {
         providerHttpStatus: response.status,
         body: sanitizeAxiosErrorData(response.data),
       });
+      aplazoLogger.info("[APLAZO_RAW_CREATE_ONLINE_RESPONSE_DEBUG]", {
+  channel: "online",
+  paymentAttemptId: input.paymentAttemptId,
+  providerReference: input.providerReference || cartId,
+  providerHttpStatus: response.status,
+  responseHeaders: sanitizeProviderHeaders(response.headers),
+  responseData: sanitizeAxiosErrorData(response.data),
+  responseDataKeys:
+    response.data && typeof response.data === "object"
+      ? Object.keys(response.data as Record<string, unknown>)
+      : [],
+});
       const rawData = response.data;
-      const providerStatus = pickString(rawData, ["status", "loanStatus", "state"]);
+const providerStatus = pickString(rawData, ["status", "loanStatus", "state"]);
+const redirectUrl = resolveAplazoRedirectUrl(rawData, response.headers);
 
-      return {
-        status: providerStatus
-          ? resolveAplazoStatus(providerStatus)
-          : PaymentStatus.PENDING_CUSTOMER,
-        providerStatus: providerStatus || "pending_customer",
-        providerLoanId: pickIdentifier(rawData, ["loanId", "loan_id"]),
-        providerReference: pickIdentifier(rawData, ["cartId", "cart_id"]) || cartId,
-        redirectUrl: pickString(rawData, [
-          "url",
-          "checkoutUrl",
-          "checkout_url",
-          "link",
-          "paymentLink",
-        ]),
-        expiresAt:
-          parseAplazoDate(
-            pickString(rawData, ["expiresAt", "expires_at", "expirationDate"]),
-          ) || undefined,
-        rawRequestSanitized: sanitizeAplazoPayload(requestPayload),
-        rawResponseSanitized: sanitizeAplazoPayload(rawData),
-      };
+aplazoLogger.info("[APLAZO_CREATE_ONLINE_REDIRECT_RESOLUTION]", {
+  channel: "online",
+  paymentAttemptId: input.paymentAttemptId,
+  providerReference: input.providerReference || cartId,
+  providerHttpStatus: response.status,
+  redirectUrlPresent: Boolean(redirectUrl),
+  responseHeaders: sanitizeProviderHeaders(response.headers),
+  body: sanitizeAxiosErrorData(rawData),
+});
+
+aplazoLogger.info("[APLAZO_REDIRECT_RESOLUTION_DEBUG]", {
+  channel: "online",
+  paymentAttemptId: input.paymentAttemptId,
+  providerReference: input.providerReference || cartId,
+  providerHttpStatus: response.status,
+  providerStatus,
+  redirectUrl,
+  redirectUrlPresent:
+    typeof redirectUrl === "string" && redirectUrl.trim().length > 0,
+  bodyKeys:
+    rawData && typeof rawData === "object"
+      ? Object.keys(rawData as Record<string, unknown>)
+      : [],
+  locationHeader:
+    typeof response.headers?.location === "string"
+      ? response.headers.location
+      : undefined,
+  sanitizedBody: sanitizeAxiosErrorData(rawData),
+});
+
+if (!redirectUrl) {
+  throw new PaymentApiError(
+    502,
+    "PAYMENT_PROVIDER_ERROR",
+    "Aplazo no devolvió URL de checkout para redirigir al cliente",
+    {
+      providerHttpStatus: response.status,
+      providerReference: input.providerReference || cartId,
+      cartId,
+      providerResponse: sanitizeAxiosErrorData(rawData),
+      providerHeaders: sanitizeProviderHeaders(response.headers),
+    },
+  );
+}
+
+return {
+  status: providerStatus
+    ? resolveAplazoStatus(providerStatus)
+    : PaymentStatus.PENDING_CUSTOMER,
+  providerStatus: providerStatus || "pending_customer",
+  providerLoanId: pickIdentifier(rawData, ["loanId", "loan_id"]),
+  providerReference: pickIdentifier(rawData, ["cartId", "cart_id"]) || cartId,
+  redirectUrl,
+  expiresAt:
+    parseAplazoDate(
+      pickString(rawData, ["expiresAt", "expires_at", "expirationDate"]),
+    ) || undefined,
+  rawRequestSanitized: sanitizeAplazoPayload(requestPayload),
+  rawResponseSanitized: sanitizeAplazoPayload(rawData),
+};
     } catch (error) {
       const sanitizedRequestPayload = sanitizeOutgoingProviderPayload(requestPayload);
       const normalizedError = normalizeProviderError(error, {

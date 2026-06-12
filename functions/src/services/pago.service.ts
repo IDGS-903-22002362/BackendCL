@@ -108,6 +108,7 @@ export type CreateStripeCheckoutSessionInput = {
 
 export type CreateStripeCheckoutSessionResult = {
   sessionId: string;
+  clientSecret: string;
   url?: string | null;
   pagoId: string;
   stripeCustomerId?: string;
@@ -1110,182 +1111,203 @@ class PagoService {
     };
   }
 
-  async createStripeCheckoutSession(
-    input: CreateStripeCheckoutSessionInput,
-  ): Promise<CreateStripeCheckoutSessionResult> {
-    const stripe = getStripeClient();
-    const { orderId, userId, successUrl, cancelUrl, idempotencyKey } = input;
-    const currency = getStripeCurrency();
+async createStripeCheckoutSession(
+  input: CreateStripeCheckoutSessionInput,
+): Promise<CreateStripeCheckoutSessionResult> {
+  const stripe = getStripeClient();
+  const { orderId, userId, successUrl, idempotencyKey } = input;
+  const currency = getStripeCurrency();
 
-    const { ordenDoc, ordenData, amount } = await this.getOrderForPayment(
-      orderId,
-      userId,
-    );
-    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
-      stripe,
-      userId,
-    );
+  const { ordenDoc, ordenData, amount } = await this.getOrderForPayment(
+    orderId,
+    userId,
+  );
 
-    return this.withStartPaymentLock(orderId, userId, async () => {
-      const activePagoDoc = await this.findLatestActivePagoDoc(orderId, userId);
-      if (activePagoDoc) {
-        const activePago = activePagoDoc.data() as Pago;
-        if (activePago.checkoutSessionId) {
-          const existingSession = await stripe.checkout.sessions.retrieve(
-            activePago.checkoutSessionId,
-          );
+  const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+    stripe,
+    userId,
+  );
+
+  return this.withStartPaymentLock(orderId, userId, async () => {
+    const activePagoDoc = await this.findLatestActivePagoDoc(orderId, userId);
+
+    if (activePagoDoc) {
+      const activePago = activePagoDoc.data() as Pago;
+
+      if (activePago.checkoutSessionId) {
+        const existingSession = await stripe.checkout.sessions.retrieve(
+          activePago.checkoutSessionId,
+        );
+
+        if (existingSession.client_secret) {
           return {
             sessionId: existingSession.id,
+            clientSecret: existingSession.client_secret,
             url: existingSession.url,
             pagoId: activePagoDoc.id,
             stripeCustomerId: activePago.stripeCustomerId || stripeCustomerId,
             created: false,
           };
         }
+
+        await activePagoDoc.ref.set(
+          {
+            estado: EstadoPago.FALLIDO,
+            failureCode: "stripe_checkout_session_without_client_secret",
+            failureMessage:
+              "La sesion existente de Stripe no tiene client_secret para Embedded Checkout",
+            updatedAt: admin.firestore.Timestamp.now(),
+          },
+          { merge: true },
+        );
       }
+    }
 
-      const resolvedIdempotencyKey =
-        idempotencyKey ||
-        (await this.generateServerIdempotencyKey(
-          orderId,
-          userId,
-          amount,
-          currency,
-          "checkout_session",
-        ));
+    const resolvedIdempotencyKey =
+      idempotencyKey ||
+      (await this.generateServerIdempotencyKey(
+        orderId,
+        userId,
+        amount,
+        currency,
+        "checkout_session",
+      ));
 
-      const idemSnapshot = await firestoreTienda
-        .collection(COLECCION_PAGOS)
-        .where("idempotencyKey", "==", resolvedIdempotencyKey)
-        .limit(1)
-        .get();
+    const idemSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("idempotencyKey", "==", resolvedIdempotencyKey)
+      .limit(1)
+      .get();
 
-      if (!idemSnapshot.empty) {
-        const existingDoc = idemSnapshot.docs[0];
-        const existingPago = existingDoc.data() as Pago;
-        if (
-          existingPago.ordenId === orderId &&
-          existingPago.userId === userId &&
-          existingPago.checkoutSessionId &&
-          isEstadoReutilizable(existingPago.estado)
-        ) {
-          const existingSession = await stripe.checkout.sessions.retrieve(
-            existingPago.checkoutSessionId,
-          );
+    if (!idemSnapshot.empty) {
+      const existingDoc = idemSnapshot.docs[0];
+      const existingPago = existingDoc.data() as Pago;
+
+      if (
+        existingPago.ordenId === orderId &&
+        existingPago.userId === userId &&
+        existingPago.checkoutSessionId &&
+        isEstadoReutilizable(existingPago.estado)
+      ) {
+        const existingSession = await stripe.checkout.sessions.retrieve(
+          existingPago.checkoutSessionId,
+        );
+
+        if (existingSession.client_secret) {
           return {
             sessionId: existingSession.id,
+            clientSecret: existingSession.client_secret,
             url: existingSession.url,
             pagoId: existingDoc.id,
             stripeCustomerId: existingPago.stripeCustomerId || stripeCustomerId,
             created: false,
           };
         }
-      }
 
-      const now = admin.firestore.Timestamp.now();
-      const paymentMetadata = this.buildCompactPaymentMetadata({
-        ...ordenData,
-        id: orderId,
-      });
-      const pricingSnapshot = this.buildOrderPricingSnapshot({
-        ...ordenData,
-        id: orderId,
-      });
-      const cartId = paymentMetadata.cartId || undefined;
-
-      const pagoDraft: Omit<Pago, "id"> = {
-        ordenId: orderId,
-        userId,
-        provider: ProveedorPago.STRIPE,
-        metodoPago: MetodoPago.TARJETA,
-        monto: ordenData.total,
-        currency,
-        estado: EstadoPago.PROCESANDO,
-        idempotencyKey: resolvedIdempotencyKey,
-        stripeCustomerId,
-        metadata: paymentMetadata,
-        pricingSnapshot,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const pagoRef = await firestoreTienda
-        .collection(COLECCION_PAGOS)
-        .add(pagoDraft);
-      const baseUrl = getAppUrl();
-      const resolvedSuccessUrl =
-        successUrl ||
-        `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
-      const resolvedCancelUrl = cancelUrl || `${baseUrl}/checkout/cancel`;
-
-      const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] =
-        ordenData.items.map((item) => ({
-          quantity: item.cantidad,
-          price_data: {
-            currency,
-            unit_amount: Math.round(item.precioUnitario * 100),
-            product_data: {
-              name: `Producto ${item.productoId}`,
-              metadata: {
-                productoId: item.productoId,
-                tallaId: item.tallaId || "",
-              },
-            },
+        await existingDoc.ref.set(
+          {
+            estado: EstadoPago.FALLIDO,
+            failureCode: "stripe_checkout_session_without_client_secret",
+            failureMessage:
+              "La sesion existente de Stripe no tiene client_secret para Embedded Checkout",
+            updatedAt: admin.firestore.Timestamp.now(),
           },
-        }));
-
-      if (ordenData.costoEnvio && ordenData.costoEnvio > 0) {
-        lineItems.push({
-          quantity: 1,
-          price_data: {
-            currency,
-            unit_amount: Math.round(ordenData.costoEnvio * 100),
-            product_data: {
-              name: "Envio FedEx",
-              metadata: {
-                provider: String(ordenData.shipping?.provider || "FEDEX"),
-                quoteId: String(ordenData.shipping?.quoteId || ""),
-                serviceType: String(ordenData.shipping?.serviceType || ""),
-                carrierCode: String(ordenData.shipping?.carrierCode || ""),
-              },
-            },
-          },
-        });
-      }
-
-      if (ordenData.impuestos && ordenData.impuestos > 0) {
-        lineItems.push({
-          quantity: 1,
-          price_data: {
-            currency,
-            unit_amount: Math.round(ordenData.impuestos * 100),
-            product_data: {
-              name: "Impuestos",
-            },
-          },
-        });
-      }
-
-      const checkoutLineAmount = lineItems.reduce((total, item) => {
-        const unitAmount = item.price_data?.unit_amount || 0;
-        const quantity = typeof item.quantity === "number" ? item.quantity : 1;
-        return total + unitAmount * quantity;
-      }, 0);
-
-      if (checkoutLineAmount !== amount) {
-        throw new ApiError(
-          409,
-          "El total de Stripe Checkout no coincide con el total de la orden",
+          { merge: true },
         );
       }
+    }
 
-      const session = await stripe.checkout.sessions.create(
-        {
-          mode: "payment",
-          customer: stripeCustomerId,
-          line_items: lineItems,
-          success_url: resolvedSuccessUrl,
-          cancel_url: resolvedCancelUrl,
+    const now = admin.firestore.Timestamp.now();
+
+    const paymentMetadata = this.buildCompactPaymentMetadata({
+      ...ordenData,
+      id: orderId,
+    });
+
+    const pricingSnapshot = this.buildOrderPricingSnapshot({
+      ...ordenData,
+      id: orderId,
+    });
+
+    const cartId = paymentMetadata.cartId || undefined;
+
+    const pagoDraft: Omit<Pago, "id"> = {
+      ordenId: orderId,
+      userId,
+      provider: ProveedorPago.STRIPE,
+      metodoPago: MetodoPago.TARJETA,
+      monto: ordenData.total,
+      currency,
+      estado: EstadoPago.PROCESANDO,
+      idempotencyKey: resolvedIdempotencyKey,
+      stripeCustomerId,
+      metadata: paymentMetadata,
+      pricingSnapshot,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const pagoRef = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .add(pagoDraft);
+
+    const baseUrl = getAppUrl();
+
+    const resolvedSuccessUrl =
+      successUrl ||
+      `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
+
+    const orderTotalMinor = Math.round(Number(ordenData.total || 0) * 100);
+
+    if (orderTotalMinor <= 0 || orderTotalMinor !== amount) {
+      throw new ApiError(
+        409,
+        "La orden tiene un total inválido para Stripe Checkout",
+      );
+    }
+
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        quantity: 1,
+        price_data: {
+          currency,
+          unit_amount: orderTotalMinor,
+          product_data: {
+            name: `Pedido ${orderId}`,
+            description: "Compra en tienda Club León",
+            metadata: {
+              ordenId: orderId,
+              cartId: cartId || "",
+              fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+              discountTotal: paymentMetadata.discountTotal,
+              shippingTotal: paymentMetadata.shippingTotal,
+            },
+          },
+        },
+      },
+    ];
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        ui_mode: "embedded",
+        customer: stripeCustomerId,
+        line_items: lineItems,
+        return_url: resolvedSuccessUrl,
+        metadata: {
+          ordenId: orderId,
+          userId,
+          pagoId: pagoRef.id,
+          cartId: cartId || "",
+          fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
+          pickupLocationId: ordenData.pickupLocationId || "",
+          shippingProvider: paymentMetadata.shippingProvider,
+          shippingServiceType: paymentMetadata.shippingServiceType,
+          carrierCode: paymentMetadata.carrierCode,
+          shippingTotal: paymentMetadata.shippingTotal,
+          discountTotal: paymentMetadata.discountTotal,
+        },
+        payment_intent_data: {
           metadata: {
             ordenId: orderId,
             userId,
@@ -1299,57 +1321,62 @@ class PagoService {
             shippingTotal: paymentMetadata.shippingTotal,
             discountTotal: paymentMetadata.discountTotal,
           },
-          payment_intent_data: {
-            metadata: {
-              ordenId: orderId,
-              userId,
-              pagoId: pagoRef.id,
-              cartId: cartId || "",
-              fulfillmentMethod: ordenData.fulfillmentMethod || "DELIVERY",
-              pickupLocationId: ordenData.pickupLocationId || "",
-              shippingProvider: paymentMetadata.shippingProvider,
-              shippingServiceType: paymentMetadata.shippingServiceType,
-              carrierCode: paymentMetadata.carrierCode,
-              shippingTotal: paymentMetadata.shippingTotal,
-              discountTotal: paymentMetadata.discountTotal,
-            },
-          },
         },
-        { idempotencyKey: resolvedIdempotencyKey },
-      );
+      },
+      { idempotencyKey: resolvedIdempotencyKey },
+    );
 
-      const checkoutUpdate: Record<string, unknown> = {
-        checkoutSessionId: session.id,
-        providerStatus: session.payment_status || "open",
-        stripeCustomerId,
-        updatedAt: admin.firestore.Timestamp.now(),
-      };
-
-      if (typeof session.payment_intent === "string") {
-        checkoutUpdate.paymentIntentId = session.payment_intent;
-      }
-
-      await pagoRef.update(checkoutUpdate);
-
-      await ordenDoc.ref.set(
+    if (!session.client_secret) {
+      await pagoRef.set(
         {
-          stripeCheckoutSessionId: session.id,
-          stripeCustomerId,
-          paymentMetadata,
+          estado: EstadoPago.FALLIDO,
+          failureCode: "stripe_embedded_checkout_without_client_secret",
+          failureMessage:
+            "Stripe no devolvio client_secret para Embedded Checkout",
           updatedAt: admin.firestore.Timestamp.now(),
         },
         { merge: true },
       );
 
-      return {
-        sessionId: session.id,
-        url: session.url,
-        pagoId: pagoRef.id,
+      throw new ApiError(
+        502,
+        "Stripe no devolvio client secret para Embedded Checkout",
+      );
+    }
+
+    const checkoutUpdate: Record<string, unknown> = {
+      checkoutSessionId: session.id,
+      providerStatus: session.payment_status || "open",
+      stripeCustomerId,
+      updatedAt: admin.firestore.Timestamp.now(),
+    };
+
+    if (typeof session.payment_intent === "string") {
+      checkoutUpdate.paymentIntentId = session.payment_intent;
+    }
+
+    await pagoRef.update(checkoutUpdate);
+
+    await ordenDoc.ref.set(
+      {
+        stripeCheckoutSessionId: session.id,
         stripeCustomerId,
-        created: true,
-      };
-    });
-  }
+        paymentMetadata,
+        updatedAt: admin.firestore.Timestamp.now(),
+      },
+      { merge: true },
+    );
+
+    return {
+      sessionId: session.id,
+      clientSecret: session.client_secret,
+      url: session.url,
+      pagoId: pagoRef.id,
+      stripeCustomerId,
+      created: true,
+    };
+  });
+}
 
   async getStripeCheckoutSessionById(
     sessionId: string,

@@ -892,18 +892,19 @@ export class CarritoService {
   async checkout(
     usuarioId: string,
     checkoutData: {
-      fulfillmentMethod?: FulfillmentMethod;
-      direccionEnvio?: DireccionEnvio;
-      pickupLocationId?: string;
-      pickupContact?: PickupContact;
-      metodoPago: MetodoPago;
-      costoEnvio?: number;
-      shippingQuoteId?: string;
-      selectedShippingOptionId?: string;
-      selectedServiceType?: string;
-      shippingSelection?: Partial<CheckoutShippingSelection>;
-      notas?: string;
-    },
+  fulfillmentMethod?: FulfillmentMethod;
+  direccionEnvio?: DireccionEnvio;
+  pickupLocationId?: string;
+  pickupContact?: PickupContact;
+  metodoPago: MetodoPago;
+  codigoPromocion?: string;
+  costoEnvio?: number;
+  shippingQuoteId?: string;
+  selectedShippingOptionId?: string;
+  selectedServiceType?: string;
+  shippingSelection?: Partial<CheckoutShippingSelection>;
+  notas?: string;
+},
   ): Promise<Orden> {
     console.log(`🛒 Iniciando checkout para usuario: ${usuarioId}`);
 
@@ -946,23 +947,29 @@ export class CarritoService {
 
     // PASO 4: Construir CrearOrdenDTO
     // subtotal, impuestos y total son placeholders — OrdenService los recalcula
-    const crearOrdenDTO: CrearOrdenDTO = {
-      usuarioId,
-      items: pricing.items.map((item) => ({
-        productoId: item.productId,
-        cantidad: item.quantity,
-        precioUnitario: item.unitPriceFinal,
-        subtotal: item.subtotalFinal,
-        ...(item.tallaId ? { tallaId: item.tallaId } : {}),
-      })),
-      subtotal: pricing.subtotalFinal,
-      impuestos: 0,
-      total: pricing.total,
-      fulfillmentMethod,
-      direccionEnvio: checkoutData.direccionEnvio,
-      pickupLocationId: checkoutData.pickupLocationId,
-      pickupContact: checkoutData.pickupContact,
-      metodoPago: checkoutData.metodoPago,
+    const codigoPromocion =
+  typeof checkoutData.codigoPromocion === "string"
+    ? checkoutData.codigoPromocion.trim().toUpperCase()
+    : undefined;
+
+const crearOrdenDTO: CrearOrdenDTO = {
+  usuarioId,
+  items: pricing.items.map((item) => ({
+    productoId: item.productId,
+    cantidad: item.quantity,
+    precioUnitario: item.unitPriceFinal,
+    subtotal: item.subtotalFinal,
+    ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+  })),
+  subtotal: pricing.subtotalFinal,
+  impuestos: 0,
+  total: pricing.total,
+  fulfillmentMethod,
+  direccionEnvio: checkoutData.direccionEnvio,
+  pickupLocationId: checkoutData.pickupLocationId,
+  pickupContact: checkoutData.pickupContact,
+  metodoPago: checkoutData.metodoPago,
+  ...(codigoPromocion ? { codigoPromocion } : {}),
       costoEnvio: pricing.shippingTotal,
       shipping: pricing.shipping,
       pricingSnapshot: pricing,
