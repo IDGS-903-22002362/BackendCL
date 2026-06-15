@@ -122,16 +122,31 @@ export const handleMultipart = (options: {
                 });
         });
 
-        const rawBody = (req as any).rawBody;
-        if (Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+        const parseBufferedBody = (body: Buffer | string): boolean => {
             try {
-                busboy.end(rawBody);
+                busboy.end(body);
             } catch (error) {
                 if (!errorOccurred) {
                     errorOccurred = true;
                     next(error);
                 }
             }
+            return true;
+        };
+
+        const rawBody = (req as any).rawBody;
+        if (Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+            parseBufferedBody(rawBody);
+            return;
+        }
+
+        if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+            parseBufferedBody(req.body);
+            return;
+        }
+
+        if (typeof req.body === "string" && req.body.length > 0) {
+            parseBufferedBody(req.body);
             return;
         }
 

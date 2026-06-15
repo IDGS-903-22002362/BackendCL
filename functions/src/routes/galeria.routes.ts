@@ -144,12 +144,12 @@ router.get("/:id", query.getById);
  */
 router.post(
     "/:id/imagenes",
-    authMiddleware,
     handleMultipart({
         maxFiles: 10,
         maxFileSize: 20 * 1024 * 1024, // 20MB
         allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
     }),
+    authMiddleware,
     command.uploadImages
 );
 
@@ -189,12 +189,12 @@ router.post(
  */
 router.post(
     "/:id/videos",
-    authMiddleware,
     handleMultipart({
         maxFiles: 5,
         maxFileSize: 100 * 1024 * 1024, // 100MB para videos
         allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"]
     }),
+    authMiddleware,
     command.uploadVideos
 );
 

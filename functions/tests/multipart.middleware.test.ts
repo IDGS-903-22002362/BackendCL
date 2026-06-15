@@ -218,4 +218,45 @@ describe("handleMultipart", () => {
       buffer: Buffer.from("fake-gallery-image"),
     });
   });
+
+  it("procesa multipart desde req.body cuando el runtime entrega el cuerpo como Buffer", async () => {
+    const form = new FormData();
+    form.append("videos", Buffer.from("fake-gallery-video"), {
+      filename: "reel.mp4",
+      contentType: "video/mp4",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 5,
+      maxFileSize: 100 * 1024 * 1024,
+      allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "videos",
+      originalname: "reel.mp4",
+      mimetype: "video/mp4",
+      buffer: Buffer.from("fake-gallery-video"),
+    });
+  });
 });
