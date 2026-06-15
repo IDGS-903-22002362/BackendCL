@@ -19,10 +19,19 @@ app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
 app.use("/api/webhooks/aplazo", express.raw({ type: "application/json" }));
 
-const isNotMultipart = (req: express.Request) => {
+const isMultipart = (req: express.Request) => {
   const contentType = req.headers["content-type"] || "";
-  return !contentType.includes("multipart/form-data");
+  return contentType.includes("multipart/form-data");
 };
+
+const isNotMultipart = (req: express.Request) => {
+  return !isMultipart(req);
+};
+
+app.use(express.raw({
+  type: (req) => isMultipart(req as express.Request),
+  limit: "32mb",
+}));
 
 app.use((req, res, next) => {
   if (isNotMultipart(req)) {

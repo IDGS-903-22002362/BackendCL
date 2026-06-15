@@ -254,12 +254,26 @@ export const parseMultipartImages = ({
       });
     });
 
-    if (req.rawBody && req.rawBody.length > 0) {
+    const parseBufferedBody = (body: Buffer | string): void => {
       try {
-        parser.end(req.rawBody);
+        parser.end(body);
       } catch (error) {
         fail(error);
       }
+    };
+
+    if (req.rawBody && req.rawBody.length > 0) {
+      parseBufferedBody(req.rawBody);
+      return;
+    }
+
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      parseBufferedBody(req.body);
+      return;
+    }
+
+    if (typeof req.body === "string" && req.body.length > 0) {
+      parseBufferedBody(req.body);
       return;
     }
 

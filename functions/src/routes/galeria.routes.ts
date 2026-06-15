@@ -191,7 +191,7 @@ router.post(
     "/:id/videos",
     handleMultipart({
         maxFiles: 5,
-        maxFileSize: 100 * 1024 * 1024, // 100MB para videos
+        maxFileSize: 30 * 1024 * 1024, // Límite seguro para Cloud Functions HTTP
         allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"]
     }),
     authMiddleware,

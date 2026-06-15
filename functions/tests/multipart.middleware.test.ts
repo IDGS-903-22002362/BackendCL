@@ -95,6 +95,32 @@ describe("parseMultipartImages", () => {
     tempFiles.push((req.files as Express.Multer.File[])[0].path);
   });
 
+  it("procesa multipart desde req.body cuando express.raw ya bufferizo la solicitud", async () => {
+    const form = new FormData();
+    form.append("file", Buffer.from("fake-image-buffer"), {
+      filename: "buffered.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    await runMultipartMiddleware(req);
+
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "file",
+      originalname: "buffered.jpg",
+      mimetype: "image/jpeg",
+    });
+    tempFiles.push((req.files as Express.Multer.File[])[0].path);
+  });
+
   it("rechaza multipart sin boundary con un 400 controlado", async () => {
     const req: {
       headers: Record<string, string>;
