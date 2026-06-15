@@ -22,6 +22,10 @@ export const handleMultipart = (options: {
             return next();
         }
 
+        if (!contentType.includes("boundary=")) {
+            return next(new Error("Solicitud multipart invalida: falta el boundary en Content-Type"));
+        }
+
         const busboy = Busboy({
             headers: req.headers,
             limits: {
@@ -50,11 +54,25 @@ export const handleMultipart = (options: {
                 let fileSize = 0;
 
                 file.on("data", (chunk: Buffer) => {
+                    if (errorOccurred) {
+                        return;
+                    }
+
                     chunks.push(chunk);
                     fileSize += chunk.length;
                 });
 
+                file.on("limit", () => {
+                    file.resume();
+                    reject(new Error(`El archivo "${filename || "archivo"}" excede el limite permitido`));
+                });
+
                 file.on("end", () => {
+                    if (errorOccurred) {
+                        resolve();
+                        return;
+                    }
+
                     const buffer = Buffer.concat(chunks);
                     files.push({
                         fieldname,
@@ -103,10 +121,18 @@ export const handleMultipart = (options: {
                     }
                 });
         });
-        console.log("rawBody exists:", !!(req as any).rawBody);
 
-        if ((req as any).rawBody) {
-            console.log("rawBody length:", (req as any).rawBody.length);
+        const rawBody = (req as any).rawBody;
+        if (Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+            try {
+                busboy.end(rawBody);
+            } catch (error) {
+                if (!errorOccurred) {
+                    errorOccurred = true;
+                    next(error);
+                }
+            }
+            return;
         }
 
         req.pipe(busboy);

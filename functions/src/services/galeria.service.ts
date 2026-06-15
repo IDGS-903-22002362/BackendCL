@@ -1,5 +1,4 @@
-import { getStorage } from "firebase-admin/storage";
-import { firestoreApp } from "../config/app.firebase";
+import { firestoreApp, storageAppOficial } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import { Galeria } from "../models/galeria.model";
 
@@ -107,7 +106,7 @@ class GalleryService {
 
         // 🔑 Extraer el path del archivo desde la URL de Firebase Storage
         try {
-            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const bucket = storageAppOficial.bucket();
             const urlObj = new URL(imageUrl);
             const pathParts = urlObj.pathname.split('/');
             // La URL es: https://storage.googleapis.com/BUCKET_NAME/ruta/al/archivo
@@ -142,7 +141,7 @@ class GalleryService {
 
         // 🔑 Extraer el path del archivo desde la URL
         try {
-            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const bucket = storageAppOficial.bucket();
             const urlObj = new URL(videoUrl);
             const pathParts = urlObj.pathname.split('/');
             const filePath = pathParts.slice(2).join('/');

@@ -1,15 +1,9 @@
 import { Request, Response } from "express";
 import galleryService from "../../services/galeria.service";
 //import storageAppService from "../../services/storageApp.service";
-import { firestoreApp } from "../../config/app.firebase";
+import { firestoreApp, storageAppOficial } from "../../config/app.firebase";
 import { deleteGalleryImageSchema, deleteGalleryVideoSchema } from "../../middleware/validators/gallery.validator";
 import { admin } from "../../config/firebase.admin";
-
-import { Storage } from "@google-cloud/storage";
-import { getStorage } from "firebase-admin/storage";
-
-const storage = new Storage();
-storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
 
 export const create = async (req: Request, res: Response): Promise<Response> => {
     try {
@@ -65,7 +59,7 @@ export const uploadImages = async (req: Request, res: Response): Promise<Respons
         }
 
         // 🔑 Usar Firebase Storage (ya autenticado)
-        const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+        const bucket = storageAppOficial.bucket();
 
         const uploadPromises = files.map(async (file) => {
             const fileName = `galeria/${id}/${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
@@ -137,7 +131,7 @@ export const uploadVideos = async (req: Request, res: Response): Promise<Respons
         }
 
         // 🔑 Usar Firebase Storage
-        const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+        const bucket = storageAppOficial.bucket();
 
         const uploadPromises = files.map(async (file) => {
             // Sanitizar nombre del archivo

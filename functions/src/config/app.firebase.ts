@@ -29,11 +29,7 @@ const adminApps = Array.isArray(admin.apps) ? admin.apps : [];
 let appOficial = adminApps.find((app) => app?.name === "APP_OFICIAL");
 
 if (!appOficial) {
-  const projectId =
-    process.env.APP_OFICIAL_PROJECT_ID ||
-    process.env.GCP_PROJECT_ID ||
-    process.env.GCLOUD_PROJECT ||
-    "app-oficial-leon";
+  const projectId = process.env.APP_OFICIAL_PROJECT_ID || "app-oficial-leon";
   const storageBucket =
     process.env.APP_OFICIAL_STORAGE_BUCKET ||
     `${projectId}.firebasestorage.app`;
