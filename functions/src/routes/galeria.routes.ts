@@ -198,6 +198,21 @@ router.post(
     command.uploadVideos
 );
 
+/**
+ * @swagger
+ * /api/galeria/{galeriaId}/media/metadata:
+ *   post:
+ *     summary: Registrar metadata de media de galeria
+ *     description: Guarda metadata de una imagen o video ya subido directamente a Firebase Storage.
+ *     tags: [Galeria]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post(
+    "/:galeriaId/media/metadata",
+    authMiddleware,
+    command.addMediaMetadata
+);
 
 /**
  * @swagger

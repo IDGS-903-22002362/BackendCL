@@ -1,8 +1,13 @@
 import { Request, Response } from "express";
-import galleryService from "../../services/galeria.service";
+import { ZodError } from "zod";
+import galleryService, { GalleryServiceError } from "../../services/galeria.service";
 //import storageAppService from "../../services/storageApp.service";
 import { firestoreApp, storageAppOficial } from "../../config/app.firebase";
-import { deleteGalleryImageSchema, deleteGalleryVideoSchema } from "../../middleware/validators/gallery.validator";
+import {
+    createGalleryMediaMetadataSchema,
+    deleteGalleryImageSchema,
+    deleteGalleryVideoSchema,
+} from "../../middleware/validators/gallery.validator";
 import { admin } from "../../config/firebase.admin";
 
 export const create = async (req: Request, res: Response): Promise<Response> => {
@@ -177,6 +182,56 @@ export const uploadVideos = async (req: Request, res: Response): Promise<Respons
             success: false,
             message: "Error al subir videos",
             error: error instanceof Error ? error.message : "Error desconocido"
+        });
+    }
+};
+
+export const addMediaMetadata = async (req: Request, res: Response): Promise<Response> => {
+    try {
+        const { galeriaId } = req.params;
+        const parsed = createGalleryMediaMetadataSchema(galeriaId).parse(req.body);
+
+        const media = await galleryService.addMediaMetadata(galeriaId, parsed);
+
+        return res.status(201).json({
+            success: true,
+            message: "Metadata de archivo guardada correctamente",
+            data: {
+                id: media.id,
+                galeriaId: media.galeriaId,
+                tipo: media.tipo,
+                url: media.url,
+                storagePath: media.storagePath,
+                contentType: media.contentType,
+                size: media.size,
+                nombreOriginal: media.nombreOriginal,
+                creadoEn: media.creadoEn.toISOString(),
+            },
+        });
+    } catch (error) {
+        if (error instanceof ZodError) {
+            return res.status(400).json({
+                success: false,
+                message: "Validacion fallida",
+                errors: error.errors.map((err) => ({
+                    campo: err.path.join("."),
+                    mensaje: err.message,
+                    codigo: err.code,
+                })),
+            });
+        }
+
+        if (error instanceof GalleryServiceError && error.code === "NOT_FOUND") {
+            return res.status(404).json({
+                success: false,
+                message: error.message,
+            });
+        }
+
+        console.error("Error al guardar metadata de Galeria:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error al guardar metadata de archivo",
         });
     }
 };
