@@ -28,6 +28,14 @@ const isNotMultipart = (req: express.Request) => {
   return !isMultipart(req);
 };
 
+app.use((req, _res, next) => {
+  const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+  if (isMultipart(req) && Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+    req.body = rawBody;
+  }
+  next();
+});
+
 app.use(express.raw({
   type: (req) => isMultipart(req as express.Request),
   limit: "32mb",

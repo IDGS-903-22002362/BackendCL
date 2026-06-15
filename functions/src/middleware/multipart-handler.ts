@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Busboy from "busboy";
+import { ApiError } from "../utils/error-handler";
 
 interface MulterFile {
     fieldname: string;
@@ -23,7 +24,7 @@ export const handleMultipart = (options: {
         }
 
         if (!contentType.includes("boundary=")) {
-            return next(new Error("Solicitud multipart invalida: falta el boundary en Content-Type"));
+            return next(new ApiError(400, "Solicitud multipart invalida: falta el boundary en Content-Type"));
         }
 
         const busboy = Busboy({
@@ -98,7 +99,7 @@ export const handleMultipart = (options: {
         busboy.on("error", (error) => {
             if (!errorOccurred) {
                 errorOccurred = true;
-                next(new Error("Error al procesar archivos: " + (error as Error).message));
+                next(new ApiError(400, "Error al procesar archivos: " + (error as Error).message));
             }
         });
 
@@ -117,7 +118,7 @@ export const handleMultipart = (options: {
                 .catch((err) => {
                     if (!errorOccurred) {
                         errorOccurred = true;
-                        next(new Error("Error leyendo archivos: " + err.message));
+                        next(new ApiError(400, "Error leyendo archivos: " + err.message));
                     }
                 });
         });
@@ -128,7 +129,11 @@ export const handleMultipart = (options: {
             } catch (error) {
                 if (!errorOccurred) {
                     errorOccurred = true;
-                    next(error);
+                    next(
+                        error instanceof ApiError
+                            ? error
+                            : new ApiError(400, error instanceof Error ? error.message : "Error al procesar multipart")
+                    );
                 }
             }
             return true;
@@ -148,6 +153,21 @@ export const handleMultipart = (options: {
         if (typeof req.body === "string" && req.body.length > 0) {
             parseBufferedBody(req.body);
             return;
+        }
+
+        if (process.env.K_SERVICE || process.env.FUNCTION_NAME) {
+            console.error("Multipart body no disponible en Cloud Functions", {
+                contentLength: req.headers["content-length"],
+                contentType,
+                hasRawBody: Buffer.isBuffer(rawBody),
+                rawBodyLength: Buffer.isBuffer(rawBody) ? rawBody.length : 0,
+                bodyType: typeof req.body,
+                bodyIsBuffer: Buffer.isBuffer(req.body),
+                bodyLength: Buffer.isBuffer(req.body) ? req.body.length : 0,
+                readableEnded: req.readableEnded,
+                readableLength: req.readableLength,
+            });
+            return next(new ApiError(400, "No se pudo leer el cuerpo multipart en el entorno desplegado"));
         }
 
         req.pipe(busboy);
