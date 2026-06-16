@@ -6,6 +6,7 @@ import {
   validateBody,
   validateParams,
 } from "../middleware/validation.middleware";
+import { parseMultipartImages } from "../middleware/multipart.middleware";
 import {
   createCategorySchema,
   updateCategorySchema,
@@ -239,6 +240,17 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
  */
 router.post("/", validateBody(createCategorySchema), commandController.create);
 
+router.post(
+  "/:id/imagen",
+  validateParams(idParamSchema),
+  parseMultipartImages({
+    fieldName: "imagen",
+    maxFiles: 1,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+  }),
+  commandController.uploadImage,
+);
+
 /**
  * @swagger
  * /api/categorias/{id}:
@@ -290,6 +302,12 @@ router.put(
   validateParams(idParamSchema),
   validateBody(updateCategorySchema),
   commandController.update,
+);
+
+router.delete(
+  "/:id/imagen",
+  validateParams(idParamSchema),
+  commandController.deleteImage,
 );
 
 /**

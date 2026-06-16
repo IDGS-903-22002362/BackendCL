@@ -32,6 +32,7 @@ class LineService {
                         id: doc.id,
                         codigo: data.codigo,
                         nombre: data.nombre,
+                        imagenPrincipal: data.imagenPrincipal ?? null,
                         activo: data.activo ?? true,
                         createdAt: data.createdAt,
                         updatedAt: data.updatedAt,
@@ -74,6 +75,7 @@ class LineService {
                 id: doc.id,
                 codigo: data.codigo,
                 nombre: data.nombre,
+                imagenPrincipal: data.imagenPrincipal ?? null,
                 activo: data.activo ?? true,
                 createdAt: data.createdAt,
                 updatedAt: data.updatedAt,
@@ -103,6 +105,7 @@ class LineService {
                         id: doc.id,
                         codigo: data.codigo,
                         nombre: data.nombre,
+                        imagenPrincipal: data.imagenPrincipal ?? null,
                         activo: data.activo ?? true,
                     };
                 })
@@ -121,7 +124,10 @@ class LineService {
      * Crea una nueva línea
      * Usa ID semántico basado en el nombre
      */
-    async createLine(linea: Pick<Linea, "codigo" | "nombre">): Promise<Linea> {
+    async createLine(
+        linea: Pick<Linea, "codigo" | "nombre"> &
+            Partial<Pick<Linea, "imagenPrincipal">>
+    ): Promise<Linea> {
         try {
             const now = admin.firestore.Timestamp.now();
 
@@ -158,6 +164,7 @@ class LineService {
             await docRef.set({
                 codigo: linea.codigo,
                 nombre: linea.nombre,
+                imagenPrincipal: linea.imagenPrincipal ?? null,
                 activo: true,
                 createdAt: now,
                 updatedAt: now,
@@ -167,6 +174,7 @@ class LineService {
                 id: docId,
                 codigo: linea.codigo,
                 nombre: linea.nombre,
+                imagenPrincipal: linea.imagenPrincipal ?? null,
                 activo: true,
                 createdAt: now,
                 updatedAt: now,
@@ -184,7 +192,7 @@ class LineService {
      */
     async updateLine(
         id: string,
-        updateData: Partial<Pick<Linea, "codigo" | "nombre">>
+        updateData: Partial<Pick<Linea, "codigo" | "nombre" | "imagenPrincipal">>
     ): Promise<Linea> {
         try {
             const docRef = firestoreTienda
@@ -226,6 +234,7 @@ class LineService {
                 id: updatedDoc.id,
                 codigo: data.codigo,
                 nombre: data.nombre,
+                imagenPrincipal: data.imagenPrincipal ?? null,
                 activo: data.activo ?? true,
                 createdAt: data.createdAt,
                 updatedAt: data.updatedAt,

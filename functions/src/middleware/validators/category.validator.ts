@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+const imagenPrincipalSchema = z
+  .string({
+    invalid_type_error: "La imagen principal debe ser una URL",
+  })
+  .trim()
+  .url("La imagen principal debe ser una URL valida")
+  .max(2048, "La URL de la imagen principal no puede exceder 2048 caracteres")
+  .nullable()
+  .optional();
+
 /**
  * Schema para crear una nueva categoría
  * Valida todos los campos según el modelo Categoria
@@ -14,6 +24,8 @@ export const createCategorySchema = z
       .trim()
       .min(1, "El nombre no puede estar vacío")
       .max(100, "El nombre no puede exceder 100 caracteres"),
+
+    imagenPrincipal: imagenPrincipalSchema,
 
     lineaId: z
       .string({
@@ -53,6 +65,8 @@ export const updateCategorySchema = z
       .min(1, "El nombre no puede estar vacío")
       .max(100, "El nombre no puede exceder 100 caracteres")
       .optional(),
+
+    imagenPrincipal: imagenPrincipalSchema,
 
     lineaId: z
       .string({

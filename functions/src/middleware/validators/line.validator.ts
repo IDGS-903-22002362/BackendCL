@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+const imagenPrincipalSchema = z
+  .string({
+    invalid_type_error: "La imagen principal debe ser una URL",
+  })
+  .trim()
+  .url("La imagen principal debe ser una URL valida")
+  .max(2048, "La URL de la imagen principal no puede exceder 2048 caracteres")
+  .nullable()
+  .optional();
+
 /**
  * Schema para crear una nueva línea
  * Valida todos los campos requeridos según el modelo Linea
@@ -22,6 +32,8 @@ export const createLineSchema = z
       .trim()
       .min(1, "El nombre no puede estar vacío")
       .max(100, "El nombre no puede exceder 100 caracteres"),
+
+    imagenPrincipal: imagenPrincipalSchema,
 
     activo: z
       .boolean({
@@ -54,6 +66,8 @@ export const updateLineSchema = z
       .min(1, "El nombre no puede estar vacío")
       .max(100, "El nombre no puede exceder 100 caracteres")
       .optional(),
+
+    imagenPrincipal: imagenPrincipalSchema,
 
     activo: z
       .boolean({

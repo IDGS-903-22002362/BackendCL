@@ -1,9 +1,18 @@
-import { getStorage } from "firebase-admin/storage";
-import { firestoreApp } from "../config/app.firebase";
+import { firestoreApp, storageAppOficial } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
-import { Galeria } from "../models/galeria.model";
+import {
+    CreateGaleriaMediaMetadata,
+    Galeria,
+    GaleriaMediaMetadata,
+} from "../models/galeria.model";
 
 const GALERIA_COLLECTION = "galeria";
+
+export class GalleryServiceError extends Error {
+    constructor(public readonly code: "NOT_FOUND", message: string) {
+        super(message);
+    }
+}
 
 class GalleryService {
 
@@ -96,6 +105,56 @@ class GalleryService {
         return gallery;
     }
 
+    async addMediaMetadata(
+        galeriaId: string,
+        input: CreateGaleriaMediaMetadata,
+    ): Promise<GaleriaMediaMetadata> {
+        const docRef = this.collection.doc(galeriaId);
+        const snapshot = await docRef.get();
+
+        if (!snapshot.exists) {
+            throw new GalleryServiceError("NOT_FOUND", "Galeria no encontrada");
+        }
+
+        console.log("Guardando metadata de Galeria:", {
+            galeriaId,
+            tipo: input.tipo,
+            contentType: input.contentType,
+            size: input.size,
+            storagePath: input.storagePath,
+        });
+
+        const mediaRef = docRef.collection("media").doc();
+        const now = admin.firestore.Timestamp.now();
+        const mediaData = {
+            ...input,
+            id: mediaRef.id,
+            galeriaId,
+            estado: true,
+            creadoEn: now,
+            actualizadoEn: now,
+        };
+
+        const arrayField = input.tipo === "imagen" ? "imagenes" : "videos";
+        const batch = firestoreApp.batch();
+        batch.set(mediaRef, mediaData);
+        batch.update(docRef, {
+            [arrayField]: admin.firestore.FieldValue.arrayUnion(input.url),
+            updatedAt: now,
+        });
+
+        await batch.commit();
+
+        return {
+            ...input,
+            id: mediaRef.id,
+            galeriaId,
+            estado: true,
+            creadoEn: now.toDate(),
+            actualizadoEn: now.toDate(),
+        };
+    }
+
 
     async deleteImage(id: string, imageUrl: string) {
         const docRef = this.collection.doc(id);
@@ -107,7 +166,7 @@ class GalleryService {
 
         // 🔑 Extraer el path del archivo desde la URL de Firebase Storage
         try {
-            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const bucket = storageAppOficial.bucket();
             const urlObj = new URL(imageUrl);
             const pathParts = urlObj.pathname.split('/');
             // La URL es: https://storage.googleapis.com/BUCKET_NAME/ruta/al/archivo
@@ -142,7 +201,7 @@ class GalleryService {
 
         // 🔑 Extraer el path del archivo desde la URL
         try {
-            const bucket = getStorage().bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+            const bucket = storageAppOficial.bucket();
             const urlObj = new URL(videoUrl);
             const pathParts = urlObj.pathname.split('/');
             const filePath = pathParts.slice(2).join('/');

@@ -18,8 +18,44 @@ app.use(requestContextMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
 app.use("/api/webhooks/aplazo", express.raw({ type: "application/json" }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+const isMultipart = (req: express.Request) => {
+  const contentType = req.headers["content-type"] || "";
+  return contentType.includes("multipart/form-data");
+};
+
+const isNotMultipart = (req: express.Request) => {
+  return !isMultipart(req);
+};
+
+app.use((req, _res, next) => {
+  const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody;
+  if (isMultipart(req) && Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+    req.body = rawBody;
+  }
+  next();
+});
+
+app.use(express.raw({
+  type: (req) => isMultipart(req as express.Request),
+  limit: "32mb",
+}));
+
+app.use((req, res, next) => {
+  if (isNotMultipart(req)) {
+    express.json({ limit: "500mb" })(req, res, next);
+  } else {
+    next();
+  }
+});
+
+app.use((req, res, next) => {
+  if (isNotMultipart(req)) {
+    express.urlencoded({ limit: "500mb", extended: true })(req, res, next);
+  } else {
+    next();
+  }
+});
 
 // Morgan: Logger de peticiones HTTP (solo en desarrollo)
 if (process.env.NODE_ENV === "development") {

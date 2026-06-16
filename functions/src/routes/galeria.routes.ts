@@ -144,12 +144,12 @@ router.get("/:id", query.getById);
  */
 router.post(
     "/:id/imagenes",
-    authMiddleware,
     handleMultipart({
         maxFiles: 10,
         maxFileSize: 20 * 1024 * 1024, // 20MB
         allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
     }),
+    authMiddleware,
     command.uploadImages
 );
 
@@ -189,15 +189,30 @@ router.post(
  */
 router.post(
     "/:id/videos",
-    authMiddleware,
     handleMultipart({
         maxFiles: 5,
-        maxFileSize: 100 * 1024 * 1024, // 100MB para videos
+        maxFileSize: 30 * 1024 * 1024, // Límite seguro para Cloud Functions HTTP
         allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"]
     }),
+    authMiddleware,
     command.uploadVideos
 );
 
+/**
+ * @swagger
+ * /api/galeria/{galeriaId}/media/metadata:
+ *   post:
+ *     summary: Registrar metadata de media de galeria
+ *     description: Guarda metadata de una imagen o video ya subido directamente a Firebase Storage.
+ *     tags: [Galeria]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post(
+    "/:galeriaId/media/metadata",
+    authMiddleware,
+    command.addMediaMetadata
+);
 
 /**
  * @swagger

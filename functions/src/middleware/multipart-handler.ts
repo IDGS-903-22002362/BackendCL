@@ -1,11 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import Busboy from "busboy";
-import { Storage } from "@google-cloud/storage";
-//import { v4 as uuidv4 } from "uuid";
-
-// Configuración
-const storage = new Storage();
-storage.bucket(process.env.APP_OFICIAL_STORAGE_BUCKET!);
+import { ApiError } from "../utils/error-handler";
 
 interface MulterFile {
     fieldname: string;
@@ -21,52 +16,80 @@ export const handleMultipart = (options: {
     maxFileSize?: number;
     allowedMimeTypes?: string[];
 }) => {
-    return async (req: Request, res: Response, next: NextFunction) => {
+    return (req: Request, res: Response, next: NextFunction) => {
         const contentType = req.headers["content-type"];
 
         if (!contentType || !contentType.includes("multipart/form-data")) {
             return next();
         }
 
+        if (!contentType.includes("boundary=")) {
+            return next(new ApiError(400, "Solicitud multipart invalida: falta el boundary en Content-Type"));
+        }
+
         const busboy = Busboy({
             headers: req.headers,
             limits: {
                 files: options.maxFiles || 10,
-                fileSize: options.maxFileSize || 20 * 1024 * 1024, // 20MB default
+                fileSize: options.maxFileSize || 20 * 1024 * 1024,
             },
         });
 
         const files: MulterFile[] = [];
         const fields: Record<string, any> = {};
+        let errorOccurred = false;
+        // ✅ Rastrear promesas de cada archivo para esperar que terminen
+        const filePromises: Promise<void>[] = [];
 
         busboy.on("file", (fieldname, file, info) => {
             const { filename, encoding, mimeType } = info;
 
-            // Validar tipo de archivo
             if (options.allowedMimeTypes && !options.allowedMimeTypes.includes(mimeType)) {
                 file.resume();
                 return;
             }
 
-            const chunks: Buffer[] = [];
-            let fileSize = 0;
+            // ✅ Cada archivo es una promesa que resuelve en su evento "end"
+            const filePromise = new Promise<void>((resolve, reject) => {
+                const chunks: Buffer[] = [];
+                let fileSize = 0;
 
-            file.on("data", (chunk: Buffer) => {
-                chunks.push(chunk);
-                fileSize += chunk.length;
-            });
+                file.on("data", (chunk: Buffer) => {
+                    if (errorOccurred) {
+                        return;
+                    }
 
-            file.on("end", () => {
-                const buffer = Buffer.concat(chunks);
-                files.push({
-                    fieldname,
-                    originalname: filename,
-                    encoding,
-                    mimetype: mimeType,
-                    buffer,
-                    size: fileSize,
+                    chunks.push(chunk);
+                    fileSize += chunk.length;
                 });
+
+                file.on("limit", () => {
+                    file.resume();
+                    reject(new Error(`El archivo "${filename || "archivo"}" excede el limite permitido`));
+                });
+
+                file.on("end", () => {
+                    if (errorOccurred) {
+                        resolve();
+                        return;
+                    }
+
+                    const buffer = Buffer.concat(chunks);
+                    files.push({
+                        fieldname,
+                        originalname: filename,
+                        encoding,
+                        mimetype: mimeType,
+                        buffer,
+                        size: fileSize,
+                    });
+                    resolve();
+                });
+
+                file.on("error", reject);
             });
+
+            filePromises.push(filePromise);
         });
 
         busboy.on("field", (fieldname, value) => {
@@ -74,20 +97,79 @@ export const handleMultipart = (options: {
         });
 
         busboy.on("error", (error) => {
-            console.error("Busboy error:", error);
-            res.status(400).json({
-                success: false,
-                message: "Error al procesar archivos",
-            });
+            if (!errorOccurred) {
+                errorOccurred = true;
+                next(new ApiError(400, "Error al procesar archivos: " + (error as Error).message));
+            }
         });
 
+        // ✅ Esperar TODAS las promesas de archivos antes de llamar next()
         busboy.on("close", () => {
-            req.files = files as any;
-            req.body = fields;
-            next();
+            if (errorOccurred) return;
+
+            Promise.all(filePromises)
+                .then(() => {
+                    if (!errorOccurred && !res.headersSent) {
+                        req.files = files as any;
+                        req.body = { ...req.body, ...fields };
+                        next();
+                    }
+                })
+                .catch((err) => {
+                    if (!errorOccurred) {
+                        errorOccurred = true;
+                        next(new ApiError(400, "Error leyendo archivos: " + err.message));
+                    }
+                });
         });
 
-        // Pipe request to busboy
+        const parseBufferedBody = (body: Buffer | string): boolean => {
+            try {
+                busboy.end(body);
+            } catch (error) {
+                if (!errorOccurred) {
+                    errorOccurred = true;
+                    next(
+                        error instanceof ApiError
+                            ? error
+                            : new ApiError(400, error instanceof Error ? error.message : "Error al procesar multipart")
+                    );
+                }
+            }
+            return true;
+        };
+
+        const rawBody = (req as any).rawBody;
+        if (Buffer.isBuffer(rawBody) && rawBody.length > 0) {
+            parseBufferedBody(rawBody);
+            return;
+        }
+
+        if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+            parseBufferedBody(req.body);
+            return;
+        }
+
+        if (typeof req.body === "string" && req.body.length > 0) {
+            parseBufferedBody(req.body);
+            return;
+        }
+
+        if (process.env.K_SERVICE || process.env.FUNCTION_NAME) {
+            console.error("Multipart body no disponible en Cloud Functions", {
+                contentLength: req.headers["content-length"],
+                contentType,
+                hasRawBody: Buffer.isBuffer(rawBody),
+                rawBodyLength: Buffer.isBuffer(rawBody) ? rawBody.length : 0,
+                bodyType: typeof req.body,
+                bodyIsBuffer: Buffer.isBuffer(req.body),
+                bodyLength: Buffer.isBuffer(req.body) ? req.body.length : 0,
+                readableEnded: req.readableEnded,
+                readableLength: req.readableLength,
+            });
+            return next(new ApiError(400, "No se pudo leer el cuerpo multipart en el entorno desplegado"));
+        }
+
         req.pipe(busboy);
     };
 };

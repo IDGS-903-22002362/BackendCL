@@ -1,6 +1,7 @@
 import FormData from "form-data";
 import { promises as fs } from "fs";
 import { parseMultipartImages } from "../src/middleware/multipart.middleware";
+import { handleMultipart } from "../src/middleware/multipart-handler";
 
 const runMultipartMiddleware = async (
   req: Record<string, unknown>,
@@ -94,6 +95,32 @@ describe("parseMultipartImages", () => {
     tempFiles.push((req.files as Express.Multer.File[])[0].path);
   });
 
+  it("procesa multipart desde req.body cuando express.raw ya bufferizo la solicitud", async () => {
+    const form = new FormData();
+    form.append("file", Buffer.from("fake-image-buffer"), {
+      filename: "buffered.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    await runMultipartMiddleware(req);
+
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "file",
+      originalname: "buffered.jpg",
+      mimetype: "image/jpeg",
+    });
+    tempFiles.push((req.files as Express.Multer.File[])[0].path);
+  });
+
   it("rechaza multipart sin boundary con un 400 controlado", async () => {
     const req: {
       headers: Record<string, string>;
@@ -167,5 +194,95 @@ describe("parseMultipartImages", () => {
         message: expect.stringContaining("excede el límite"),
       }),
     );
+  });
+});
+
+describe("handleMultipart", () => {
+  it("procesa multipart desde req.rawBody para endpoints de galeria", async () => {
+    const form = new FormData();
+    form.append("descripcion", "Partido de prueba");
+    form.append("imagenes", Buffer.from("fake-gallery-image"), {
+      filename: "gol.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      rawBody: Buffer;
+      body: Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      rawBody: form.getBuffer(),
+      body: {},
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 10,
+      maxFileSize: 20 * 1024 * 1024,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    expect(req.body).toMatchObject({
+      descripcion: "Partido de prueba",
+    });
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "imagenes",
+      originalname: "gol.jpg",
+      mimetype: "image/jpeg",
+      buffer: Buffer.from("fake-gallery-image"),
+    });
+  });
+
+  it("procesa multipart desde req.body cuando el runtime entrega el cuerpo como Buffer", async () => {
+    const form = new FormData();
+    form.append("videos", Buffer.from("fake-gallery-video"), {
+      filename: "reel.mp4",
+      contentType: "video/mp4",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 5,
+      maxFileSize: 100 * 1024 * 1024,
+      allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "videos",
+      originalname: "reel.mp4",
+      mimetype: "video/mp4",
+      buffer: Buffer.from("fake-gallery-video"),
+    });
   });
 });
