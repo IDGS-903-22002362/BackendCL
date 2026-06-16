@@ -20,11 +20,7 @@ const nullablePositiveIntSchema = z
   .nullable()
   .optional();
 
-const nullablePositiveNumberSchema = z
-  .number()
-  .positive("Debe ser mayor a 0.")
-  .nullable()
-  .optional();
+
 
 const fechaSchema = z.union([
   z.string().trim().min(1, "La fecha es obligatoria."),
