@@ -892,7 +892,7 @@ export class CarritoService {
   async checkout(
     usuarioId: string,
     checkoutData: {
-  fulfillmentMethod?: FulfillmentMethod;
+  fulfillmentMethod?: FulfillmentMethod | string;
   direccionEnvio?: DireccionEnvio;
   pickupLocationId?: string;
   pickupContact?: PickupContact;
@@ -925,8 +925,12 @@ export class CarritoService {
     // PASO 3: Mapear ItemCarrito[] → ItemOrden[]
     // Se agregan campos requeridos por la orden (subtotal por item)
     // Los precios se recalcularán en OrdenService.createOrden() desde Firestore
-    const fulfillmentMethod =
-      checkoutData.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+    const fulfillmentMethod = this.normalizeFulfillmentMethod(
+      checkoutData.fulfillmentMethod,
+    );
+    const direccionEnvio = this.normalizeDireccionEnvio(
+      checkoutData.direccionEnvio,
+    );
     const pricing = await checkoutPricingService.calculateCheckoutPricing({
       userId: usuarioId,
       cartId: carrito.id,
@@ -936,7 +940,7 @@ export class CarritoService {
       ),
       shippingAddress:
         fulfillmentMethod === FulfillmentMethod.DELIVERY
-          ? this.buildCheckoutShippingAddress(checkoutData.direccionEnvio)
+          ? this.buildCheckoutShippingAddress(direccionEnvio)
           : undefined,
       paymentProvider:
         checkoutData.metodoPago === MetodoPago.APLAZO ? "APLAZO" : "STRIPE",
@@ -965,7 +969,7 @@ const crearOrdenDTO: CrearOrdenDTO = {
   impuestos: 0,
   total: pricing.total,
   fulfillmentMethod,
-  direccionEnvio: checkoutData.direccionEnvio,
+  direccionEnvio,
   pickupLocationId: checkoutData.pickupLocationId,
   pickupContact: checkoutData.pickupContact,
   metodoPago: checkoutData.metodoPago,
@@ -976,9 +980,10 @@ const crearOrdenDTO: CrearOrdenDTO = {
       paymentMetadata: {
         cartId: carrito.id,
         shippingProvider: pricing.shipping.provider || "",
+        shippingCarrier: pricing.shipping.carrier || "",
         shippingServiceType: pricing.shipping.serviceType || "",
+        shippingMethod: pricing.shipping.shippingMethod || pricing.shipping.method,
         carrierCode: pricing.shipping.carrierCode || "",
-        shippingMethod: pricing.shipping.method,
       },
       discountTotal: pricing.discountTotal,
       subtotalOriginal: pricing.subtotalOriginal,
@@ -1055,18 +1060,46 @@ const crearOrdenDTO: CrearOrdenDTO = {
       return { method: "PICKUP" };
     }
 
-    const incoming = checkoutData.shippingSelection || {};
+    return { method: "MANUAL", provider: "MANUAL" };
+  }
+
+  private normalizeFulfillmentMethod(
+    value?: FulfillmentMethod | string,
+  ): FulfillmentMethod {
+    if (value === FulfillmentMethod.PICKUP) {
+      return FulfillmentMethod.PICKUP;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "pickup" || normalized === "store_pickup") {
+        return FulfillmentMethod.PICKUP;
+      }
+    }
+
+    return FulfillmentMethod.DELIVERY;
+  }
+
+  private normalizeDireccionEnvio(
+    address?: DireccionEnvio,
+  ): DireccionEnvio | undefined {
+    if (!address) {
+      return undefined;
+    }
+
+    const raw = address as DireccionEnvio & {
+      nombreCompleto?: string;
+      numeroExterior?: string;
+      pais?: string;
+    };
+
     return {
-      method: "FEDEX",
-      provider: "FEDEX",
-      serviceType: incoming.serviceType || checkoutData.selectedServiceType,
-      serviceName: incoming.serviceName,
-      carrierCode: incoming.carrierCode,
-      packagingType: incoming.packagingType,
-      quotedAmount: incoming.quotedAmount,
-      quotedCurrency: incoming.quotedCurrency,
-      transitTime: incoming.transitTime,
-      deliveryTimestamp: incoming.deliveryTimestamp,
+      ...raw,
+      nombre: raw.nombre || raw.nombreCompleto || "",
+      nombreCompleto: raw.nombreCompleto || raw.nombre,
+      numero: raw.numero || raw.numeroExterior || "",
+      numeroExterior: raw.numeroExterior || raw.numero,
+      pais: raw.pais || "Mexico",
     };
   }
 
@@ -1079,7 +1112,7 @@ const crearOrdenDTO: CrearOrdenDTO = {
 
     return {
       streetLines: [
-        `${address.calle} ${address.numero}`.trim(),
+        `${address.calle} ${address.numero || address.numeroExterior || ""}`.trim(),
         address.numeroInterior
           ? `${address.colonia} Int ${address.numeroInterior}`.trim()
           : address.colonia,

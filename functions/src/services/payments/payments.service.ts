@@ -409,6 +409,14 @@ backendOrderShipping: order.shipping,
         requestCurrency: requestCurrency || "MXN",
         shippingProvider:
           typeof order.shipping?.provider === "string" ? order.shipping.provider : "",
+        shippingCarrier:
+          typeof order.shipping?.carrier === "string" ? order.shipping.carrier : "",
+        shippingMethod:
+          typeof order.shipping?.shippingMethod === "string"
+            ? order.shipping.shippingMethod
+            : typeof order.shipping?.method === "string"
+              ? order.shipping.method
+              : "",
         shippingServiceType:
           typeof order.shipping?.serviceType === "string"
             ? order.shipping.serviceType

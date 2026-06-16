@@ -41,6 +41,44 @@ describe("CheckoutShippingService", () => {
     });
   });
 
+  it("returns fixed manual FedEx shipping without calling FedEx services", async () => {
+    const ratesService = { quotePublicRates: jest.fn() };
+    const availabilityService = { retrieveServicesAndTransitTimes: jest.fn() };
+    const service = new CheckoutShippingService(
+      {} as any,
+      ratesService as any,
+      availabilityService as any,
+    );
+
+    await expect(
+      service.calculateShipping({
+        items: [buildItem()],
+        shippingSelection: { method: "MANUAL", provider: "MANUAL" },
+        shippingAddress: {
+          streetLines: ["Calle 1"],
+          city: "Leon",
+          stateOrProvinceCode: "GTO",
+          postalCode: "37500",
+          countryCode: "MX",
+          residential: true,
+        },
+        currency: "MXN",
+      }),
+    ).resolves.toMatchObject({
+      method: "MANUAL",
+      provider: "MANUAL",
+      carrier: "FEDEX",
+      shippingMethod: "manual_fedex",
+      amount: 150,
+      currency: "MXN",
+      status: "pending_manual_shipment",
+      createdManually: true,
+    });
+
+    expect(ratesService.quotePublicRates).not.toHaveBeenCalled();
+    expect(availabilityService.retrieveServicesAndTransitTimes).not.toHaveBeenCalled();
+  });
+
   it("throws when a shippable product lacks dimensions", async () => {
     const service = new CheckoutShippingService(
       {} as any,

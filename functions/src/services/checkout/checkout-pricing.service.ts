@@ -328,25 +328,7 @@ export class CheckoutPricingService {
       return { method: "PICKUP" };
     }
 
-    if (selection.method === "MANUAL") {
-      return { method: "MANUAL" };
-    }
-
-    return {
-      method: "FEDEX",
-      provider: "FEDEX",
-      serviceType: selection.serviceType,
-      serviceName: selection.serviceName,
-      carrierCode: selection.carrierCode,
-      packagingType: selection.packagingType,
-      quotedAmount:
-        typeof selection.quotedAmount === "number"
-          ? roundMoney(selection.quotedAmount)
-          : undefined,
-      quotedCurrency: selection.quotedCurrency || DEFAULT_CURRENCY,
-      transitTime: selection.transitTime,
-      deliveryTimestamp: selection.deliveryTimestamp,
-    };
+    return { method: "MANUAL", provider: "MANUAL" };
   }
 }
 

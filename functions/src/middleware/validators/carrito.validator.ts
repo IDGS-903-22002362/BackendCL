@@ -11,7 +11,10 @@
 
 import { z } from "zod";
 import { MAX_CANTIDAD_POR_ITEM } from "../../models/carrito.model";
-import { direccionEnvioSchema } from "./orden.validator";
+import {
+  direccionEnvioSchema,
+  fulfillmentMethodSchema,
+} from "./orden.validator";
 import {
   FulfillmentMethod,
   MetodoPago,
@@ -19,6 +22,46 @@ import {
 import { pickupContactSchema } from "./orden.validator";
 
 const optionalTrimmedString = z.string().trim().min(1).optional();
+
+const normalizeCheckoutShippingMethod = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "delivery" ||
+    normalized === "home_delivery" ||
+    normalized === "domicilio" ||
+    normalized === "fedex" ||
+    normalized === "manual" ||
+    normalized === "manual_fedex"
+  ) {
+    return "MANUAL";
+  }
+
+  if (normalized === "pickup" || normalized === "store_pickup") {
+    return "PICKUP";
+  }
+
+  return value;
+};
+
+const normalizeCheckoutShippingProvider = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "manual" || normalized === "manual_fedex") {
+    return "MANUAL";
+  }
+  if (normalized === "fedex") {
+    return "FEDEX";
+  }
+
+  return value;
+};
 
 const codigoPromocionCheckoutSchema = z
   .string({
@@ -32,8 +75,20 @@ const codigoPromocionCheckoutSchema = z
 
 const checkoutShippingSelectionSchema = z
   .object({
-    method: z.enum(["PICKUP", "FEDEX", "MANUAL"]),
-    provider: z.literal("FEDEX").optional(),
+    method: z.preprocess(
+      normalizeCheckoutShippingMethod,
+      z.enum(["PICKUP", "FEDEX", "MANUAL"]),
+    ),
+    provider: z
+      .preprocess(
+        normalizeCheckoutShippingProvider,
+        z.enum(["FEDEX", "MANUAL"]),
+      )
+      .optional(),
+    carrier: z
+      .preprocess(normalizeCheckoutShippingProvider, z.literal("FEDEX"))
+      .optional(),
+    shippingMethod: z.string().trim().min(1).max(80).optional(),
     serviceType: z.string().trim().min(1).max(120).optional(),
     serviceName: z.string().trim().min(1).max(160).optional(),
     carrierCode: z.string().trim().min(1).max(20).optional(),
@@ -146,8 +201,7 @@ export const mergeCarritoSchema = z
  */
 export const checkoutCarritoSchema = z
   .object({
-    fulfillmentMethod: z
-      .nativeEnum(FulfillmentMethod)
+    fulfillmentMethod: fulfillmentMethodSchema
       .optional()
       .default(FulfillmentMethod.DELIVERY),
 
@@ -196,38 +250,7 @@ export const checkoutCarritoSchema = z
     }
 
     if (method === FulfillmentMethod.DELIVERY) {
-      if (typeof data.costoEnvio === "number") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["costoEnvio"],
-          message:
-            "El costo de envio se calcula en backend; usa shippingQuoteId",
-        });
-      }
-
-      const shippingSelectionMethod = data.shippingSelection?.method;
-
-      if (!data.shippingQuoteId && shippingSelectionMethod !== "FEDEX") {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["shippingQuoteId"],
-          message:
-            "shippingQuoteId es requerido para DELIVERY salvo que uses shippingSelection FEDEX",
-        });
-      }
-
-      if (
-        !data.selectedShippingOptionId &&
-        !data.selectedServiceType &&
-        !data.shippingSelection?.serviceType
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["selectedShippingOptionId"],
-          message:
-            "selectedShippingOptionId, selectedServiceType o shippingSelection.serviceType es requerido para DELIVERY",
-        });
-      }
+      return;
     }
 
     if (method === FulfillmentMethod.PICKUP) {
@@ -257,13 +280,7 @@ export const checkoutCarritoSchema = z
 
 export const createCartFedexQuoteSchema = z
   .object({
-    direccionEnvio: direccionEnvioSchema
-      .extend({
-        stateOrProvinceCode: optionalTrimmedString,
-        countryCode: optionalTrimmedString,
-        postalCode: optionalTrimmedString,
-      })
-      .optional(),
+    direccionEnvio: z.object({}).passthrough().optional(),
     shippingAddress: z
       .object({
         streetLines: z.array(z.string().trim().min(1)).max(3).optional(),

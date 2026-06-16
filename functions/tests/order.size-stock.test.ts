@@ -221,8 +221,8 @@ describe("Order service size-aware stock validation", () => {
     });
 
     expect(orden.subtotal).toBe(700);
-    expect(orden.costoEnvio).toBe(99);
-    expect(orden.total).toBe(799);
-    expect(dbState.ordenes[orden.id!]?.total).toBe(799);
+    expect(orden.costoEnvio).toBe(150);
+    expect(orden.total).toBe(850);
+    expect(dbState.ordenes[orden.id!]?.total).toBe(850);
   });
 });

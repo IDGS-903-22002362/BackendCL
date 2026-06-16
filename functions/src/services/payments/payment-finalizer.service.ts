@@ -2,7 +2,13 @@ import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../../config/firebase";
 import { admin } from "../../config/firebase.admin";
 import { STORE_FIRESTORE_DATABASE } from "../../config/firestore.constants";
-import { EstadoOrden, MetodoPago, Orden } from "../../models/orden.model";
+import {
+  EstadoOrden,
+  FulfillmentMethod,
+  FulfillmentStatus,
+  MetodoPago,
+  Orden,
+} from "../../models/orden.model";
 import { PaymentStatus, RefundState } from "../../models/pago.model";
 import { EstadoVentaPos, VentaPos } from "../../models/venta-pos.model";
 import { RolUsuario } from "../../models/usuario.model";
@@ -23,6 +29,11 @@ import inventoryService from "../inventory.service";
 import ordenService from "../orden.service";
 import pickupOrderService from "../pickup-order.service";
 import paidOrderFinalizerService from "../paid-order-finalizer.service";
+import {
+  MANUAL_FEDEX_METHOD,
+  MANUAL_FEDEX_PROVIDER,
+  MANUAL_FEDEX_STATUS,
+} from "../../config/manual-shipping.config";
 
 const ORDENES_COLLECTION = "ordenes";
 
@@ -377,9 +388,24 @@ export class PaymentFinalizerService {
       return;
     }
 
+    const shipping = order.shipping as Record<string, any> | undefined;
+    const isManualFedexOrder =
+      order.fulfillmentMethod !== FulfillmentMethod.PICKUP &&
+      (shipping?.provider === MANUAL_FEDEX_PROVIDER ||
+        shipping?.shippingMethod === MANUAL_FEDEX_METHOD);
+
     await orderRef.set(
       {
         estado: EstadoOrden.CONFIRMADA,
+        ...(isManualFedexOrder
+          ? {
+              fulfillmentStatus: FulfillmentStatus.PREPARING,
+              shipping: {
+                ...(shipping || {}),
+                status: MANUAL_FEDEX_STATUS,
+              },
+            }
+          : {}),
         metodoPago:
           paymentAttempt.metodoPago === MetodoPago.APLAZO
             ? MetodoPago.APLAZO

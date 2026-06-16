@@ -77,4 +77,65 @@ describe("pickup fulfillment validators", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("acepta DELIVERY sin cotizacion FedEx", () => {
+    const result = checkoutCarritoSchema.safeParse({
+      fulfillmentMethod: FulfillmentMethod.DELIVERY,
+      direccionEnvio: deliveryAddress,
+      metodoPago: MetodoPago.TARJETA,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("normaliza aliases de domicilio y direccion", () => {
+    const result = checkoutCarritoSchema.safeParse({
+      fulfillmentMethod: "home_delivery",
+      shippingSelection: {
+        method: "manual_fedex",
+        provider: "manual",
+        shippingMethod: "manual_fedex",
+      },
+      direccionEnvio: {
+        nombreCompleto: "Juan Perez",
+        telefono: "4771234567",
+        calle: "Av. Principal",
+        numeroExterior: "1",
+        colonia: "Centro",
+        ciudad: "Leon",
+        estado: "Guanajuato",
+        codigoPostal: "37000",
+      },
+      metodoPago: MetodoPago.TARJETA,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.fulfillmentMethod).toBe(FulfillmentMethod.DELIVERY);
+      expect(result.data.shippingSelection?.method).toBe("MANUAL");
+      expect(result.data.shippingSelection?.provider).toBe("MANUAL");
+      expect(result.data.direccionEnvio?.pais).toBe("Mexico");
+    }
+  });
+
+  it("rechaza domicilio sin campo obligatorio de direccion", () => {
+    const result = checkoutCarritoSchema.safeParse({
+      fulfillmentMethod: "domicilio",
+      direccionEnvio: {
+        nombreCompleto: "Juan Perez",
+        telefono: "4771234567",
+        calle: "Av. Principal",
+        colonia: "Centro",
+        ciudad: "Leon",
+        estado: "Guanajuato",
+        codigoPostal: "37000",
+      },
+      metodoPago: MetodoPago.TARJETA,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.success ? "" : result.error.issues[0].path.join(".")).toBe(
+      "direccionEnvio.numeroExterior",
+    );
+  });
 });

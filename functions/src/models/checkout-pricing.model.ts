@@ -21,7 +21,9 @@ export type CheckoutShippingAddress = {
 
 export type CheckoutShippingSelection = {
   method: CheckoutShippingMethod;
-  provider?: "FEDEX";
+  provider?: "FEDEX" | "MANUAL";
+  carrier?: "FEDEX";
+  shippingMethod?: string;
   serviceType?: string;
   serviceName?: string;
   carrierCode?: string;
@@ -54,7 +56,9 @@ export type CheckoutItemPricingSnapshot = {
 
 export type CheckoutShippingSnapshot = {
   method: CheckoutShippingMethod;
-  provider?: "FEDEX";
+  provider?: "FEDEX" | "MANUAL";
+  carrier?: "FEDEX";
+  shippingMethod?: string;
   serviceType?: string;
   serviceName?: string;
   carrierCode?: string;
@@ -76,6 +80,15 @@ export type CheckoutShippingSnapshot = {
   selectedRate?: Record<string, unknown>;
   packages?: Array<Record<string, unknown>>;
   destination?: Record<string, unknown>;
+  trackingNumber?: string;
+  trackingUrl?: string;
+  createdManually?: boolean;
+  manualEvidence?: {
+    receiptUrl?: string;
+    guidePdfUrl?: string;
+    realShippingCost?: number;
+    notes?: string;
+  };
 };
 
 export type CheckoutPricingSnapshot = {

@@ -22,6 +22,7 @@ import {
   ItemOrden,
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
+import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
 import { RolUsuario } from "../models/usuario.model";
 import { TipoMovimientoInventario } from "../models/inventario.model";
 import inventoryService from "./inventory.service";
@@ -35,6 +36,15 @@ import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
 } from "./shipping-refund-guard.service";
+import {
+  buildFedexTrackingUrl,
+  MANUAL_FEDEX_CARRIER,
+  MANUAL_FEDEX_CURRENCY,
+  MANUAL_FEDEX_METHOD,
+  MANUAL_FEDEX_PROVIDER,
+  MANUAL_FEDEX_SHIPPING_COST,
+  MANUAL_FEDEX_STATUS,
+} from "../config/manual-shipping.config";
 
 /**
  * Colección de órdenes en Firestore
@@ -69,6 +79,13 @@ function toStringArray(value: unknown): string[] {
 function buildVariantKey(productoId: string, tallaId?: string) {
   return `${productoId}::${tallaId ?? "__GLOBAL__"}`;
 }
+
+type ManualShippingStatus =
+  | "READY_TO_SHIP"
+  | "IN_TRANSIT"
+  | "DELIVERED"
+  | "EXCEPTION"
+  | "RETURNED";
 
 /**
  * Clase OrdenService
@@ -147,6 +164,74 @@ export class OrdenService {
     };
   }
 
+  private normalizeDireccionEnvio(
+    address?: Orden["direccionEnvio"],
+  ): Orden["direccionEnvio"] | undefined {
+    if (!address) {
+      return undefined;
+    }
+
+    const raw = address as NonNullable<Orden["direccionEnvio"]> & {
+      nombreCompleto?: string;
+      numeroExterior?: string;
+      pais?: string;
+    };
+
+    return {
+      ...raw,
+      nombre: raw.nombre || raw.nombreCompleto || "",
+      nombreCompleto: raw.nombreCompleto || raw.nombre,
+      numero: raw.numero || raw.numeroExterior || "",
+      numeroExterior: raw.numeroExterior || raw.numero,
+      pais: raw.pais || "Mexico",
+    };
+  }
+
+  private requireManualFedexAddress(
+    address?: Orden["direccionEnvio"],
+  ): NonNullable<Orden["direccionEnvio"]> {
+    const normalized = this.normalizeDireccionEnvio(address);
+    const missing: string[] = [];
+
+    if (!normalized?.nombre) missing.push("nombreCompleto");
+    if (!normalized?.telefono) missing.push("telefono");
+    if (!normalized?.calle) missing.push("calle");
+    if (!normalized?.numero) missing.push("numeroExterior");
+    if (!normalized?.colonia) missing.push("colonia");
+    if (!normalized?.ciudad) missing.push("ciudad");
+    if (!normalized?.estado) missing.push("estado");
+    if (!normalized?.codigoPostal) missing.push("codigoPostal");
+
+    if (missing.length > 0 || !normalized) {
+      throw new Error(
+        `La direccion de envio esta incompleta. Faltan: ${missing.join(", ")}`,
+      );
+    }
+
+    return normalized;
+  }
+
+  private buildManualFedexShippingSnapshot(
+    address: NonNullable<Orden["direccionEnvio"]>,
+    existing?: Record<string, any>,
+  ): Record<string, any> {
+    return {
+      ...(existing || {}),
+      method: "MANUAL",
+      provider: MANUAL_FEDEX_PROVIDER,
+      carrier: MANUAL_FEDEX_CARRIER,
+      shippingMethod: MANUAL_FEDEX_METHOD,
+      serviceName: existing?.serviceName || "FedEx manual",
+      amount: MANUAL_FEDEX_SHIPPING_COST,
+      currency: MANUAL_FEDEX_CURRENCY,
+      status: existing?.status || MANUAL_FEDEX_STATUS,
+      address,
+      addressValidationStatus: "USER_CONFIRMED",
+      createdManually: true,
+      quotedAt: existing?.quotedAt || new Date().toISOString(),
+    };
+  }
+
   /**
    * Crea una nueva orden de compra
    * REGLAS DE NEGOCIO:
@@ -207,31 +292,17 @@ const requestedByVariant = new Map<string, number>();
       );
       const fulfillmentMethod =
         data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
-
-      if (fulfillmentMethod === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
-        throw new Error("La dirección de envío es requerida para DELIVERY");
-      }
-
-      if (fulfillmentMethod === FulfillmentMethod.DELIVERY) {
-        const shipping = data.shipping as Record<string, any> | undefined;
-        const selectedRate = shipping?.selectedRate as
-          | { amount?: number; serviceType?: string }
-          | undefined;
-
-        if (
-          shipping?.provider !== "FEDEX" ||
-          shipping?.status !== "QUOTE_SELECTED" ||
-          !shipping?.quoteId ||
-          !selectedRate ||
-          typeof selectedRate.amount !== "number" ||
-          selectedRate.amount < 0 ||
-          !selectedRate.serviceType
-        ) {
-          throw new Error(
-            "DELIVERY requiere una cotización FedEx válida generada por backend",
-          );
-        }
-      }
+      const direccionEnvio =
+        fulfillmentMethod === FulfillmentMethod.DELIVERY
+          ? this.requireManualFedexAddress(data.direccionEnvio)
+          : this.normalizeDireccionEnvio(data.direccionEnvio);
+      const shippingSnapshot =
+        fulfillmentMethod === FulfillmentMethod.DELIVERY
+          ? this.buildManualFedexShippingSnapshot(
+              direccionEnvio!,
+              data.shipping as Record<string, any> | undefined,
+            )
+          : undefined;
 
       let pickupLocationSnapshot: Orden["pickupLocation"] | undefined;
       if (fulfillmentMethod === FulfillmentMethod.PICKUP) {
@@ -569,12 +640,18 @@ console.log(
       const costoEnvioCalculado =
         fulfillmentMethod === FulfillmentMethod.PICKUP
           ? 0
-          : typeof data.pricingSnapshot?.shippingTotal === "number"
-            ? data.pricingSnapshot.shippingTotal
-            : Number((data.shipping as Record<string, any>)?.selectedRate?.amount);
+          : MANUAL_FEDEX_SHIPPING_COST;
       const totalCalculado = roundCurrency(
   subtotalCalculado + impuestosCalculados + costoEnvioCalculado,
 );
+      const pricingSnapshot = data.pricingSnapshot
+        ? {
+            ...data.pricingSnapshot,
+            shippingTotal: costoEnvioCalculado,
+            total: totalCalculado,
+            ...(shippingSnapshot ? { shipping: shippingSnapshot as any } : {}),
+          }
+        : undefined;
 
       console.log(`💰 Totales calculados:`);
       console.log(`   Subtotal: $${subtotalCalculado.toFixed(2)}`);
@@ -593,7 +670,7 @@ console.log(
         impuestos: impuestosCalculados, // Calculado por servidor
         total: totalCalculado, // Calculado por servidor
         estado: EstadoOrden.PENDIENTE, // Siempre PENDIENTE al crear
-        ...(data.direccionEnvio ? { direccionEnvio: data.direccionEnvio } : {}),
+        ...(direccionEnvio ? { direccionEnvio } : {}),
         metodoPago: data.metodoPago,
         fulfillmentMethod,
         fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT,
@@ -606,8 +683,8 @@ console.log(
             }
           : {}),
         costoEnvio: costoEnvioCalculado,
-        ...(data.shipping ? { shipping: data.shipping } : {}),
-        ...(data.pricingSnapshot ? { pricingSnapshot: data.pricingSnapshot } : {}),
+        ...(shippingSnapshot ? { shipping: shippingSnapshot } : {}),
+        ...(pricingSnapshot ? { pricingSnapshot } : {}),
         ...(data.paymentMetadata ? { paymentMetadata: data.paymentMetadata } : {}),
         ...(typeof data.discountTotal === "number" || descuentoCodigoPromocion > 0
   ? {
@@ -630,9 +707,7 @@ console.log(
   ? { subtotalOriginal: data.subtotalOriginal }
   : {}),
 subtotalFinal: subtotalCalculado,
-        ...(typeof data.shippingTotal === "number"
-          ? { shippingTotal: data.shippingTotal }
-          : {}),
+        shippingTotal: costoEnvioCalculado,
         ...(data.currency ? { currency: data.currency } : {}),
         notas: data.notas,
         createdAt: now,
@@ -824,6 +899,285 @@ subtotalFinal: subtotalCalculado,
    * @param usuarioActual - Usuario autenticado (req.user)
    * @returns Promise con array de órdenes que cumplen los filtros
    */
+  private isManualFedexOrder(order: Orden): boolean {
+    const shipping = order.shipping as Record<string, any> | undefined;
+    return (
+      order.fulfillmentMethod !== FulfillmentMethod.PICKUP &&
+      (shipping?.provider === MANUAL_FEDEX_PROVIDER ||
+        shipping?.shippingMethod === MANUAL_FEDEX_METHOD)
+    );
+  }
+
+  private async assertOrderIsPaid(orderId: string): Promise<void> {
+    const snapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", orderId)
+      .get();
+
+    const hasPaidPayment = snapshot.docs.some((doc) => {
+      const pago = doc.data() as {
+        estado?: EstadoPago;
+        status?: PaymentStatus | string;
+      };
+      return (
+        pago.estado === EstadoPago.COMPLETADO ||
+        pago.status === PaymentStatus.PAID
+      );
+    });
+
+    if (!hasPaidPayment) {
+      throw new Error("Solo se puede actualizar envio de ordenes con pago confirmado");
+    }
+  }
+
+  private async requireManualShippingOrder(
+    orderId: string,
+  ): Promise<{ ref: FirebaseFirestore.DocumentReference; order: Orden }> {
+    const ref = firestoreTienda.collection(ORDENES_COLLECTION).doc(orderId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) {
+      throw new Error(`La orden con ID "${orderId}" no existe`);
+    }
+
+    const order = { id: snapshot.id, ...(snapshot.data() as Orden) };
+    if (order.estado === EstadoOrden.CANCELADA) {
+      throw new Error("No se puede actualizar envio de una orden cancelada");
+    }
+
+    if (order.fulfillmentMethod === FulfillmentMethod.PICKUP) {
+      throw new Error("Las ordenes pickup no permiten guia de envio");
+    }
+
+    if (!this.isManualFedexOrder(order)) {
+      throw new Error("La orden no usa envio manual FedEx");
+    }
+
+    await this.assertOrderIsPaid(orderId);
+    return { ref, order };
+  }
+
+  private buildHistoryEntry(input: {
+    type: "shipping_status_change" | "fulfillment_status_change";
+    from?: string;
+    to: string;
+    changedBy: string;
+    note?: string;
+  }) {
+    return {
+      type: input.type,
+      from: input.from || "",
+      to: input.to,
+      changedBy: input.changedBy,
+      changedAt: admin.firestore.Timestamp.now(),
+      ...(input.note ? { note: input.note } : {}),
+    };
+  }
+
+  async markManualShippingPreparing(
+    orderId: string,
+    adminId: string,
+    note?: string,
+  ): Promise<Orden> {
+    const { ref, order } = await this.requireManualShippingOrder(orderId);
+    const now = admin.firestore.Timestamp.now();
+    const historyEntry = this.buildHistoryEntry({
+      type: "fulfillment_status_change",
+      from: String(order.fulfillmentStatus || ""),
+      to: FulfillmentStatus.PREPARING,
+      changedBy: adminId,
+      note,
+    });
+
+    await ref.update({
+      estado: EstadoOrden.EN_PROCESO,
+      fulfillmentStatus: FulfillmentStatus.PREPARING,
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    });
+
+    return {
+      ...order,
+      estado: EstadoOrden.EN_PROCESO,
+      fulfillmentStatus: FulfillmentStatus.PREPARING,
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: [...(order.shippingHistory || []), historyEntry],
+    };
+  }
+
+  async markManualShippingReadyToShip(
+    orderId: string,
+    adminId: string,
+    note?: string,
+  ): Promise<Orden> {
+    const { ref, order } = await this.requireManualShippingOrder(orderId);
+    const now = admin.firestore.Timestamp.now();
+    const currentShipping = (order.shipping || {}) as Record<string, any>;
+    const nextShipping = {
+      ...currentShipping,
+      status: "READY_TO_SHIP",
+      updatedAt: now,
+    };
+    const historyEntry = this.buildHistoryEntry({
+      type: "shipping_status_change",
+      from: String(currentShipping.status || ""),
+      to: "READY_TO_SHIP",
+      changedBy: adminId,
+      note,
+    });
+
+    await ref.update({
+      shipping: nextShipping,
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    });
+
+    return {
+      ...order,
+      shipping: nextShipping,
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: [...(order.shippingHistory || []), historyEntry],
+    };
+  }
+
+  async captureManualFedexTracking(
+    orderId: string,
+    adminId: string,
+    input: {
+      trackingNumber: string;
+      serviceName?: string;
+      realShippingCost?: number;
+      receiptUrl?: string;
+      guidePdfUrl?: string;
+      notes?: string;
+    },
+  ): Promise<Orden> {
+    const trackingNumber = input.trackingNumber.trim();
+    if (!trackingNumber) {
+      throw new Error("trackingNumber es obligatorio");
+    }
+
+    const { ref, order } = await this.requireManualShippingOrder(orderId);
+    const now = admin.firestore.Timestamp.now();
+    const currentShipping = (order.shipping || {}) as Record<string, any>;
+    const trackingUrl = buildFedexTrackingUrl(trackingNumber);
+    const nextShipping = {
+      ...currentShipping,
+      status: "IN_TRANSIT",
+      trackingNumber,
+      trackingUrl,
+      serviceName: input.serviceName || currentShipping.serviceName,
+      shippedAt: currentShipping.shippedAt || now,
+      updatedAt: now,
+      manualEvidence: {
+        ...(currentShipping.manualEvidence || {}),
+        ...(typeof input.realShippingCost === "number"
+          ? { realShippingCost: input.realShippingCost }
+          : {}),
+        ...(input.receiptUrl ? { receiptUrl: input.receiptUrl } : {}),
+        ...(input.guidePdfUrl ? { guidePdfUrl: input.guidePdfUrl } : {}),
+        ...(input.notes ? { notes: input.notes } : {}),
+      },
+    };
+    const historyEntry = this.buildHistoryEntry({
+      type: "shipping_status_change",
+      from: String(currentShipping.status || ""),
+      to: "IN_TRANSIT",
+      changedBy: adminId,
+      note: input.notes,
+    });
+
+    await ref.update({
+      estado: EstadoOrden.ENVIADA,
+      shipping: nextShipping,
+      numeroGuia: trackingNumber,
+      transportista: "FEDEX",
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    });
+
+    await this.enqueueOrderNotificationEvent("order_shipped", {
+      ...order,
+      id: orderId,
+      estado: EstadoOrden.ENVIADA,
+      shipping: nextShipping,
+      numeroGuia: trackingNumber,
+      transportista: "FEDEX",
+      updatedAt: now,
+    });
+
+    return {
+      ...order,
+      estado: EstadoOrden.ENVIADA,
+      shipping: nextShipping,
+      numeroGuia: trackingNumber,
+      transportista: "FEDEX",
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: [...(order.shippingHistory || []), historyEntry],
+    };
+  }
+
+  async updateManualShippingStatus(
+    orderId: string,
+    adminId: string,
+    input: { status: ManualShippingStatus; note?: string },
+  ): Promise<Orden> {
+    const { ref, order } = await this.requireManualShippingOrder(orderId);
+    const now = admin.firestore.Timestamp.now();
+    const currentShipping = (order.shipping || {}) as Record<string, any>;
+    const nextShipping = {
+      ...currentShipping,
+      status: input.status,
+      ...(input.status === "DELIVERED" && !currentShipping.deliveredAt
+        ? { deliveredAt: now }
+        : {}),
+      updatedAt: now,
+    };
+    const historyEntry = this.buildHistoryEntry({
+      type: "shipping_status_change",
+      from: String(currentShipping.status || ""),
+      to: input.status,
+      changedBy: adminId,
+      note: input.note,
+    });
+    const nextEstado =
+      input.status === "DELIVERED"
+        ? EstadoOrden.ENTREGADA
+        : input.status === "IN_TRANSIT"
+          ? EstadoOrden.ENVIADA
+          : order.estado;
+
+    await ref.update({
+      estado: nextEstado,
+      shipping: nextShipping,
+      ...(input.status === "DELIVERED" ? { deliveredAt: now } : {}),
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
+    });
+
+    const updatedOrder = {
+      ...order,
+      estado: nextEstado,
+      shipping: nextShipping,
+      ...(input.status === "DELIVERED" ? { deliveredAt: now } : {}),
+      updatedByAdminId: adminId,
+      updatedAt: now,
+      shippingHistory: [...(order.shippingHistory || []), historyEntry],
+    };
+
+    if (input.status === "DELIVERED") {
+      await this.enqueueOrderNotificationEvent("order_delivered", updatedOrder);
+    }
+
+    return updatedOrder;
+  }
+
   async getAllOrdenes(filtros: any, usuarioActual: any): Promise<Orden[]> {
     try {
       console.log("📋 Obteniendo órdenes con filtros:", filtros);
@@ -889,6 +1243,15 @@ subtotalFinal: subtotalCalculado,
           numeroGuia: data.numeroGuia,
           transportista: data.transportista,
           costoEnvio: data.costoEnvio,
+          shipping: data.shipping,
+          pricingSnapshot: data.pricingSnapshot,
+          discountTotal: data.discountTotal,
+          subtotalOriginal: data.subtotalOriginal,
+          subtotalFinal: data.subtotalFinal,
+          shippingTotal: data.shippingTotal,
+          currency: data.currency,
+          shippingHistory: data.shippingHistory,
+          updatedByAdminId: data.updatedByAdminId,
           notas: data.notas,
           deliveredAt: data.deliveredAt,
           fulfillmentMethod: data.fulfillmentMethod,
@@ -995,6 +1358,15 @@ subtotalFinal: subtotalCalculado,
         numeroGuia: data.numeroGuia,
         transportista: data.transportista,
         costoEnvio: data.costoEnvio,
+        shipping: data.shipping,
+        pricingSnapshot: data.pricingSnapshot,
+        discountTotal: data.discountTotal,
+        subtotalOriginal: data.subtotalOriginal,
+        subtotalFinal: data.subtotalFinal,
+        shippingTotal: data.shippingTotal,
+        currency: data.currency,
+        shippingHistory: data.shippingHistory,
+        updatedByAdminId: data.updatedByAdminId,
         notas: data.notas,
         deliveredAt: data.deliveredAt,
         fulfillmentMethod: data.fulfillmentMethod,
@@ -1409,6 +1781,15 @@ subtotalFinal: subtotalCalculado,
           numeroGuia: data.numeroGuia,
           transportista: data.transportista,
           costoEnvio: data.costoEnvio,
+          shipping: data.shipping,
+          pricingSnapshot: data.pricingSnapshot,
+          discountTotal: data.discountTotal,
+          subtotalOriginal: data.subtotalOriginal,
+          subtotalFinal: data.subtotalFinal,
+          shippingTotal: data.shippingTotal,
+          currency: data.currency,
+          shippingHistory: data.shippingHistory,
+          updatedByAdminId: data.updatedByAdminId,
           notas: data.notas,
           deliveredAt: data.deliveredAt,
           fulfillmentMethod: data.fulfillmentMethod,

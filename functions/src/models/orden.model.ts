@@ -52,16 +52,34 @@ export interface ItemOrden {
 
 export interface DireccionEnvio {
   nombre: string;
+  nombreCompleto?: string;
   telefono: string;
   calle: string;
   numero: string;
+  numeroExterior?: string;
   numeroInterior?: string;
   colonia: string;
   ciudad: string;
   estado: string;
   codigoPostal: string;
+  pais?: string;
   referencias?: string;
+  instruccionesEntrega?: string;
+  email?: string;
   addressValidationStatus?: CheckoutAddressValidationStatus;
+}
+
+export type OrderHistoryChangeType =
+  | "shipping_status_change"
+  | "fulfillment_status_change";
+
+export interface OrderStatusHistoryEntry {
+  type: OrderHistoryChangeType;
+  from: string;
+  to: string;
+  changedBy: string;
+  changedAt: Timestamp;
+  note?: string;
 }
 
 export interface PickupLocationSnapshot {
@@ -120,6 +138,8 @@ export interface Orden {
   costoEnvio?: number;
    shipping?: CheckoutShippingSnapshot | Record<string, any>;
   pricingSnapshot?: CheckoutPricingSnapshot;
+  shippingHistory?: OrderStatusHistoryEntry[];
+  updatedByAdminId?: string;
 
   discountTotal?: number;
   subtotalOriginal?: number;
@@ -162,6 +182,7 @@ export interface CrearOrdenDTO {
   shippingQuoteId?: string;
   selectedShippingOptionId?: string;
   selectedServiceType?: string;
+  shippingMethod?: string;
   notas?: string;
 }
 

@@ -17,6 +17,35 @@ import {
   MetodoPago,
 } from "../../models/orden.model";
 
+export const normalizeFulfillmentMethodValue = (value: unknown): unknown => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "delivery" ||
+    normalized === "home_delivery" ||
+    normalized === "domicilio" ||
+    normalized === "fedex" ||
+    normalized === "manual" ||
+    normalized === "manual_fedex"
+  ) {
+    return FulfillmentMethod.DELIVERY;
+  }
+
+  if (normalized === "pickup" || normalized === "store_pickup") {
+    return FulfillmentMethod.PICKUP;
+  }
+
+  return value;
+};
+
+export const fulfillmentMethodSchema = z.preprocess(
+  normalizeFulfillmentMethodValue,
+  z.nativeEnum(FulfillmentMethod),
+);
+
 /**
  * Schema para validar items individuales de la orden
  * Valida producto, cantidad, precios y subtotal
@@ -63,15 +92,8 @@ export const itemOrdenSchema = z
  */
 export const direccionEnvioSchema = z
   .object({
-    nombre: z
-      .string({
-        required_error: "El nombre del destinatario es requerido",
-        invalid_type_error: "El nombre debe ser una cadena de texto",
-      })
-      .trim()
-      .min(1, "El nombre no puede estar vacío")
-      .max(100, "El nombre no puede exceder 100 caracteres"),
-
+    nombre: z.string().trim().min(1).max(100).optional(),
+    nombreCompleto: z.string().trim().min(1).max(100).optional(),
     telefono: z
       .string({
         required_error: "El teléfono es requerido",
@@ -89,13 +111,8 @@ export const direccionEnvioSchema = z
       .min(1, "La calle no puede estar vacía")
       .max(200, "La calle no puede exceder 200 caracteres"),
 
-    numero: z
-      .string({
-        required_error: "El número exterior es requerido",
-        invalid_type_error: "El número debe ser una cadena de texto",
-      })
-      .trim()
-      .min(1, "El número exterior no puede estar vacío"),
+    numero: z.string().trim().min(1).max(40).optional(),
+    numeroExterior: z.string().trim().min(1).max(40).optional(),
 
     numeroInterior: z.string().trim().optional(),
 
@@ -139,6 +156,9 @@ export const direccionEnvioSchema = z
       .trim()
       .max(500, "Las referencias no pueden exceder 500 caracteres")
       .optional(),
+    instruccionesEntrega: z.string().trim().max(500).optional(),
+    email: z.string().trim().email("El email debe ser valido").optional(),
+    pais: z.string().trim().min(1).max(80).optional().default("Mexico"),
     addressValidationStatus: z
       .enum([
         "VALIDATED",
@@ -149,7 +169,24 @@ export const direccionEnvioSchema = z
       ])
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((data, ctx) => {
+    if (!data.nombre && !data.nombreCompleto) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["nombreCompleto"],
+        message: "El nombre completo del destinatario es requerido",
+      });
+    }
+
+    if (!data.numero && !data.numeroExterior) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["numeroExterior"],
+        message: "El numero exterior es requerido",
+      });
+    }
+  });
 
 export const pickupContactSchema = z
   .object({
@@ -210,8 +247,7 @@ export const createOrdenSchema = z
       .optional()
       .default(EstadoOrden.PENDIENTE),
 
-    fulfillmentMethod: z
-      .nativeEnum(FulfillmentMethod)
+    fulfillmentMethod: fulfillmentMethodSchema
       .optional()
       .default(FulfillmentMethod.DELIVERY),
 

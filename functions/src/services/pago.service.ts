@@ -2,7 +2,13 @@ import Stripe from "stripe";
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
 import { firestoreApp } from "../config/app.firebase";
-import { EstadoOrden, MetodoPago, Orden } from "../models/orden.model";
+import {
+  EstadoOrden,
+  FulfillmentMethod,
+  FulfillmentStatus,
+  MetodoPago,
+  Orden,
+} from "../models/orden.model";
 import {
   COLECCION_PAGOS,
   EstadoPago,
@@ -26,6 +32,11 @@ import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
 } from "./shipping-refund-guard.service";
+import {
+  MANUAL_FEDEX_METHOD,
+  MANUAL_FEDEX_PROVIDER,
+  MANUAL_FEDEX_STATUS,
+} from "../config/manual-shipping.config";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
@@ -495,6 +506,14 @@ class PagoService {
       pickupLocationId: order.pickupLocationId || "",
       shippingProvider:
         typeof order.shipping?.provider === "string" ? order.shipping.provider : "",
+      shippingCarrier:
+        typeof order.shipping?.carrier === "string" ? order.shipping.carrier : "",
+      shippingMethod:
+        typeof order.shipping?.shippingMethod === "string"
+          ? order.shipping.shippingMethod
+          : typeof order.shipping?.method === "string"
+            ? order.shipping.method
+            : "",
       shippingServiceType:
         typeof order.shipping?.serviceType === "string"
           ? order.shipping.serviceType
@@ -505,6 +524,26 @@ class PagoService {
           : "",
       shippingTotal: String(order.costoEnvio || 0),
       discountTotal: String(order.discountTotal || 0),
+    };
+  }
+
+  private buildManualFedexPaidOrderPatch(order?: Orden): Record<string, unknown> {
+    const shipping = order?.shipping as Record<string, any> | undefined;
+    const isManualFedexOrder =
+      order?.fulfillmentMethod !== FulfillmentMethod.PICKUP &&
+      (shipping?.provider === MANUAL_FEDEX_PROVIDER ||
+        shipping?.shippingMethod === MANUAL_FEDEX_METHOD);
+
+    if (!isManualFedexOrder) {
+      return {};
+    }
+
+    return {
+      fulfillmentStatus: FulfillmentStatus.PREPARING,
+      shipping: {
+        ...(shipping || {}),
+        status: MANUAL_FEDEX_STATUS,
+      },
     };
   }
 
@@ -2008,6 +2047,8 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
+      const ordenSnapshot = await tx.get(pagoMatch.ordenRef);
+      const ordenData = ordenSnapshot.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
         estado: EstadoPago.COMPLETADO,
@@ -2029,6 +2070,7 @@ async createStripeCheckoutSession(
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
+        ...this.buildManualFedexPaidOrderPatch(ordenData),
         stripePaymentIntentId: paymentIntent.id,
         stripeCustomerId:
           typeof paymentIntent.customer === "string"
@@ -2102,7 +2144,6 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
-
       tx.update(pagoMatch.pagoRef, {
         estado: EstadoPago.FALLIDO,
         providerStatus: paymentIntent.status,
@@ -2167,6 +2208,8 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
+      const ordenSnapshot = await tx.get(pagoMatch.ordenRef);
+      const ordenData = ordenSnapshot.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
         estado: EstadoPago.COMPLETADO,
@@ -2192,6 +2235,7 @@ async createStripeCheckoutSession(
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
+        ...this.buildManualFedexPaidOrderPatch(ordenData),
         stripeCheckoutSessionId: session.id,
         stripePaymentIntentId:
           typeof session.payment_intent === "string"
