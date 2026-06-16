@@ -350,6 +350,130 @@ console.log(
 );
       }
 
+      // PASO 1.5: Aplicar ofertas activas en backend antes de código promocional.
+      // No se mandan precios desde frontend; aquí se recalculan con datos reales.
+      try {
+        const ofertasModule = (await import("./ofertas.service")) as any;
+        const ofertasService =
+          ofertasModule.ofertasService ?? ofertasModule.default;
+
+        if (ofertasService?.calcularPreciosCarrito) {
+          const resultadoOfertas = await ofertasService.calcularPreciosCarrito(
+            itemsValidados.map((item) => ({
+              productoId: item.productoId,
+              cantidad: item.cantidad,
+              ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+            })),
+          );
+
+          const ofertasItemsRaw = Array.isArray(resultadoOfertas?.items)
+            ? resultadoOfertas.items
+            : Array.isArray(resultadoOfertas?.precios)
+              ? resultadoOfertas.precios
+              : Array.isArray(resultadoOfertas)
+                ? resultadoOfertas
+                : Object.entries(resultadoOfertas ?? {}).map(
+                    ([productoId, value]) => ({
+                      productoId,
+                      ...(typeof value === "object" && value !== null
+                        ? value
+                        : {}),
+                    }),
+                  );
+
+          const ofertasByVariant = new Map<string, any>();
+
+          for (const ofertaItem of ofertasItemsRaw) {
+            const productoId = String(
+              ofertaItem.productoId ??
+                ofertaItem.productId ??
+                ofertaItem.id ??
+                "",
+            );
+
+            if (!productoId) {
+              continue;
+            }
+
+            ofertasByVariant.set(
+              buildVariantKey(productoId, ofertaItem.tallaId ?? undefined),
+              ofertaItem,
+            );
+
+            ofertasByVariant.set(buildVariantKey(productoId), ofertaItem);
+          }
+
+          let subtotalRecalculadoConOfertas = 0;
+
+          for (let index = 0; index < itemsValidados.length; index++) {
+            const itemValidado = itemsValidados[index];
+
+            const ofertaItem =
+              ofertasByVariant.get(
+                buildVariantKey(itemValidado.productoId, itemValidado.tallaId),
+              ) ?? ofertasByVariant.get(buildVariantKey(itemValidado.productoId));
+
+            if (!ofertaItem) {
+              subtotalRecalculadoConOfertas += itemValidado.subtotal;
+              continue;
+            }
+
+            let subtotalFinalOferta = Number(
+              ofertaItem.subtotalFinal ??
+                ofertaItem.totalFinal ??
+                ofertaItem.subtotalConOferta,
+            );
+
+            let precioFinalOferta = Number(
+              ofertaItem.precioFinal ??
+                ofertaItem.precioUnitarioFinal ??
+                ofertaItem.unitPriceFinal,
+            );
+
+            if (
+              !Number.isFinite(subtotalFinalOferta) &&
+              Number.isFinite(precioFinalOferta)
+            ) {
+              subtotalFinalOferta = precioFinalOferta * itemValidado.cantidad;
+            }
+
+            if (
+              !Number.isFinite(precioFinalOferta) &&
+              Number.isFinite(subtotalFinalOferta)
+            ) {
+              precioFinalOferta = subtotalFinalOferta / itemValidado.cantidad;
+            }
+
+            const ofertaValida =
+              Number.isFinite(subtotalFinalOferta) &&
+              subtotalFinalOferta >= 0 &&
+              subtotalFinalOferta < itemValidado.subtotal &&
+              Number.isFinite(precioFinalOferta) &&
+              precioFinalOferta >= 0;
+
+            if (ofertaValida) {
+              itemValidado.precioUnitario = roundCurrency(precioFinalOferta);
+              itemValidado.subtotal = roundCurrency(subtotalFinalOferta);
+
+              if (itemsParaCodigoPromocion[index]) {
+                itemsParaCodigoPromocion[index].precioUnitario =
+                  itemValidado.precioUnitario;
+              }
+            }
+
+            subtotalRecalculadoConOfertas += itemValidado.subtotal;
+          }
+
+          subtotalCalculado = roundCurrency(subtotalRecalculadoConOfertas);
+
+          console.log(
+            `Ofertas recalculadas en orden | Subtotal final: $${subtotalCalculado.toFixed(2)}`,
+          );
+        }
+      } catch (ofertasError) {
+        console.error("No se pudieron calcular ofertas en orden:", ofertasError);
+      }
+
       if (codigoPromocion) {
   const resultadoCodigo = await codigosPromocionService.validar({
     codigo: codigoPromocion,
