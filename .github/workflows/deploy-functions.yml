@@ -6,6 +6,10 @@ on:
       - master
   workflow_dispatch:
 
+concurrency:
+  group: deploy-functions-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     name: Deploy Backend Functions
@@ -18,7 +22,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -34,7 +38,7 @@ jobs:
       - name: Install Functions deps
         run: |
           cd functions
-          npm install
+          npm ci
 
       - name: Create Service Account Files
         run: |
@@ -129,13 +133,42 @@ jobs:
           cd functions
           npm run build
 
-      - name: Deploy to Firebase
+      - name: Deploy to Firebase in staggered batches
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
           JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
-        run: firebase deploy --only functions --project e-comerce-leon
+        run: |
+          set -euo pipefail
+
+          batches=(
+            "functions:api,functions:processTryOnJob,functions:processNotificationEvent"
+            "functions:processPaymentEvent,functions:userLevelSyncFunction,functions:scheduledAccountDeletionFunction"
+            "functions:syncInstagramPostsFunction,functions:reconcileAplazoPaymentsFunction,functions:expirePickupOrdersFunction"
+            "functions:lowStockDailyDigest,functions:abandonedCartNotifications,functions:inactiveUserNotifications"
+            "functions:campaignNotifications,functions:probableRepurchaseNotifications,functions:productRatingReminderNotifications"
+          )
+
+          for batch in "${batches[@]}"; do
+            echo "Deploying batch: ${batch}"
+            for attempt in 1 2 3; do
+              if firebase deploy --only "${batch}" --project e-comerce-leon; then
+                break
+              fi
+
+              if [ "${attempt}" -eq 3 ]; then
+                echo "Firebase deploy failed after ${attempt} attempts for batch: ${batch}"
+                exit 1
+              fi
+
+              wait_seconds=$((attempt * 120))
+              echo "Deploy attempt ${attempt} failed. Waiting ${wait_seconds}s before retrying..."
+              sleep "${wait_seconds}"
+            done
+            echo "Batch finished. Waiting before starting the next Firebase build wave..."
+            sleep 45
+          done
 
       - name: Grant Eventarc Invoker Access To Try-On Worker
         run: |
@@ -163,6 +196,7 @@ jobs:
           }
 
   notify:
+    needs: deploy
     runs-on: ubuntu-latest
     steps:
       - name: Send notification to Discord
