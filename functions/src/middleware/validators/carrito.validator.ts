@@ -20,6 +20,16 @@ import { pickupContactSchema } from "./orden.validator";
 
 const optionalTrimmedString = z.string().trim().min(1).optional();
 
+const codigoPromocionCheckoutSchema = z
+  .string({
+    invalid_type_error: "El código promocional debe ser una cadena de texto",
+  })
+  .trim()
+  .min(1, "El código promocional no puede estar vacío")
+  .max(50, "El código promocional no puede exceder 50 caracteres")
+  .transform((value) => value.toUpperCase())
+  .optional();
+
 const checkoutShippingSelectionSchema = z
   .object({
     method: z.enum(["PICKUP", "FEDEX", "MANUAL"]),
@@ -152,6 +162,8 @@ export const checkoutCarritoSchema = z
         message: `El método de pago debe ser uno de: ${Object.values(MetodoPago).join(", ")}`,
       }),
     }),
+
+    codigoPromocion: codigoPromocionCheckoutSchema,
 
     costoEnvio: z
       .number()

@@ -42,6 +42,8 @@ import adminFedexRoutes from "./admin-fedex.routes";
 import adminOrdersFedexRoutes from "./admin-orders-fedex.routes";
 import ordersTrackingRoutes from "./orders-tracking.routes";
 import shippingRoutes from "../modules/shipping/shipping.routes";
+import ofertasRoutes from "./ofertas.routes";
+import codigofertasRoutes from "./codigos-promocion.routes";
 
 const router = Router();
 
@@ -80,6 +82,8 @@ router.use("/admin/fedex", adminFedexRoutes);
 router.use("/admin/orders", adminOrdersFedexRoutes);
 router.use("/orders", ordersTrackingRoutes);
 router.use("/shipping", shippingRoutes);
+router.use("/ofertas", ofertasRoutes);
+router.use("/codigos-promocion", codigofertasRoutes);
 
 // Futuros módulos:
 

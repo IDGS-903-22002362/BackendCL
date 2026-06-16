@@ -82,6 +82,7 @@ type OnlineCreateRequest = {
   customer?: PaymentCustomerInput;
   items?: PaymentItemInput[];
   subtotal?: number;
+  expectedSubtotal?: number;
   tax?: number;
   shipping?: number;
   total?: number;
@@ -90,6 +91,7 @@ type OnlineCreateRequest = {
   cancelUrl?: string;
   failureUrl?: string;
   cartUrl?: string;
+  codigoPromocion?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -253,16 +255,68 @@ export class PaymentsService {
       );
     }
 
-    if (
-      typeof request.total === "number" &&
-      roundToMinor(request.total) !== amountMinor
-    ) {
-      throw new PaymentApiError(
-        409,
-        "PAYMENT_AMOUNT_MISMATCH",
-        "El total enviado por frontend no coincide con el total recalculado en backend",
-      );
-    }
+   if (
+  typeof request.total === "number" &&
+  roundToMinor(request.total) !== amountMinor
+) {
+  paymentsLogger.warn("[PAYMENT_AMOUNT_MISMATCH_DEBUG]", {
+    orderId: order.id,
+    requestTotal: request.total,
+    requestTotalMinor: roundToMinor(request.total),
+    backendTotal: order.total,
+    backendTotalMinor: amountMinor,
+    requestSubtotal: request.subtotal,
+    requestExpectedSubtotal: request.expectedSubtotal,
+    backendSubtotal: order.subtotal,
+    backendSubtotalOriginal: order.subtotalOriginal,
+    backendSubtotalFinal: order.subtotalFinal,
+    backendDiscountTotal: order.discountTotal,
+    backendDescuentoCodigoPromocion: order.descuentoCodigoPromocion,
+    requestCodigoPromocion: request.codigoPromocion,
+    backendCodigoPromocion: order.codigoPromocion,
+    backendCodigoPromocionId: order.codigoPromocionId,
+    pricingSnapshotTotalMinor: pricingSnapshot.totalMinor,
+    pricingSnapshotSubtotalMinor: pricingSnapshot.subtotalMinor,
+    pricingSnapshotDiscountMinor: pricingSnapshot.discountMinor,
+  });
+
+  paymentsLogger.error("[PAYMENT_AMOUNT_MISMATCH_DEBUG]", {
+  orderId: order.id,
+
+  requestTotal: request.total,
+  requestTotalMinor: roundToMinor(request.total),
+  requestSubtotal: request.subtotal,
+  requestExpectedSubtotal: request.expectedSubtotal,
+  requestShipping: request.shipping,
+  requestTax: request.tax,
+  requestCodigoPromocion: request.codigoPromocion,
+
+  amountMinor,
+  backendOrderSubtotal: order.subtotal,
+backendOrderShipping: order.shipping,
+  backendOrderTotal: order.total,
+
+  backendCodigoPromocion: (order as any).codigoPromocion,
+  backendDescuentoCodigoPromocion: (order as any).descuentoCodigoPromocion,
+
+  pricingSnapshot,
+  orderItems: (order as any).items,
+});
+
+  throw new PaymentApiError(
+    409,
+    "PAYMENT_AMOUNT_MISMATCH",
+    "El total enviado por frontend no coincide con el total recalculado en backend",
+    {
+      orderId: order.id,
+      requestTotal: request.total,
+      backendTotal: order.total,
+      requestCodigoPromocion: request.codigoPromocion,
+      backendCodigoPromocion: order.codigoPromocion,
+      backendDescuentoCodigoPromocion: order.descuentoCodigoPromocion,
+    },
+  );
+}
 
     const idempotencyKey =
       validateIdempotencyKey(headerIdempotencyKey) ??
@@ -345,9 +399,10 @@ export class PaymentsService {
       expiresAt,
       pricingSnapshot,
       metadata: {
-        ...(request.metadata || {}),
-        cartId: metadataCartId,
-        cartUrl: request.cartUrl || config.online.cartUrl,
+  ...(request.metadata || {}),
+  cartId: metadataCartId,
+  cartUrl: request.cartUrl || config.online.cartUrl,
+  codigoPromocion: request.codigoPromocion || order.codigoPromocion,
         orderId: order.id,
         fulfillmentMethod: order.fulfillmentMethod || "DELIVERY",
         pickupLocationId: order.pickupLocationId || "",
@@ -405,6 +460,28 @@ export class PaymentsService {
         pricingSnapshot,
       });
 
+      paymentsLogger.info("[APLAZO_PROVIDER_RESULT_DEBUG]", {
+  orderId: order.id,
+  paymentAttemptId: attempt.id,
+  amountMinor,
+  requestTotal: request.total,
+  requestCodigoPromocion: request.codigoPromocion,
+
+  providerStatus: providerResult.providerStatus,
+  status: providerResult.status,
+  providerPaymentId: providerResult.providerPaymentId,
+  providerLoanId: providerResult.providerLoanId,
+  providerReference: providerResult.providerReference,
+
+  redirectUrl: providerResult.redirectUrl,
+  redirectUrlPresent:
+    typeof providerResult.redirectUrl === "string" &&
+    providerResult.redirectUrl.trim().length > 0,
+
+  rawRequestSanitized: providerResult.rawRequestSanitized,
+  rawResponseSanitized: providerResult.rawResponseSanitized,
+});
+
       const updated = await this.paymentAttemptRepo.update(attempt.id!, {
         status: providerResult.status,
         providerStatus: providerResult.providerStatus,
@@ -429,6 +506,23 @@ export class PaymentsService {
         paymentAttempt: updated,
       };
     } catch (error) {
+      paymentsLogger.error("[APLAZO_CREATE_ONLINE_ERROR_DEBUG]", {
+  orderId: order.id,
+  paymentAttemptId: attempt.id,
+  amountMinor,
+  requestTotal: request.total,
+  requestCodigoPromocion: request.codigoPromocion,
+  errorName: error instanceof Error ? error.name : typeof error,
+  errorMessage: error instanceof Error ? error.message : String(error),
+  errorCode:
+    error instanceof PaymentApiError ? error.code : undefined,
+  errorStatus:
+    error instanceof PaymentApiError ? error.statusCode : undefined,
+  errorDetails:
+    error instanceof PaymentApiError
+      ? sanitizeForStorage(error.details || {})
+      : {},
+});
       if (
         error instanceof PaymentApiError &&
         error.code === "PAYMENT_PROVIDER_TIMEOUT"
