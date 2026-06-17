@@ -8,6 +8,8 @@ import {
   FulfillmentStatus,
   MetodoPago,
   Orden,
+  PaymentState,
+  PreparationStatus,
 } from "../models/orden.model";
 import {
   COLECCION_PAGOS,
@@ -534,11 +536,20 @@ class PagoService {
       (shipping?.provider === MANUAL_FEDEX_PROVIDER ||
         shipping?.shippingMethod === MANUAL_FEDEX_METHOD);
 
+    // Estados comunes al confirmarse el pago (domicilio y pickup): el pago
+    // queda PAGADO y la orden pasa a pendiente de preparacion. No se genera
+    // guia ni se marca como enviado (eso lo hace el admin manualmente).
+    const commonPaidPatch: Record<string, unknown> = {
+      paymentStatus: PaymentState.PAGADO,
+      preparationStatus: PreparationStatus.PENDING_PREPARATION,
+    };
+
     if (!isManualFedexOrder) {
-      return {};
+      return commonPaidPatch;
     }
 
     return {
+      ...commonPaidPatch,
       fulfillmentStatus: FulfillmentStatus.PREPARING,
       shipping: {
         ...(shipping || {}),
@@ -2163,6 +2174,7 @@ async createStripeCheckoutSession(
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.PENDIENTE,
+        paymentStatus: PaymentState.FALLIDO,
         stripePaymentIntentId: paymentIntent.id,
         stripeCustomerId:
           typeof paymentIntent.customer === "string"
@@ -2411,6 +2423,7 @@ async createStripeCheckoutSession(
 
       tx.update(pagoMatch.ordenRef, {
         estado: EstadoOrden.CANCELADA,
+        paymentStatus: PaymentState.REEMBOLSADO,
         stripePaymentIntentId:
           typeof charge.payment_intent === "string"
             ? charge.payment_intent

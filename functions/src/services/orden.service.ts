@@ -20,6 +20,9 @@ import {
   FulfillmentMethod,
   FulfillmentStatus,
   ItemOrden,
+  ManualShippingStatus,
+  PaymentState,
+  PreparationStatus,
 } from "../models/orden.model";
 import { Producto } from "../models/producto.model";
 import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
@@ -79,13 +82,6 @@ function toStringArray(value: unknown): string[] {
 function buildVariantKey(productoId: string, tallaId?: string) {
   return `${productoId}::${tallaId ?? "__GLOBAL__"}`;
 }
-
-type ManualShippingStatus =
-  | "READY_TO_SHIP"
-  | "IN_TRANSIT"
-  | "DELIVERED"
-  | "EXCEPTION"
-  | "RETURNED";
 
 /**
  * Clase OrdenService
@@ -674,6 +670,8 @@ console.log(
         metodoPago: data.metodoPago,
         fulfillmentMethod,
         fulfillmentStatus: FulfillmentStatus.PENDING_PAYMENT,
+        paymentStatus: PaymentState.PENDIENTE,
+        preparationStatus: PreparationStatus.WAITING_PAYMENT,
         ...(fulfillmentMethod === FulfillmentMethod.PICKUP
           ? {
               pickupLocationId: data.pickupLocationId,
@@ -980,6 +978,12 @@ subtotalFinal: subtotalCalculado,
   ): Promise<Orden> {
     const { ref, order } = await this.requireManualShippingOrder(orderId);
     const now = admin.firestore.Timestamp.now();
+    const currentShipping = (order.shipping || {}) as Record<string, any>;
+    const nextShipping = {
+      ...currentShipping,
+      status: ManualShippingStatus.PREPARING,
+      updatedAt: now,
+    };
     const historyEntry = this.buildHistoryEntry({
       type: "fulfillment_status_change",
       from: String(order.fulfillmentStatus || ""),
@@ -991,6 +995,8 @@ subtotalFinal: subtotalCalculado,
     await ref.update({
       estado: EstadoOrden.EN_PROCESO,
       fulfillmentStatus: FulfillmentStatus.PREPARING,
+      preparationStatus: PreparationStatus.PREPARING,
+      shipping: nextShipping,
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
@@ -1000,6 +1006,8 @@ subtotalFinal: subtotalCalculado,
       ...order,
       estado: EstadoOrden.EN_PROCESO,
       fulfillmentStatus: FulfillmentStatus.PREPARING,
+      preparationStatus: PreparationStatus.PREPARING,
+      shipping: nextShipping,
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: [...(order.shippingHistory || []), historyEntry],
@@ -1016,19 +1024,20 @@ subtotalFinal: subtotalCalculado,
     const currentShipping = (order.shipping || {}) as Record<string, any>;
     const nextShipping = {
       ...currentShipping,
-      status: "READY_TO_SHIP",
+      status: ManualShippingStatus.READY_TO_SHIP,
       updatedAt: now,
     };
     const historyEntry = this.buildHistoryEntry({
       type: "shipping_status_change",
       from: String(currentShipping.status || ""),
-      to: "READY_TO_SHIP",
+      to: ManualShippingStatus.READY_TO_SHIP,
       changedBy: adminId,
       note,
     });
 
     await ref.update({
       shipping: nextShipping,
+      preparationStatus: PreparationStatus.READY_TO_SHIP,
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
@@ -1037,6 +1046,7 @@ subtotalFinal: subtotalCalculado,
     return {
       ...order,
       shipping: nextShipping,
+      preparationStatus: PreparationStatus.READY_TO_SHIP,
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: [...(order.shippingHistory || []), historyEntry],
@@ -1066,7 +1076,7 @@ subtotalFinal: subtotalCalculado,
     const trackingUrl = buildFedexTrackingUrl(trackingNumber);
     const nextShipping = {
       ...currentShipping,
-      status: "IN_TRANSIT",
+      status: ManualShippingStatus.DELIVERED_TO_CARRIER,
       trackingNumber,
       trackingUrl,
       serviceName: input.serviceName || currentShipping.serviceName,
@@ -1085,13 +1095,14 @@ subtotalFinal: subtotalCalculado,
     const historyEntry = this.buildHistoryEntry({
       type: "shipping_status_change",
       from: String(currentShipping.status || ""),
-      to: "IN_TRANSIT",
+      to: ManualShippingStatus.DELIVERED_TO_CARRIER,
       changedBy: adminId,
       note: input.notes,
     });
 
     await ref.update({
       estado: EstadoOrden.ENVIADA,
+      preparationStatus: PreparationStatus.SHIPPED,
       shipping: nextShipping,
       numeroGuia: trackingNumber,
       transportista: "FEDEX",
@@ -1113,6 +1124,7 @@ subtotalFinal: subtotalCalculado,
     return {
       ...order,
       estado: EstadoOrden.ENVIADA,
+      preparationStatus: PreparationStatus.SHIPPED,
       shipping: nextShipping,
       numeroGuia: trackingNumber,
       transportista: "FEDEX",
@@ -1146,16 +1158,25 @@ subtotalFinal: subtotalCalculado,
       note: input.note,
     });
     const nextEstado =
-      input.status === "DELIVERED"
+      input.status === ManualShippingStatus.DELIVERED
         ? EstadoOrden.ENTREGADA
-        : input.status === "IN_TRANSIT"
+        : input.status === ManualShippingStatus.IN_TRANSIT
           ? EstadoOrden.ENVIADA
           : order.estado;
+    const nextPreparationStatus =
+      input.status === ManualShippingStatus.DELIVERED
+        ? PreparationStatus.DELIVERED
+        : input.status === ManualShippingStatus.INCIDENT
+          ? PreparationStatus.INCIDENT
+          : input.status === ManualShippingStatus.RETURNED
+            ? PreparationStatus.RETURNED
+            : order.preparationStatus ?? PreparationStatus.SHIPPED;
 
     await ref.update({
       estado: nextEstado,
+      preparationStatus: nextPreparationStatus,
       shipping: nextShipping,
-      ...(input.status === "DELIVERED" ? { deliveredAt: now } : {}),
+      ...(input.status === ManualShippingStatus.DELIVERED ? { deliveredAt: now } : {}),
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: admin.firestore.FieldValue.arrayUnion(historyEntry),
@@ -1164,8 +1185,9 @@ subtotalFinal: subtotalCalculado,
     const updatedOrder = {
       ...order,
       estado: nextEstado,
+      preparationStatus: nextPreparationStatus,
       shipping: nextShipping,
-      ...(input.status === "DELIVERED" ? { deliveredAt: now } : {}),
+      ...(input.status === ManualShippingStatus.DELIVERED ? { deliveredAt: now } : {}),
       updatedByAdminId: adminId,
       updatedAt: now,
       shippingHistory: [...(order.shippingHistory || []), historyEntry],
@@ -1256,6 +1278,8 @@ subtotalFinal: subtotalCalculado,
           deliveredAt: data.deliveredAt,
           fulfillmentMethod: data.fulfillmentMethod,
           fulfillmentStatus: data.fulfillmentStatus,
+          paymentStatus: data.paymentStatus,
+          preparationStatus: data.preparationStatus,
           pickupLocationId: data.pickupLocationId,
           pickupLocation: data.pickupLocation,
           pickupInstructions: data.pickupInstructions,
@@ -1794,6 +1818,8 @@ subtotalFinal: subtotalCalculado,
           deliveredAt: data.deliveredAt,
           fulfillmentMethod: data.fulfillmentMethod,
           fulfillmentStatus: data.fulfillmentStatus,
+          paymentStatus: data.paymentStatus,
+          preparationStatus: data.preparationStatus,
           pickupLocationId: data.pickupLocationId,
           pickupLocation: data.pickupLocation,
           pickupInstructions: data.pickupInstructions,

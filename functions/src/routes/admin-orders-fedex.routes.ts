@@ -36,7 +36,13 @@ const manualTrackingSchema = z
 
 const manualStatusSchema = z
   .object({
-    status: z.enum(["IN_TRANSIT", "DELIVERED", "EXCEPTION", "RETURNED"]),
+    status: z.enum([
+      "IN_TRANSIT",
+      "DELIVERED",
+      "INCIDENT",
+      "EXCEPTION",
+      "RETURNED",
+    ]),
     note: z.string().trim().max(500).optional(),
   })
   .strict();

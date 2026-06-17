@@ -42,6 +42,52 @@ export enum FulfillmentStatus {
   CANCELED = "CANCELED",
 }
 
+/**
+ * Estado de pago a nivel de orden (espejo simplificado del documento `pagos`).
+ * Permite a las pantallas de cliente/admin leer el estado de pago directamente
+ * desde la orden sin tener que cruzar la colección de pagos.
+ */
+export enum PaymentState {
+  PENDIENTE = "PENDIENTE",
+  PAGADO = "PAGADO",
+  FALLIDO = "FALLIDO",
+  REEMBOLSADO = "REEMBOLSADO",
+}
+
+/**
+ * Estado granular de preparación/fulfillment de la orden.
+ * Es aditivo: convive con `estado` (EstadoOrden) y `fulfillmentStatus`
+ * (FulfillmentStatus). Se usa como fuente de verdad para etiquetas de UI.
+ */
+export enum PreparationStatus {
+  WAITING_PAYMENT = "WAITING_PAYMENT",
+  PENDING_PREPARATION = "PENDING_PREPARATION",
+  PREPARING = "PREPARING",
+  READY_TO_SHIP = "READY_TO_SHIP",
+  SHIPPED = "SHIPPED",
+  READY_FOR_PICKUP = "READY_FOR_PICKUP",
+  PICKED_UP = "PICKED_UP",
+  DELIVERED = "DELIVERED",
+  INCIDENT = "INCIDENT",
+  RETURNED = "RETURNED",
+}
+
+/**
+ * Estado del envío manual (FedEx manual) almacenado en `shipping.status`.
+ * Mantiene compatibilidad con los valores legacy (EXCEPTION) y agrega los
+ * estados granulares solicitados para el flujo manual temporal.
+ */
+export enum ManualShippingStatus {
+  PENDING_MANUAL_SHIPMENT = "pending_manual_shipment",
+  PREPARING = "PREPARING",
+  READY_TO_SHIP = "READY_TO_SHIP",
+  DELIVERED_TO_CARRIER = "DELIVERED_TO_CARRIER",
+  IN_TRANSIT = "IN_TRANSIT",
+  DELIVERED = "DELIVERED",
+  INCIDENT = "INCIDENT",
+  RETURNED = "RETURNED",
+}
+
 export interface ItemOrden {
   productoId: string;
   cantidad: number;
@@ -115,6 +161,8 @@ export interface Orden {
   metodoPago: MetodoPago;
   fulfillmentMethod?: FulfillmentMethod;
   fulfillmentStatus?: FulfillmentStatus;
+  paymentStatus?: PaymentState;
+  preparationStatus?: PreparationStatus;
   pickupLocationId?: string;
   pickupLocation?: PickupLocationSnapshot;
   pickupInstructions?: string;

@@ -6,6 +6,7 @@ import {
   FulfillmentMethod,
   FulfillmentStatus,
   Orden,
+  PreparationStatus,
 } from "../models/orden.model";
 import orderEventService from "./order-event.service";
 
@@ -356,9 +357,18 @@ export class PickupOrderService {
     },
   ): Promise<Orden> {
     const now = Timestamp.now();
+    const preparationStatusByEvent: Record<string, PreparationStatus> = {
+      PICKUP_PREPARING: PreparationStatus.PREPARING,
+      PICKUP_READY: PreparationStatus.READY_FOR_PICKUP,
+      PICKUP_COMPLETED: PreparationStatus.PICKED_UP,
+    };
+    const nextPreparationStatus = preparationStatusByEvent[options.eventType];
     const patch = {
       fulfillmentStatus,
       estado: options.estado,
+      ...(nextPreparationStatus
+        ? { preparationStatus: nextPreparationStatus }
+        : {}),
       updatedAt: now,
       ...(options.extraPatch || {}),
     };
