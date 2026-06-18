@@ -4,8 +4,21 @@ import { logout } from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
 import { refreshToken } from "../controllers/users/auth.refresh.controller";
 import { requestVerificationCode, verifyAndLogin } from "../controllers/users/auth.otp.controller";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
+
+const authRateLimit = createSimpleRateLimiter({
+  keyPrefix: "auth",
+  windowMs: 60_000,
+  maxRequests: 20,
+});
+
+const otpRateLimit = createSimpleRateLimiter({
+  keyPrefix: "auth:otp",
+  windowMs: 60_000,
+  maxRequests: 10,
+});
 
 /**
  * @swagger
@@ -87,7 +100,7 @@ const router = Router();
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/register-or-login", registerOrLogin);
+router.post("/register-or-login", authRateLimit, registerOrLogin);
 
 router.post("/logout", authMiddleware, logout);
 
@@ -150,7 +163,7 @@ router.post("/refresh", authMiddleware, refreshToken);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/request-verification-code", requestVerificationCode);
+router.post("/request-verification-code", otpRateLimit, requestVerificationCode);
 
 /**
  * @swagger
@@ -235,6 +248,6 @@ router.post("/request-verification-code", requestVerificationCode);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/verify-and-login", verifyAndLogin);
+router.post("/verify-and-login", authRateLimit, verifyAndLogin);
 
 export default router;

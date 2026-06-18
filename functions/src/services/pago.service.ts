@@ -1439,107 +1439,6 @@ async createStripeCheckoutSession(
     return session.payment_intent?.id;
   }
 
-  private getCustomerIdFromCheckoutSession(
-    session: Stripe.Checkout.Session,
-    fallback?: string,
-  ): string | undefined {
-    if (typeof session.customer === "string") {
-      return session.customer;
-    }
-
-    return fallback;
-  }
-
-  private async reconcilePaidCheckoutSession(
-    session: Stripe.Checkout.Session,
-    pagoMatch: {
-      pagoId: string;
-      ordenId: string;
-      pagoRef: FirebaseFirestore.DocumentReference;
-      ordenRef: FirebaseFirestore.DocumentReference;
-    },
-  ): Promise<void> {
-    if (session.payment_status !== "paid") {
-      return;
-    }
-
-    const sourceEventId = `checkout_session_reconcile:${session.id}`;
-    const now = admin.firestore.Timestamp.now();
-    let shouldFinalizeOrder = false;
-
-    await firestoreTienda.runTransaction(async (tx) => {
-      const pagoSnapshot = await tx.get(pagoMatch.pagoRef);
-      if (!pagoSnapshot.exists) {
-        throw new ApiError(404, "Pago no encontrado al reconciliar Stripe");
-      }
-
-      const pagoData = pagoSnapshot.data() as Pago;
-      const ordenSnapshot = await tx.get(pagoMatch.ordenRef);
-      const ordenData = ordenSnapshot.data() as Orden | undefined;
-
-      const alreadyCompleted =
-        pagoData.estado === EstadoPago.COMPLETADO &&
-        pagoData.status === PaymentStatus.PAID &&
-        ordenData?.paymentStatus === PaymentState.PAGADO;
-
-      if (alreadyCompleted) {
-        return;
-      }
-
-      shouldFinalizeOrder = true;
-      const paymentIntentId = this.getPaymentIntentIdFromCheckoutSession(session);
-      const stripeCustomerId = this.getCustomerIdFromCheckoutSession(
-        session,
-        pagoData.stripeCustomerId,
-      );
-      const nextOrderState =
-        ordenData?.estado === EstadoOrden.PENDIENTE || !ordenData?.estado
-          ? EstadoOrden.CONFIRMADA
-          : ordenData.estado;
-
-      tx.update(pagoMatch.pagoRef, {
-        estado: EstadoPago.COMPLETADO,
-        status: PaymentStatus.PAID,
-        providerStatus: session.payment_status,
-        checkoutSessionId: session.id,
-        ...(paymentIntentId ? { paymentIntentId } : {}),
-        ...(stripeCustomerId ? { stripeCustomerId } : {}),
-        fechaPago: pagoData.fechaPago || now,
-        failureCode: admin.firestore.FieldValue.delete(),
-        failureMessage: admin.firestore.FieldValue.delete(),
-        rawEventId: pagoData.rawEventId || sourceEventId,
-        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
-          sourceEventId,
-        ),
-        updatedAt: now,
-      });
-
-      tx.update(pagoMatch.ordenRef, {
-        estado: nextOrderState,
-        ...this.buildManualFedexPaidOrderPatch(ordenData),
-        stripeCheckoutSessionId: session.id,
-        ...(paymentIntentId ? { stripePaymentIntentId: paymentIntentId } : {}),
-        ...(stripeCustomerId ? { stripeCustomerId } : {}),
-        updatedAt: now,
-      });
-    });
-
-    if (!shouldFinalizeOrder) {
-      return;
-    }
-
-    await pickupOrderService.finalizePaidPickupOrder({
-      orderId: pagoMatch.ordenId,
-      source: "stripe",
-      sourceEventId,
-    });
-    await paidOrderFinalizerService.finalizePaidOrder({
-      orderId: pagoMatch.ordenId,
-      provider: "stripe",
-      sourceEventId,
-    });
-  }
-
   async getStripeCheckoutSessionById(
     sessionId: string,
     user: AuthUser,
@@ -1575,8 +1474,6 @@ async createStripeCheckoutSession(
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["payment_intent"],
     });
-
-    await this.reconcilePaidCheckoutSession(session, pagoMatch);
 
     return {
       id: session.id,
@@ -2104,6 +2001,40 @@ async createStripeCheckoutSession(
       );
   }
 
+  private assertStripeAmountMatchesOrder(
+    stripeAmountMinor: number | null | undefined,
+    ordenData: Orden,
+    context: {
+      eventId: string;
+      pagoId?: string;
+      ordenId: string;
+      source: string;
+    },
+  ): void {
+    const expectedMinor = Math.round(Number(ordenData.total || 0) * 100);
+
+    if (
+      typeof stripeAmountMinor !== "number" ||
+      !Number.isFinite(stripeAmountMinor) ||
+      stripeAmountMinor !== expectedMinor
+    ) {
+      console.error("stripe_payment_amount_mismatch", {
+        eventId: context.eventId,
+        pagoId: context.pagoId,
+        ordenId: context.ordenId,
+        source: context.source,
+        expectedMinor,
+        receivedMinor: stripeAmountMinor ?? null,
+        orderTotal: ordenData.total,
+      });
+
+      throw new ApiError(
+        409,
+        "El monto pagado en Stripe no coincide con el total de la orden",
+      );
+    }
+  }
+
   private async handleStripeEvent(
     event: Stripe.Event,
   ): Promise<StripeWebhookProcessResult> {
@@ -2156,6 +2087,23 @@ async createStripeCheckoutSession(
         reason: "pago_not_found_by_payment_intent",
       };
     }
+
+    const ordenSnapshot = await pagoMatch.ordenRef.get();
+    const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
+    if (!ordenDataForValidation) {
+      throw new ApiError(404, "Orden no encontrada al procesar webhook");
+    }
+
+    this.assertStripeAmountMatchesOrder(
+      paymentIntent.amount,
+      ordenDataForValidation,
+      {
+        eventId: event.id,
+        pagoId: pagoMatch.pagoId,
+        ordenId: pagoMatch.ordenId,
+        source: "payment_intent.succeeded",
+      },
+    );
 
     const now = admin.firestore.Timestamp.now();
 
@@ -2318,6 +2266,25 @@ async createStripeCheckoutSession(
         eventType: event.type,
         reason: "pago_not_found_by_checkout_session",
       };
+    }
+
+    if (session.payment_status === "paid") {
+      const ordenSnapshot = await pagoMatch.ordenRef.get();
+      const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
+      if (!ordenDataForValidation) {
+        throw new ApiError(404, "Orden no encontrada al procesar webhook");
+      }
+
+      this.assertStripeAmountMatchesOrder(
+        session.amount_total,
+        ordenDataForValidation,
+        {
+          eventId: event.id,
+          pagoId: pagoMatch.pagoId,
+          ordenId: pagoMatch.ordenId,
+          source: event.type,
+        },
+      );
     }
 
     const now = admin.firestore.Timestamp.now();

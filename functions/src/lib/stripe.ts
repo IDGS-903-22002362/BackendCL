@@ -41,12 +41,37 @@ let stripeClient: Stripe | null = null;
 
 export const getStripeClient = (): Stripe => {
   if (!stripeClient) {
+    assertStripeKeyEnvironment();
     stripeClient = new Stripe(getStripeSecretKey(), {
       apiVersion: STRIPE_API_VERSION,
     });
   }
 
   return stripeClient;
+};
+
+const isProductionRuntime = (): boolean =>
+  Boolean(process.env.K_SERVICE || process.env.NODE_ENV === "production");
+
+export const assertStripeKeyEnvironment = (): void => {
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  if (!key) {
+    return;
+  }
+
+  if (!isProductionRuntime() && key.startsWith("sk_live_")) {
+    throw new ApiError(
+      500,
+      "No usar claves Stripe live en entorno no productivo",
+    );
+  }
+
+  if (isProductionRuntime() && key.startsWith("sk_test_")) {
+    console.warn("stripe_key_env_mismatch", {
+      runtime: "production",
+      keyMode: "test",
+    });
+  }
 };
 
 export type StripeIdempotencyInput = {

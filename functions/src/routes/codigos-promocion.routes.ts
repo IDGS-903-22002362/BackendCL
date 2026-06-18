@@ -14,8 +14,15 @@ import {
   validateParams,
   validateQuery,
 } from "../middleware/validation.middleware";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
+
+const couponRateLimit = createSimpleRateLimiter({
+  keyPrefix: "coupons",
+  windowMs: 60_000,
+  maxRequests: 30,
+});
 
 /**
  * @swagger
@@ -99,6 +106,7 @@ router.get(
  */
 router.post(
   "/validar",
+  couponRateLimit,
   validateBody(validarCodigoPromocionSchema),
   codigosPromocionQueryController.validar,
 );

@@ -6,6 +6,7 @@ import pointsService from "../../services/puntos.service";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { UsuarioApp, RolUsuario } from "../../models/usuario.model";
+import { syncFirebaseAdminClaims } from "../../utils/middlewares";
 
 const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
   if (!fechaNacimiento) return null;
@@ -349,12 +350,26 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       );
     }
 
-    // 6. Generar JWT propio con opciones tipadas
+    // 6. Sincronizar custom claims de Firebase y generar JWT propio
+    try {
+      await syncFirebaseAdminClaims(usuario.uid, usuario.rol);
+    } catch (claimsError) {
+      console.error("admin_claims_sync_error", {
+        uid: usuario.uid,
+        reason:
+          claimsError instanceof Error ? claimsError.message : "unknown",
+      });
+    }
+
+    const isAdminUser =
+      usuario.rol === RolUsuario.ADMIN || usuario.rol === RolUsuario.EMPLEADO;
+
     const jwtPayload = {
       uid: usuario.uid,
       email: usuario.email,
       rol: usuario.rol,
       nombre: usuario.nombre,
+      admin: isAdminUser,
     };
 
     // 👇 Forzamos el tipo SignOptions para evitar ambigüedad en las sobrecargas
@@ -362,7 +377,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       expiresIn: process.env.JWT_EXPIRES_IN || "7d",
     } as jwt.SignOptions);
 
-    console.log("🔑 Token generado para", usuario.email);
+    console.info("auth_token_issued", { uid: usuario.uid });
 
     // 7. Respuesta exitosa
     return res.status(200).json({

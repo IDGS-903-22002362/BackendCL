@@ -23,9 +23,16 @@ import {
   checkoutCarritoSchema,
   createCartFedexQuoteSchema,
 } from "../middleware/validators/carrito.validator";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
 
 const router = Router();
+
+const checkoutRateLimit = createSimpleRateLimiter({
+  keyPrefix: "checkout",
+  windowMs: 60_000,
+  maxRequests: 15,
+});
 
 // ==========================================
 // QUERIES (Lectura)
@@ -514,6 +521,7 @@ router.post(
 router.post(
   "/checkout",
   authMiddleware,
+  checkoutRateLimit,
   validateBody(checkoutCarritoSchema),
   commandController.checkout,
 );

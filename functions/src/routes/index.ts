@@ -44,8 +44,17 @@ import ordersTrackingRoutes from "./orders-tracking.routes";
 import shippingRoutes from "../modules/shipping/shipping.routes";
 import ofertasRoutes from "./ofertas.routes";
 import codigofertasRoutes from "./codigos-promocion.routes";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
+
+const adminRateLimit = createSimpleRateLimiter({
+  keyPrefix: "admin",
+  windowMs: 60_000,
+  maxRequests: 120,
+});
+
+router.use("/admin", adminRateLimit);
 
 // ===================================
 // Montaje de Rutas por Módulo

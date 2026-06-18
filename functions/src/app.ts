@@ -1,6 +1,6 @@
 import "./config/env.bootstrap";
 import express from "express";
-import cors from "cors";
+import cors, { type CorsOptions } from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import swaggerUi from "swagger-ui-express";
@@ -9,12 +9,64 @@ import publicPaymentsRoutes from "./routes/payments-public.routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
 import { requestContextMiddleware } from "./middleware/request-context.middleware";
+import {
+  blockDebugInProduction,
+  optionalAppCheckMiddleware,
+} from "./utils/middlewares";
+
+const getCorsOptions = (): CorsOptions => {
+  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const storeOrigin = process.env.STORE_PUBLIC_BASE_URL?.trim();
+  const allowedOrigins = [
+    ...new Set([
+      ...configuredOrigins,
+      ...(storeOrigin ? [storeOrigin] : []),
+    ]),
+  ];
+  const isCloudRuntime = Boolean(
+    process.env.K_SERVICE || process.env.FUNCTION_NAME,
+  );
+
+  if (allowedOrigins.length === 0) {
+    if (!isCloudRuntime && process.env.NODE_ENV !== "production") {
+      return { origin: true, credentials: true };
+    }
+
+    return { origin: false, credentials: true };
+  }
+
+  return {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origen no permitido por CORS: ${origin}`));
+    },
+    credentials: true,
+  };
+};
 
 const app = express();
+const isProductionRuntime =
+  process.env.NODE_ENV === "production" ||
+  Boolean(process.env.K_SERVICE || process.env.FUNCTION_NAME);
 
-app.use(helmet());
-app.use(cors({ origin: true }));
+app.use(
+  helmet({
+    hsts: isProductionRuntime
+      ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+      : false,
+  }),
+);
+app.use(cors(getCorsOptions()));
 app.use(requestContextMiddleware);
+app.use(blockDebugInProduction);
+app.use(optionalAppCheckMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));
 app.use("/api/webhooks/aplazo", express.raw({ type: "application/json" }));

@@ -3,6 +3,8 @@ import { firestoreApp } from "../../config/app.firebase";
 import { sendVerificationEmail } from "../../lib/brevo/client";
 import otpService from "../../lib/firebase/otp-service";
 import jwt from "jsonwebtoken";
+import { RolUsuario } from "../../models/usuario.model";
+import { syncFirebaseAdminClaims } from "../../utils/middlewares";
 
 export async function requestVerificationCode(req: Request, res: Response) {
     try {
@@ -118,6 +120,19 @@ export async function verifyAndLogin(req: Request, res: Response) {
 
         const userDoc = snapshot.docs[0];
         const userData = userDoc.data();
+        const rol = userData.rol as RolUsuario;
+
+        try {
+            await syncFirebaseAdminClaims(userData.uid, rol);
+        } catch (claimsError) {
+            console.error("admin_claims_sync_error", {
+                uid: userData.uid,
+                reason:
+                    claimsError instanceof Error ? claimsError.message : "unknown",
+            });
+        }
+
+        const isAdminUser = rol === RolUsuario.ADMIN || rol === RolUsuario.EMPLEADO;
 
         // Generar JWT para la sesión
         const jwtSecret = process.env.JWT_SECRET;
@@ -129,8 +144,9 @@ export async function verifyAndLogin(req: Request, res: Response) {
             {
                 uid: userData.uid,
                 email: userData.email,
-                rol: userData.rol,
-                nombre: userData.nombre
+                rol,
+                nombre: userData.nombre,
+                admin: isAdminUser,
             },
             jwtSecret,
             { expiresIn: "7d" }
