@@ -26,8 +26,10 @@ import {
   getAppUrl,
   getStripeClient,
   getStripeCurrency,
+  getStripeMinimumAmountMinor,
   getStripePublishableKey,
   getStripeWebhookSecret,
+  isStripeMissingResourceError,
 } from "../lib/stripe";
 import pickupOrderService from "./pickup-order.service";
 import paidOrderFinalizerService from "./paid-order-finalizer.service";
@@ -725,9 +727,18 @@ class PagoService {
       throw new ApiError(409, "La orden tiene un monto invalido para pago");
     }
 
+    const currency = getStripeCurrency();
     const amount = Math.round(ordenData.total * 100);
     if (amount <= 0) {
       throw new ApiError(409, "La orden tiene un monto invalido para pago");
+    }
+
+    const minimumAmountMinor = getStripeMinimumAmountMinor(currency);
+    if (amount < minimumAmountMinor) {
+      throw new ApiError(
+        409,
+        `El total de la orden debe ser al menos ${(minimumAmountMinor / 100).toFixed(2)} ${currency.toUpperCase()} para procesar el pago con Stripe`,
+      );
     }
 
     return { ordenDoc, ordenData, amount };
@@ -770,10 +781,23 @@ class PagoService {
 
     const existingCustomerId =
       typeof userData.stripeCustomerId === "string"
-        ? userData.stripeCustomerId
+        ? userData.stripeCustomerId.trim()
         : undefined;
-    if (existingCustomerId && existingCustomerId.trim().length > 0) {
-      return existingCustomerId.trim();
+
+    if (existingCustomerId && existingCustomerId.length > 0) {
+      try {
+        await stripe.customers.retrieve(existingCustomerId);
+        return existingCustomerId;
+      } catch (error) {
+        if (!isStripeMissingResourceError(error)) {
+          throw error;
+        }
+
+        console.warn("stripe_customer_stale", {
+          userId,
+          stripeCustomerId: existingCustomerId,
+        });
+      }
     }
 
     const resolvedPreferred =
@@ -782,14 +806,26 @@ class PagoService {
         : undefined;
 
     if (resolvedPreferred) {
-      await userRef.set(
-        {
+      try {
+        await stripe.customers.retrieve(resolvedPreferred);
+        await userRef.set(
+          {
+            stripeCustomerId: resolvedPreferred,
+            updatedAt: admin.firestore.Timestamp.now(),
+          },
+          { merge: true },
+        );
+        return resolvedPreferred;
+      } catch (error) {
+        if (!isStripeMissingResourceError(error)) {
+          throw error;
+        }
+
+        console.warn("stripe_customer_preferred_stale", {
+          userId,
           stripeCustomerId: resolvedPreferred,
-          updatedAt: admin.firestore.Timestamp.now(),
-        },
-        { merge: true },
-      );
-      return resolvedPreferred;
+        });
+      }
     }
 
     const customer = await stripe.customers.create({
