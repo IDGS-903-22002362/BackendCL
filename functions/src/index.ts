@@ -30,6 +30,7 @@ import { processNotificationEventTrigger } from "./services/notifications/notifi
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
+import { syncLigaMxData } from "./liga-mx.cron";
 import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
 
 let apiAiConfigValidated = false;
@@ -75,3 +76,4 @@ export const probableRepurchaseNotifications =
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
 export const userLevelSyncFunction = syncUserLevelOnPointsChange;
+export const syncLigaMxDataFunction = syncLigaMxData;
