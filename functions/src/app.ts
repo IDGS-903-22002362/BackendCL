@@ -13,19 +13,10 @@ import {
   blockDebugInProduction,
   optionalAppCheckMiddleware,
 } from "./utils/middlewares";
+import { getAllowedCorsOriginsWithStore } from "./config/cors.config";
 
-const getCorsOptions = (): CorsOptions => {
-  const configuredOrigins = (process.env.CORS_ALLOWED_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  const storeOrigin = process.env.STORE_PUBLIC_BASE_URL?.trim();
-  const allowedOrigins = [
-    ...new Set([
-      ...configuredOrigins,
-      ...(storeOrigin ? [storeOrigin] : []),
-    ]),
-  ];
+const buildCorsOptions = (): CorsOptions => {
+  const allowedOrigins = getAllowedCorsOriginsWithStore();
   const isCloudRuntime = Boolean(
     process.env.K_SERVICE || process.env.FUNCTION_NAME,
   );
@@ -51,6 +42,16 @@ const getCorsOptions = (): CorsOptions => {
   };
 };
 
+let corsOptionsCache: CorsOptions | null = null;
+
+const getCorsOptions = (): CorsOptions => {
+  if (!corsOptionsCache) {
+    corsOptionsCache = buildCorsOptions();
+  }
+
+  return corsOptionsCache;
+};
+
 const app = express();
 const isProductionRuntime =
   process.env.NODE_ENV === "production" ||
@@ -63,7 +64,7 @@ app.use(
       : false,
   }),
 );
-app.use(cors(getCorsOptions()));
+app.use((req, res, next) => cors(getCorsOptions())(req, res, next));
 app.use(requestContextMiddleware);
 app.use(blockDebugInProduction);
 app.use(optionalAppCheckMiddleware);
