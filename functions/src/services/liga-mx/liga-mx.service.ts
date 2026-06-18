@@ -3,14 +3,22 @@ import { firestoreApp } from "../../config/app.firebase";
 import {
   configuracionLigaMx,
   obtenerPerfilDivision,
-  resolverIdTorneoActual,
   validarConfiguracionLigaMx,
 } from "../../config/liga-mx.config";
+import {
+  contextoGuardadoCoincideConResuelto,
+  obtenerCombinacionesContextoAProbar,
+  parsearFechaPartidoApiMs,
+  seleccionarContextoActivoDesdeSenales,
+  SenalesContextoLigaMx,
+  TemporadaLigaMxApi,
+} from "./liga-mx-context.resolver";
 import {
   construirCalendarioActual,
   construirClasificacionActual,
   construirContextoActual,
   construirPlantillaActual,
+  fusionarPartidosCalendario,
   esMarcadorOficial,
   esPartidoConcluido,
   normalizarDetallePartido,
@@ -75,10 +83,9 @@ class LigaMxService {
 
   async runScheduledSync(): Promise<ResumenEjecucionSincronizacion> {
     await this.limpiarColeccionesLegado();
-    const { contexto, cambioContexto } = await this.sincronizarContextoActual(false);
+    const { contexto, cambioContexto } = await this.sincronizarContextoActual(true);
 
     if (cambioContexto) {
-      await this.limpiarDatosVigentes();
       await firestoreApp.collection(COLECCIONES.contextoActual).doc("actual").set(contexto);
     }
 
@@ -186,9 +193,8 @@ class LigaMxService {
 
   async getContext(): Promise<ContextoLigaMxDoc> {
     const existente = await this.obtenerContextoActual();
-    const idTorneoActual = resolverIdTorneoActual();
 
-    if (existente && existente.torneoActual.id === idTorneoActual) {
+    if (existente) {
       return existente;
     }
 
@@ -219,11 +225,7 @@ class LigaMxService {
       }
     }
 
-    if (
-      existente &&
-      existente.temporadaActual.id === contexto.temporadaActual.id &&
-      existente.torneoActual.id === contexto.torneoActual.id
-    ) {
+    if (existente) {
       return existente;
     }
 
@@ -231,30 +233,34 @@ class LigaMxService {
   }
 
   async getStandings(divisionKey: DivisionKey): Promise<ClasificacionLigaMxDoc> {
-    const contexto = await this.getContext();
+    await this.getContext();
     const existente = await this.obtenerClasificacionActual(divisionKey);
 
-    if (
-      existente &&
-      existente.temporadaActual.id === contexto.temporadaActual.id &&
-      existente.torneoActual.id === contexto.torneoActual.id
-    ) {
+    if (existente) {
       return existente;
+    }
+
+    const contexto = await this.obtenerContextoActual();
+
+    if (!contexto) {
+      throw new Error("No hay clasificación disponible para Liga MX");
     }
 
     return this.sincronizarClasificacionActual(divisionKey, contexto, true);
   }
 
   async getRoster(divisionKey: DivisionKey): Promise<PlantillaLigaMxDoc> {
-    const contexto = await this.getContext();
+    await this.getContext();
     const existente = await this.obtenerPlantillaActual(divisionKey);
 
-    if (
-      existente &&
-      existente.temporadaActual.id === contexto.temporadaActual.id &&
-      existente.torneoActual.id === contexto.torneoActual.id
-    ) {
+    if (existente) {
       return existente;
+    }
+
+    const contexto = await this.obtenerContextoActual();
+
+    if (!contexto) {
+      throw new Error("No hay plantilla disponible para Liga MX");
     }
 
     return this.sincronizarPlantillaActual(divisionKey, contexto, true);
@@ -325,6 +331,59 @@ class LigaMxService {
     return this.sincronizarDetallePartido(partido, true);
   }
 
+  private async detectarContextoActivoDesdeApi(): Promise<{
+    temporadaActual: ContextoLigaMxDoc["temporadaActual"];
+    idTorneoActual: number;
+  }> {
+    const temporadas = await this.getJson<TemporadaLigaMxApi[]>("/v2/temporadas");
+    const combinaciones = obtenerCombinacionesContextoAProbar(temporadas);
+    const perfilVaronil = obtenerPerfilDivision("varonil");
+    const senales: SenalesContextoLigaMx[] = [];
+
+    for (const combinacion of combinaciones) {
+      const [tabla, partidos] = await Promise.all([
+        this.getJson<Array<Record<string, unknown>>>("/v2/tablaGeneral", {
+          idTemporada: combinacion.idTemporada,
+          idTorneo: combinacion.idTorneo,
+          idDivision: perfilVaronil.idDivision,
+        }),
+        this.getJson<Array<Record<string, unknown>>>("/v2/club/partidosClub", {
+          idTemporada: combinacion.idTemporada,
+          idTorneo: combinacion.idTorneo,
+          idDivision: perfilVaronil.idDivision,
+          idClub: perfilVaronil.idClub,
+        }),
+      ]);
+
+      senales.push({
+        idTemporada: combinacion.idTemporada,
+        nombreTemporada: combinacion.nombreTemporada,
+        idTorneo: combinacion.idTorneo,
+        equiposTabla: tabla.length,
+        juegosJugadosTabla: tabla.reduce(
+          (total, fila) => total + (Number(fila.jj) || 0),
+          0,
+        ),
+        partidosPublicados: partidos.length,
+        fechasPartidoMs: partidos
+          .map((partido) =>
+            parsearFechaPartidoApiMs(partido.matchDate ?? partido.fecha),
+          )
+          .filter((fechaMs): fechaMs is number => fechaMs !== null),
+      });
+    }
+
+    const resuelto = seleccionarContextoActivoDesdeSenales(senales);
+
+    if (!resuelto) {
+      throw new Error(
+        "No se pudo detectar el torneo/temporada activos desde la API de Liga MX",
+      );
+    }
+
+    return resuelto;
+  }
+
   private async sincronizarContextoActual(force: boolean): Promise<{
     contexto: ContextoLigaMxDoc;
     cambioContexto: boolean;
@@ -343,12 +402,20 @@ class LigaMxService {
 
     try {
       await this.marcarIntento(claveEstado);
-      const temporadas = await this.getJson<Array<{ idTemporada: number; nombre: string }>>(
-        "/v2/temporadas",
-      );
+      const resuelto = await this.detectarContextoActivoDesdeApi();
+
+      if (
+        !force &&
+        existente &&
+        contextoGuardadoCoincideConResuelto(existente, resuelto)
+      ) {
+        await this.marcarExito(claveEstado, configuracionLigaMx.ttlMs.contexto);
+        return { contexto: existente, cambioContexto: false };
+      }
+
       const contexto = construirContextoActual(
-        temporadas,
-        resolverIdTorneoActual(),
+        resuelto.temporadaActual,
+        resuelto.idTorneoActual,
         new Date().toISOString(),
       );
       const cambioContexto =
@@ -396,13 +463,14 @@ class LigaMxService {
         },
       );
       const sincronizadoEn = new Date().toISOString();
-      const partidos = partidosRaw
+      const partidosNuevos = partidosRaw
         .map((item) => normalizarPartidoCalendario(item, divisionKey, sincronizadoEn))
         .sort((left, right) => {
           const leftDate = left.fechaHoraPartido ? new Date(left.fechaHoraPartido).getTime() : 0;
           const rightDate = right.fechaHoraPartido ? new Date(right.fechaHoraPartido).getTime() : 0;
           return leftDate - rightDate;
         });
+      const partidos = fusionarPartidosCalendario(existente?.partidos ?? [], partidosNuevos);
       const payload = construirCalendarioActual(
         divisionKey,
         contexto.temporadaActual,
@@ -412,7 +480,7 @@ class LigaMxService {
       );
 
       await ref.set(payload);
-      await this.sincronizarPartidosActuales(divisionKey, payload.partidos);
+      await this.sincronizarPartidosActuales(divisionKey, payload.partidos, contexto);
       await this.marcarExito(
         claveEstado,
         ttlOverrideMs ?? configuracionLigaMx.ttlMs.calendario,
@@ -494,16 +562,30 @@ class LigaMxService {
         cuerpoTecnico: Array<Record<string, unknown>>;
       }>(`/v2/${contexto.torneoActual.id}/plantel/${perfilDivision.idClub}`);
       const sincronizadoEn = new Date().toISOString();
+      const jugadoresNormalizados = Array.isArray(plantillaRaw.jugadores)
+        ? plantillaRaw.jugadores.map((item) => normalizarJugadorPlantilla(item))
+        : [];
+      const cuerpoTecnicoNormalizado = Array.isArray(plantillaRaw.cuerpoTecnico)
+        ? plantillaRaw.cuerpoTecnico.map((item) => normalizarCuerpoTecnico(item))
+        : [];
+      const plantillaPublicada =
+        jugadoresNormalizados.length > 0 || cuerpoTecnicoNormalizado.length > 0;
+
+      if (
+        !plantillaPublicada &&
+        existente &&
+        (existente.jugadores.length > 0 || existente.cuerpoTecnico.length > 0)
+      ) {
+        await this.marcarExito(claveEstado, configuracionLigaMx.ttlMs.plantilla);
+        return existente;
+      }
+
       const payload = construirPlantillaActual(
         divisionKey,
         contexto.temporadaActual,
         contexto.torneoActual,
-        Array.isArray(plantillaRaw.jugadores)
-          ? plantillaRaw.jugadores.map((item) => normalizarJugadorPlantilla(item))
-          : [],
-        Array.isArray(plantillaRaw.cuerpoTecnico)
-          ? plantillaRaw.cuerpoTecnico.map((item) => normalizarCuerpoTecnico(item))
-          : [],
+        jugadoresNormalizados,
+        cuerpoTecnicoNormalizado,
         sincronizadoEn,
       );
 
@@ -513,6 +595,11 @@ class LigaMxService {
       return payload;
     } catch (error) {
       await this.marcarError(claveEstado, error);
+
+      if (existente) {
+        return existente;
+      }
+
       throw error;
     }
   }
@@ -626,6 +713,7 @@ class LigaMxService {
   private async sincronizarPartidosActuales(
     divisionKey: DivisionKey,
     partidosActuales: PartidoLigaMxDoc[],
+    contexto: ContextoLigaMxDoc,
   ): Promise<void> {
     const batch = firestoreApp.batch();
     const snapshotExistente = await firestoreApp
@@ -643,10 +731,21 @@ class LigaMxService {
     });
 
     snapshotExistente.docs.forEach((doc) => {
-      if (!idsNuevos.has(doc.id)) {
-        batch.delete(doc.ref);
-        batch.delete(firestoreApp.collection(COLECCIONES.detallesPartidoActuales).doc(doc.id));
+      if (idsNuevos.has(doc.id)) {
+        return;
       }
+
+      const partidoExistente = doc.data() as PartidoLigaMxDoc;
+      const perteneceAlContextoActual =
+        partidoExistente.temporadaActual.id === contexto.temporadaActual.id &&
+        partidoExistente.torneoActual.id === contexto.torneoActual.id;
+
+      if (!perteneceAlContextoActual) {
+        return;
+      }
+
+      batch.delete(doc.ref);
+      batch.delete(firestoreApp.collection(COLECCIONES.detallesPartidoActuales).doc(doc.id));
     });
 
     await batch.commit();
@@ -701,12 +800,6 @@ class LigaMxService {
     });
 
     await batch.commit();
-  }
-
-  private async limpiarDatosVigentes(): Promise<void> {
-    for (const collectionName of Object.values(COLECCIONES)) {
-      await this.vaciarColeccion(collectionName);
-    }
   }
 
   private async limpiarColeccionesLegado(): Promise<void> {

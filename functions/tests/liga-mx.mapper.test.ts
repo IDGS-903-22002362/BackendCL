@@ -7,27 +7,53 @@ import {
   normalizarEventoNarracion,
   normalizarJugadorPlantilla,
   normalizarPartidoCalendario,
+  fusionarPartidosCalendario,
   partidoDentroDeVentanaEnVivo,
-  seleccionarTemporadaActual,
 } from "../src/services/liga-mx/liga-mx.mapper";
-import { resolverIdTorneoActual } from "../src/config/liga-mx.config";
+import { ID_TORNEO_CLAUSURA } from "../src/config/liga-mx.config";
 
 describe("liga-mx mapper", () => {
-  it("selects the current season based on the current date", () => {
-    const seasons = [
-      { idTemporada: 75, nombre: "2024-2025" },
-      { idTemporada: 76, nombre: "2025-2026" },
-      { idTemporada: 77, nombre: "2026-2027" },
-    ];
 
-    expect(seleccionarTemporadaActual(seasons, new Date("2026-03-27T12:00:00Z"))).toEqual({
-      id: 76,
-      nombre: "2025-2026",
-    });
-    expect(seleccionarTemporadaActual(seasons, new Date("2026-08-01T12:00:00Z"))).toEqual({
-      id: 77,
-      nombre: "2026-2027",
-    });
+  it("merges historical and current calendar matches without dropping old fixtures", () => {
+    const partidoAnterior = normalizarPartidoCalendario(
+      {
+        idPartido: 151200,
+        idDivision: 1,
+        idTemporada: 76,
+        temporada: "2025-2026",
+        idTorneo: 2,
+        torneo: "Clausura",
+        idClubLocal: 9,
+        clubLocal: "León",
+        idClubVisita: 12566,
+        clubVisita: "Cruz Azul",
+        matchDate: "2026-04-25 19:00:00.000",
+      },
+      "varonil",
+      "2026-04-25T12:00:00.000Z",
+    );
+    const partidoNuevo = normalizarPartidoCalendario(
+      {
+        idPartido: 151400,
+        idDivision: 1,
+        idTemporada: 77,
+        temporada: "2026-2027",
+        idTorneo: 1,
+        torneo: "Apertura",
+        idClubLocal: 9,
+        clubLocal: "León",
+        idClubVisita: 12571,
+        clubVisita: "Atlas",
+        matchDate: "2026-07-17 19:00:00.000",
+      },
+      "varonil",
+      "2026-06-18T12:00:00.000Z",
+    );
+
+    const fusionados = fusionarPartidosCalendario([partidoAnterior], [partidoNuevo]);
+
+    expect(fusionados).toHaveLength(2);
+    expect(fusionados.map((partido) => partido.id)).toEqual(["151200", "151400"]);
   });
 
   it("normalizes a match payload into frontend-friendly fields", () => {
@@ -92,13 +118,9 @@ describe("liga-mx mapper", () => {
 
   it("builds normalized context and live window checks", () => {
     const payload = construirContextoActual(
-      [
-        { idTemporada: 76, nombre: "2025-2026" },
-        { idTemporada: 77, nombre: "2026-2027" },
-      ],
-      resolverIdTorneoActual(new Date("2026-03-27T12:00:00Z")),
+      { id: 76, nombre: "2025-2026" },
+      ID_TORNEO_CLAUSURA,
       "2026-03-27T12:00:00.000Z",
-      new Date("2026-03-27T12:00:00Z"),
     );
 
     expect(payload.temporadaActual.nombre).toBe("2025-2026");
