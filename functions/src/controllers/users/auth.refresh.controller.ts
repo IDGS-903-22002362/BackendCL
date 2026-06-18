@@ -52,11 +52,16 @@ export const refreshToken = async (req: Request, res: Response) => {
         }
 
         // Generar nuevo token con datos actualizados
+        const isAdminUser =
+            userData.rol === RolUsuario.ADMIN ||
+            userData.rol === RolUsuario.EMPLEADO;
+
         const newPayload = {
             uid: userData.uid,
             email: userData.email,
             rol: userData.rol as RolUsuario,
             nombre: userData.nombre,
+            admin: isAdminUser,
         };
 
         const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
