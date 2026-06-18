@@ -12,7 +12,6 @@ import "./config/env.bootstrap";
  */
 
 import { onRequest } from "firebase-functions/v2/https";
-import { corsAllowedOriginsParam } from "./config/cors.config";
 import app from "./app";
 import { assertAiConfig, getAiRuntimeSummary } from "./config/ai.config";
 import { sendLowStockDailyDigest } from "./stock-alert.cron";
@@ -34,9 +33,6 @@ import { scheduledAccountDeletion } from "./deletion-scheduler.function";
 import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
 
 let apiAiConfigValidated = false;
-
-// Vincula CORS_ALLOWED_ORIGINS al deploy de la función `api`.
-corsAllowedOriginsParam.value();
 
 const validateApiAiConfigOnce = (): void => {
   if (apiAiConfigValidated) {

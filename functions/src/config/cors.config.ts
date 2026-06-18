@@ -1,17 +1,9 @@
-﻿import { defineString } from "firebase-functions/params";
-
 const PRODUCTION_CORS_ORIGINS = [
   "https://ecomerce-next-front--e-comerce-leon.us-central1.hosted.app",
   "https://tiendalaguarida.com",
   "https://www.tiendalaguarida.com",
   "http://localhost:3001",
 ] as const;
-
-export const corsAllowedOriginsParam = defineString("CORS_ALLOWED_ORIGINS", {
-  default: PRODUCTION_CORS_ORIGINS.join(","),
-  description:
-    "Origenes CORS permitidos (separados por coma) para el storefront.",
-});
 
 function parseOrigins(raw: string | undefined): string[] {
   return (raw ?? "")
@@ -26,7 +18,7 @@ function readConfiguredOrigins(): string[] {
     return fromEnv;
   }
 
-  return parseOrigins(corsAllowedOriginsParam.value());
+  return [...PRODUCTION_CORS_ORIGINS];
 }
 
 export function getAllowedCorsOriginsWithStore(): string[] {
