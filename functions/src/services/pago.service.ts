@@ -33,6 +33,7 @@ import {
 } from "../lib/stripe";
 import pickupOrderService from "./pickup-order.service";
 import paidOrderFinalizerService from "./paid-order-finalizer.service";
+import ordenService from "./orden.service";
 import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
@@ -2280,6 +2281,8 @@ async createStripeCheckoutSession(
       });
     });
 
+    await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+
     return {
       outcome: "processed",
       eventId: event.id,
@@ -2472,6 +2475,8 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
     });
+
+    await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
 
     return {
       outcome: "processed",

@@ -191,6 +191,21 @@ class InventoryService {
     return cantidadNueva;
   }
 
+  async orderHasSaleMovements(ordenId: string): Promise<boolean> {
+    if (!ordenId) {
+      return false;
+    }
+
+    const snapshot = await firestoreTienda
+      .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+      .where("ordenId", "==", ordenId)
+      .where("tipo", "==", TipoMovimientoInventario.VENTA)
+      .limit(1)
+      .get();
+
+    return !snapshot.empty;
+  }
+
   async registerMovement(
     payload: RegistrarMovimientoInventarioDTO,
   ): Promise<MovimientoInventario> {

@@ -5,8 +5,8 @@
  * IMPORTANTE:
  * - Recalcula totales en servidor (ignora valores del cliente por seguridad)
  * - IVA = 0% (simplificación temporal, cambiar cuando se requiera)
- * - REDUCE STOCK automáticamente al crear orden (transacciones Firestore)
- * - RESTAURA STOCK automáticamente al cancelar orden (transacciones Firestore)
+ * - Reserva stock solo al confirmar pago (movimiento VENTA)
+ * - RESTAURA STOCK al cancelar orden solo si el pago ya descontó inventario
  * - Usuario autenticado definido en controller (req.user.uid)
  */
 
@@ -717,34 +717,7 @@ subtotalFinal: subtotalCalculado,
         .collection(ORDENES_COLLECTION)
         .add(nuevaOrden);
 
-      // PASO 5: Reducir stock de productos y registrar movimientos de venta
-      console.log(
-        `📦 Reduciendo stock de ${itemsValidados.length} productos...`,
-      );
-      try {
-        for (const item of itemsValidados) {
-          await inventoryService.registerMovement({
-            tipo: TipoMovimientoInventario.VENTA,
-            productoId: item.productoId,
-            tallaId: item.tallaId,
-            cantidad: item.cantidad,
-            ordenId: docRef.id,
-            referencia: docRef.id,
-            motivo: "Venta asociada a creación de orden",
-            usuarioId: data.usuarioId,
-          });
-        }
-        console.log(`✅ Stock reducido exitosamente para todos los productos`);
-      } catch (stockError) {
-        // Si falla la reducción de stock, eliminar la orden creada (rollback manual)
-        console.error(
-          `❌ Error al reducir stock, eliminando orden ${docRef.id}`,
-        );
-        await docRef.delete();
-        throw new Error(
-          `Error al reducir stock: ${stockError instanceof Error ? stockError.message : "Error desconocido"}. Orden no creada.`,
-        );
-      }
+      // PASO 5: El stock se descuenta al confirmar el pago, no al crear la orden.
 
       // PASO 6: Obtener documento creado con ID
       const ordenCreada: Orden = {
@@ -1637,30 +1610,36 @@ subtotalFinal: subtotalCalculado,
         throw error;
       }
 
-      // PASO 5: Restaurar stock de productos y registrar devoluciones
-      console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);
-      try {
-        for (const item of orden.items) {
-          await inventoryService.registerMovement({
-            tipo: TipoMovimientoInventario.DEVOLUCION,
-            productoId: item.productoId,
-            tallaId: item.tallaId,
-            cantidad: item.cantidad,
-            ordenId,
-            referencia: ordenId,
-            motivo: "Devolución por cancelación de orden",
-            usuarioId: orden.usuarioId,
-          });
+      const stockWasCommitted =
+        await inventoryService.orderHasSaleMovements(ordenId);
+
+      if (stockWasCommitted) {
+        console.log(`📦 Restaurando stock de ${orden.items.length} productos...`);
+        try {
+          for (const item of orden.items) {
+            await inventoryService.registerMovement({
+              tipo: TipoMovimientoInventario.DEVOLUCION,
+              productoId: item.productoId,
+              tallaId: item.tallaId,
+              cantidad: item.cantidad,
+              ordenId,
+              referencia: ordenId,
+              motivo: "Devolución por cancelación de orden",
+              usuarioId: orden.usuarioId,
+              idempotencyKey: `cancel:${ordenId}:${item.productoId}:${item.tallaId ?? "_"}`,
+            });
+          }
+          console.log(`✅ Stock restaurado exitosamente`);
+        } catch (stockError) {
+          console.error(
+            `⚠️ Error al restaurar stock (orden se cancelará de todas formas):`,
+            stockError,
+          );
         }
-        console.log(`✅ Stock restaurado exitosamente`);
-      } catch (stockError) {
-        // Si falla la restauración de stock, loggear error pero continuar
-        // (la orden se marca como cancelada de todas formas para evitar bloqueos)
-        console.error(
-          `⚠️ Error al restaurar stock (orden se cancelará de todas formas):`,
-          stockError,
+      } else {
+        console.log(
+          `ℹ️ Orden ${ordenId} sin movimiento de venta; no se restaura inventario`,
         );
-        // No lanzar error aquí, permitir que la cancelación continúe
       }
 
       // PASO 6: Actualizar estado a CANCELADA en Firestore
@@ -1912,6 +1891,80 @@ subtotalFinal: subtotalCalculado,
       createdAt: orden.createdAt,
       updatedAt: orden.updatedAt,
     };
+  }
+
+  /**
+   * Descuenta inventario cuando el pago queda confirmado.
+   * Es idempotente: si ya existen movimientos VENTA para la orden, no duplica.
+   */
+  async commitStockForOrder(ordenId: string): Promise<void> {
+    if (!ordenId) {
+      return;
+    }
+
+    if (await inventoryService.orderHasSaleMovements(ordenId)) {
+      return;
+    }
+
+    const ordenDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(ordenId)
+      .get();
+
+    if (!ordenDoc.exists) {
+      throw new Error(`La orden con ID "${ordenId}" no existe`);
+    }
+
+    const orden = ordenDoc.data() as Orden;
+
+    for (const item of orden.items) {
+      await inventoryService.registerMovement({
+        tipo: TipoMovimientoInventario.VENTA,
+        productoId: item.productoId,
+        tallaId: item.tallaId,
+        cantidad: item.cantidad,
+        ordenId,
+        referencia: ordenId,
+        motivo: "Venta confirmada por pago",
+        usuarioId: orden.usuarioId,
+        idempotencyKey: `paid:${ordenId}:${item.productoId}:${item.tallaId ?? "_"}`,
+      });
+    }
+  }
+
+  /**
+   * Cancela una orden impaga y libera inventario solo si ya se había descontado.
+   */
+  async releaseUnpaidOrder(ordenId: string): Promise<void> {
+    if (!ordenId) {
+      return;
+    }
+
+    const ordenDoc = await firestoreTienda
+      .collection(ORDENES_COLLECTION)
+      .doc(ordenId)
+      .get();
+
+    if (!ordenDoc.exists) {
+      return;
+    }
+
+    const orden = ordenDoc.data() as Orden;
+    if (orden.estado === EstadoOrden.CANCELADA) {
+      return;
+    }
+
+    if (
+      orden.estado !== EstadoOrden.PENDIENTE &&
+      orden.estado !== EstadoOrden.CONFIRMADA
+    ) {
+      return;
+    }
+
+    await this.cancelarOrden(ordenId, {
+      uid: "system-payment-failure",
+      rol: RolUsuario.ADMIN,
+    });
   }
 }
 
