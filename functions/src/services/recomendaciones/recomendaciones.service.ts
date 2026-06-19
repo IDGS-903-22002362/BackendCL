@@ -133,7 +133,7 @@ class RecomendacionesService {
     const exclusionIds = excludeProductIds([], [
       ...(context.exclusionIds ?? []),
       ...(params.seccion?.exclusionProductoIds ?? []),
-      ...config.exclusionGlobalProductoIds,
+      ...(config.exclusionGlobalProductoIds ?? []),
     ]);
 
     const enrichedContext: RecomendacionContexto = {
@@ -213,11 +213,11 @@ class RecomendacionesService {
 
   async getHomeRecommendations(context: RecomendacionContexto): Promise<RecomendacionHomeRespuesta> {
     const config = await configService.getConfig();
-    const secciones = config.secciones
+    const secciones = (config.secciones ?? [])
       .filter((seccion) => seccion.activo && seccion.superficie === context.superficie)
       .sort((left, right) => left.orden - right.orden);
 
-    const results = await Promise.all(
+    const results = await Promise.allSettled(
       secciones.map(async (seccion) =>
         this.getRecommendations({
           estrategia: seccion.estrategia,
@@ -227,8 +227,16 @@ class RecomendacionesService {
       ),
     );
 
+    const seccionesOk = results
+      .filter(
+        (result): result is PromiseFulfilledResult<RecomendacionRespuesta> =>
+          result.status === "fulfilled",
+      )
+      .map((result) => result.value)
+      .filter((section) => section.items.length > 0);
+
     return {
-      secciones: results.filter((section) => section.items.length > 0),
+      secciones: seccionesOk,
     };
   }
 }

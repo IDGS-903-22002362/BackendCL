@@ -152,22 +152,22 @@ class ProductCardsService {
         | undefined;
 
       if (withOffers && product) {
-        const mejorOferta = seleccionarMejorOferta(
-          ofertasActivas,
-          {
-            id: product.id || productId,
-            precioPublico: product.precioPublico,
-            categoriaId: product.categoriaId,
-            lineaId: product.lineaId,
-          },
-        );
+        const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
+          id: product.id || productId,
+          precioPublico: product.precioPublico,
+          categoriaId: product.categoriaId,
+          lineaId: product.lineaId,
+        });
 
         if (mejorOferta) {
           offer = {
             precioFinal: mejorOferta.precioFinal,
             ofertaId: mejorOferta.oferta.id || "",
             ofertaTitulo: mejorOferta.oferta.titulo || "Oferta",
-            descuentoTotal: Math.max(0, product.precioPublico - mejorOferta.precioFinal),
+            descuentoTotal: Math.max(
+              0,
+              product.precioPublico - mejorOferta.precioFinal,
+            ),
           };
         }
       }

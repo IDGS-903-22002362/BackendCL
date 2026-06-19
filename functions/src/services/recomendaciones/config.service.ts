@@ -1,8 +1,43 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../../config/firebase";
 import { RecomendacionConfigGlobal } from "../../models/recomendaciones.model";
-import { buildDefaultConfig } from "./recomendaciones.config";
+import {
+  buildDefaultConfig,
+  RECOMENDACIONES_DEFAULT_CACHE_TTL_SECONDS,
+} from "./recomendaciones.config";
 import { recomendacionCollections } from "./collections";
+
+function normalizeConfig(
+  data?: Partial<RecomendacionConfigGlobal>,
+): RecomendacionConfigGlobal {
+  const defaults = buildDefaultConfig();
+  const source = data ?? {};
+
+  return {
+    ...defaults,
+    ...source,
+    id: "global",
+    secciones:
+      Array.isArray(source.secciones) && source.secciones.length > 0
+        ? source.secciones
+        : defaults.secciones,
+    pesos:
+      Array.isArray(source.pesos) && source.pesos.length > 0
+        ? source.pesos
+        : defaults.pesos,
+    exclusionGlobalProductoIds: source.exclusionGlobalProductoIds ?? [],
+    retencionEventosDias:
+      source.retencionEventosDias ?? defaults.retencionEventosDias,
+    cacheTtlSegundos:
+      source.cacheTtlSegundos ?? RECOMENDACIONES_DEFAULT_CACHE_TTL_SECONDS,
+    diversificacionMaxPorCategoria:
+      source.diversificacionMaxPorCategoria ??
+      defaults.diversificacionMaxPorCategoria,
+    diversificacionMaxPorLinea:
+      source.diversificacionMaxPorLinea ?? defaults.diversificacionMaxPorLinea,
+    updatedAt: source.updatedAt ?? Timestamp.now(),
+  };
+}
 
 class ConfigService {
   async getConfig(): Promise<RecomendacionConfigGlobal> {
@@ -12,16 +47,12 @@ class ConfigService {
       .get();
 
     if (!snapshot.exists) {
-      const defaults = buildDefaultConfig();
-      const payload: RecomendacionConfigGlobal = {
-        ...defaults,
-        updatedAt: Timestamp.now(),
-      };
+      const payload = normalizeConfig();
       await snapshot.ref.set(payload);
       return payload;
     }
 
-    return snapshot.data() as RecomendacionConfigGlobal;
+    return normalizeConfig(snapshot.data() as Partial<RecomendacionConfigGlobal>);
   }
 
   async updateConfig(
@@ -29,13 +60,11 @@ class ConfigService {
     updatedBy?: string,
   ): Promise<RecomendacionConfigGlobal> {
     const current = await this.getConfig();
-    const payload: RecomendacionConfigGlobal = {
+    const payload = normalizeConfig({
       ...current,
       ...partial,
-      id: "global",
-      updatedAt: Timestamp.now(),
       updatedBy,
-    };
+    });
 
     await firestoreTienda
       .collection(recomendacionCollections.config)

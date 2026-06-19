@@ -900,15 +900,6 @@
       "collectionId": "temp_verification_codes",
       "fields": [
         {
-          "fieldPath": "expiresAt",
-          "mode": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionId": "temp_verification_codes",
-      "fields": [
-        {
           "fieldPath": "email",
           "mode": "ASCENDING"
         },
@@ -947,16 +938,6 @@
       ]
     },
     {
-      "collectionGroup": "recomendacionMetricas",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "fecha",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "productos",
       "queryScope": "COLLECTION",
       "fields": [
@@ -988,6 +969,44 @@
     },
     {
       "collectionGroup": "recomendacionCache",
+      "fieldPath": "expiresAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "recomendacionEventos",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "recomendacionMetricas",
+      "fieldPath": "fecha",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "temp_verification_codes",
       "fieldPath": "expiresAt",
       "indexes": [
         {

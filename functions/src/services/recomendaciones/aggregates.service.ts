@@ -41,7 +41,12 @@ class AggregatesService {
     }
 
     const data = snapshot.data() as RecomendacionAgregadoDocumento;
-    if (data.expiresAt.toMillis() <= Date.now()) {
+    const expiresAt = data.expiresAt;
+    if (
+      expiresAt &&
+      typeof expiresAt.toMillis === "function" &&
+      expiresAt.toMillis() <= Date.now()
+    ) {
       return null;
     }
 
@@ -274,7 +279,7 @@ class AggregatesService {
       return [];
     }
 
-    return aggregate.items.slice(0, limite).map((item) => ({
+    return (aggregate.items ?? []).slice(0, limite).map((item) => ({
       productoId: item.productoId,
       score: item.score,
       estrategia,

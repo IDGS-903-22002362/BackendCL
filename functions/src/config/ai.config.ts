@@ -34,6 +34,27 @@ const normalizeBaseUrl = (value: string | undefined): string | undefined => {
   return value.trim().replace(/\/+$/, "");
 };
 
+const parseFirebaseConfigProjectId = (): string | undefined => {
+  const raw = process.env.FIREBASE_CONFIG;
+  if (!raw) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { projectId?: string };
+    return parsed.projectId?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const resolveGcpProjectId = (): string | undefined =>
+  process.env.GCP_PROJECT_ID?.trim() ||
+  process.env.GOOGLE_CLOUD_PROJECT?.trim() ||
+  process.env.GCLOUD_PROJECT?.trim() ||
+  process.env.GCP_PROJECT?.trim() ||
+  parseFirebaseConfigProjectId();
+
 const resolveGeminiMode = (): GeminiExecutionMode => {
   const configuredMode = process.env.AI_GEMINI_MODE?.trim().toLowerCase();
 
@@ -101,14 +122,14 @@ export const aiConfig = {
     maxContextMessages: toInt(process.env.AI_CONTEXT_MAX_MESSAGES, 12),
     maxSummaryChars: toInt(process.env.AI_SUMMARY_MAX_CHARS, 2500),
     temperature: Number(process.env.AI_GEMINI_TEMPERATURE ?? 0.2),
-    project: process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    project: resolveGcpProjectId(),
     region:
       process.env.GCP_REGION ||
       process.env.GOOGLE_CLOUD_LOCATION ||
       "us-central1",
   },
   tryOn: {
-    project: process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    project: resolveGcpProjectId(),
     region:
       process.env.GCP_REGION ||
       process.env.GOOGLE_CLOUD_LOCATION ||
@@ -119,7 +140,7 @@ export const aiConfig = {
     pollIntervalMs: toInt(process.env.AI_TRYON_POLL_INTERVAL_MS, 4000),
   },
   previewMockup: {
-    project: process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT,
+    project: resolveGcpProjectId(),
     region:
       process.env.GCP_REGION ||
       process.env.GOOGLE_CLOUD_LOCATION ||
