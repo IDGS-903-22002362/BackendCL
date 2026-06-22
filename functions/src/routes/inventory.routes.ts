@@ -5,13 +5,20 @@ import {
 } from "../middleware/validation.middleware";
 import {
   listLowStockAlertsQuerySchema,
+  listInventoryDashboardQuerySchema,
   listInventoryMovementsQuerySchema,
+  listRecepcionesQuerySchema,
   registerInventoryAdjustmentSchema,
   registerInventoryMovementSchema,
+  createRecepcionSchema,
+  updateRecepcionLineasSchema,
+  confirmRecepcionSchema,
 } from "../middleware/validators/inventory.validator";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
 import * as commandController from "../controllers/inventory/inventory.command.controller";
 import * as queryController from "../controllers/inventory/inventory.query.controller";
+import * as receptionCommandController from "../controllers/inventory/inventory-reception.command.controller";
+import * as receptionQueryController from "../controllers/inventory/inventory-reception.query.controller";
 
 const router = Router();
 
@@ -351,6 +358,67 @@ router.get(
   requireAdmin,
   validateQuery(listLowStockAlertsQuerySchema),
   queryController.getLowStockAlerts,
+);
+
+router.get(
+  "/dashboard",
+  authMiddleware,
+  requireAdmin,
+  validateQuery(listInventoryDashboardQuerySchema),
+  queryController.getDashboard,
+);
+
+router.get(
+  "/diagnostico/:productoId",
+  authMiddleware,
+  requireAdmin,
+  queryController.getDiagnostic,
+);
+
+router.post(
+  "/recepciones",
+  authMiddleware,
+  requireAdmin,
+  validateBody(createRecepcionSchema),
+  receptionCommandController.createRecepcion,
+);
+
+router.get(
+  "/recepciones",
+  authMiddleware,
+  requireAdmin,
+  validateQuery(listRecepcionesQuerySchema),
+  receptionQueryController.listRecepciones,
+);
+
+router.get(
+  "/recepciones/:recepcionId",
+  authMiddleware,
+  requireAdmin,
+  receptionQueryController.getRecepcion,
+);
+
+router.put(
+  "/recepciones/:recepcionId/lineas",
+  authMiddleware,
+  requireAdmin,
+  validateBody(updateRecepcionLineasSchema),
+  receptionCommandController.updateRecepcionLineas,
+);
+
+router.post(
+  "/recepciones/:recepcionId/confirmar",
+  authMiddleware,
+  requireAdmin,
+  validateBody(confirmRecepcionSchema),
+  receptionCommandController.confirmRecepcion,
+);
+
+router.post(
+  "/recepciones/:recepcionId/cerrar",
+  authMiddleware,
+  requireAdmin,
+  receptionCommandController.closeRecepcion,
 );
 
 export default router;

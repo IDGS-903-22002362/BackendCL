@@ -1,22 +1,35 @@
 type DocData = Record<string, unknown>;
 
-let fakeFirestore: ReturnType<typeof createFakeFirestore>;
+const firestoreState: {
+  fake: ReturnType<typeof createFakeFirestore> | undefined;
+} = { fake: undefined };
+
+jest.mock("../src/services/recomendaciones/product-cards.service", () => ({
+  __esModule: true,
+  default: {},
+}));
 
 jest.mock("../src/config/firebase", () => ({
   firestoreTienda: {
-    collection: (name: string) => fakeFirestore.collection(name),
+    collection: (name: string) => firestoreState.fake!.collection(name),
   },
 }));
 
-jest.mock("../src/config/firebase.admin", () => ({
-  admin: {
-    firestore: {
-      Timestamp: {
-        now: () => new Date("2026-02-16T00:00:00.000Z"),
+jest.mock("../src/config/firebase.admin", () => {
+  class MockTimestamp {
+    static now() {
+      return new Date("2026-02-16T00:00:00.000Z");
+    }
+  }
+
+  return {
+    admin: {
+      firestore: {
+        Timestamp: MockTimestamp,
       },
     },
-  },
-}));
+  };
+});
 
 jest.mock("../src/services/stock-alert.service", () => ({
   __esModule: true,
@@ -106,7 +119,7 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
 
 describe("TASK-066 - Alertas de stock bajo", () => {
   beforeEach(() => {
-    fakeFirestore = createFakeFirestore({
+    firestoreState.fake = createFakeFirestore({
       productos: {
         prod_critical: {
           clave: "JER-001",

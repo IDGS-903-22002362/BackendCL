@@ -1,8 +1,12 @@
 import { firestoreTienda } from "../config/firebase";
 import { admin } from "../config/firebase.admin";
+import { INVENTORY_EMPLOYEE_ADJUSTMENT_LIMIT } from "../config/inventory.config";
 import {
   DashboardAlertasStock,
+  DashboardInventarioItem,
+  DiagnosticoInventarioProducto,
   ListarAlertasStockQuery,
+  ListarDashboardInventarioQuery,
   ListarMovimientosInventarioQuery,
   MovimientoInventario,
   RegistrarAjusteInventarioDTO,
@@ -10,19 +14,60 @@ import {
   RegistrarMovimientoInventarioDTO,
   TipoMovimientoInventario,
 } from "../models/inventario.model";
+import { RolUsuario } from "../models/usuario.model";
 import productService from "./product.service";
 import {
   completeInventarioPorTalla,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
+import { projectLegacyFromProductData } from "../utils/inventory-stock.util";
 
 const MOVIMIENTOS_INVENTARIO_COLLECTION = "movimientosInventario";
 const ORDENES_COLLECTION = "ordenes";
 const AJUSTES_IDEMPOTENCY_COLLECTION = "inventarioAjustesIdempotency";
 const MOVIMIENTOS_IDEMPOTENCY_COLLECTION = "inventarioMovimientosIdempotency";
 const POS_SALES_COLLECTION = "ventasPos";
+const PRODUCTOS_COLLECTION = "productos";
+const RESERVAS_INVENTARIO_COLLECTION = "reservasInventario";
 
 class InventoryService {
+  private assertMovementPermissions(
+    payload: RegistrarMovimientoInventarioDTO,
+  ): void {
+    const rol = payload.rolUsuario;
+    if (rol !== RolUsuario.EMPLEADO) {
+      return;
+    }
+
+    if (payload.tipo === TipoMovimientoInventario.VENTA) {
+      throw new Error("Los empleados no pueden registrar ventas manuales");
+    }
+
+    if (
+      payload.tipo === TipoMovimientoInventario.DEVOLUCION &&
+      !payload.ordenId
+    ) {
+      throw new Error(
+        "Los empleados solo pueden registrar devoluciones vinculadas a una orden",
+      );
+    }
+  }
+
+  private assertAdjustmentPermissions(
+    payload: RegistrarAjusteInventarioDTO,
+    cantidadActual: number,
+  ): void {
+    if (payload.rolUsuario !== RolUsuario.EMPLEADO) {
+      return;
+    }
+
+    const diferencia = Math.abs(payload.cantidadFisica - cantidadActual);
+    if (diferencia > INVENTORY_EMPLOYEE_ADJUSTMENT_LIMIT) {
+      throw new Error(
+        `El ajuste excede el límite de ${INVENTORY_EMPLOYEE_ADJUSTMENT_LIMIT} unidades para empleados. Solicita aprobación de un administrador.`,
+      );
+    }
+  }
   private buildMovementIdempotencyDocId(
     payload: RegistrarMovimientoInventarioDTO,
     idempotencyKey: string,
@@ -178,7 +223,8 @@ class InventoryService {
 
     if (
       tipo === TipoMovimientoInventario.ENTRADA ||
-      tipo === TipoMovimientoInventario.DEVOLUCION
+      tipo === TipoMovimientoInventario.DEVOLUCION ||
+      tipo === TipoMovimientoInventario.RECEPCION
     ) {
       return cantidadActual + payload.cantidad;
     }
@@ -215,6 +261,8 @@ class InventoryService {
         "Los ajustes de inventario deben registrarse mediante POST /api/inventario/ajustes",
       );
     }
+
+    this.assertMovementPermissions(payload);
 
     const tallaId = payload.tallaId?.trim();
     const idempotencyKey = payload.idempotencyKey?.trim();
@@ -284,6 +332,19 @@ class InventoryService {
     }
 
     return movimiento;
+  }
+
+  async registerRecepcionMovement(
+    payload: Omit<RegistrarMovimientoInventarioDTO, "tipo"> & {
+      recepcionId: string;
+    },
+  ): Promise<MovimientoInventario> {
+    return this.registerMovement({
+      ...payload,
+      tipo: TipoMovimientoInventario.RECEPCION,
+      referencia: payload.referencia ?? payload.recepcionId,
+      motivo: payload.motivo ?? "Recepción de mercancía confirmada",
+    });
   }
 
   private buildAdjustmentIdempotencyDocId(
@@ -366,6 +427,14 @@ class InventoryService {
     const { cantidadActual, tallaIdFinal } = await this.getCantidadActual(
       payload.productoId,
       tallaId,
+    );
+
+    this.assertAdjustmentPermissions(
+      {
+        ...payload,
+        tallaId,
+      },
+      cantidadActual,
     );
 
     const stockResult = await productService.updateStock(payload.productoId, {
@@ -532,6 +601,174 @@ class InventoryService {
         fechaCorte: new Date(),
       },
       alertas: alerts,
+    };
+  }
+
+  private mapDashboardItem(
+    productoId: string,
+    data: Record<string, unknown>,
+  ): DashboardInventarioItem {
+    const projection = projectLegacyFromProductData(data);
+    const stockMinimoGlobal = Number(data.stockMinimoGlobal ?? 5);
+    const globalBuckets = projection.inventarioGlobal;
+    const fisica = globalBuckets?.fisica ?? projection.existencias;
+    const reservada = globalBuckets?.reservada ?? 0;
+    const noDisponible = globalBuckets?.noDisponible ?? 0;
+    const entrante = globalBuckets?.entrante ?? 0;
+
+    return {
+      productoId,
+      clave: String(data.clave ?? ""),
+      descripcion: String(data.descripcion ?? ""),
+      lineaId: String(data.lineaId ?? ""),
+      categoriaId: String(data.categoriaId ?? ""),
+      tallaIds: projection.tallaIds,
+      existencias: projection.existencias,
+      fisica,
+      reservada,
+      noDisponible,
+      entrante,
+      disponible: projection.existencias,
+      inventarioPorTalla: projection.inventarioPorTalla.map((row) => ({
+        tallaId: row.tallaId,
+        cantidad: row.cantidad,
+        fisica: row.fisica ?? row.cantidad,
+        reservada: row.reservada ?? 0,
+        noDisponible: row.noDisponible ?? 0,
+        entrante: row.entrante ?? 0,
+      })),
+      stockMinimoGlobal,
+      bajoStock: projection.existencias < stockMinimoGlobal,
+    };
+  }
+
+  async listDashboard(
+    queryParams: ListarDashboardInventarioQuery,
+  ): Promise<{ items: DashboardInventarioItem[]; nextCursor: string | null }> {
+    let query: FirebaseFirestore.Query = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true);
+
+    if (queryParams.lineaId) {
+      query = query.where("lineaId", "==", queryParams.lineaId);
+    }
+    if (queryParams.categoriaId) {
+      query = query.where("categoriaId", "==", queryParams.categoriaId);
+    }
+
+    query = query.orderBy("descripcion").limit(queryParams.limit + 1);
+
+    if (queryParams.cursor) {
+      const cursorDoc = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .doc(queryParams.cursor)
+        .get();
+      if (cursorDoc.exists) {
+        query = query.startAfter(cursorDoc);
+      }
+    }
+
+    const snapshot = await query.get();
+    const hasNext = snapshot.docs.length > queryParams.limit;
+    const docs = hasNext
+      ? snapshot.docs.slice(0, queryParams.limit)
+      : snapshot.docs;
+
+    const q = queryParams.q?.trim().toLowerCase();
+    let items = docs.map((doc) =>
+      this.mapDashboardItem(doc.id, doc.data() as Record<string, unknown>),
+    );
+
+    if (q) {
+      items = items.filter(
+        (item) =>
+          item.clave.toLowerCase().includes(q) ||
+          item.descripcion.toLowerCase().includes(q) ||
+          item.productoId.toLowerCase().includes(q),
+      );
+    }
+
+    if (queryParams.soloBajoStock) {
+      items = items.filter((item) => item.bajoStock);
+    }
+
+    return {
+      items,
+      nextCursor: hasNext ? docs[docs.length - 1].id : null,
+    };
+  }
+
+  async diagnoseProduct(productoId: string): Promise<DiagnosticoInventarioProducto> {
+    const doc = await firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .doc(productoId)
+      .get();
+
+    if (!doc.exists) {
+      throw new Error(`Producto con ID ${productoId} no encontrado`);
+    }
+
+    const data = doc.data() as Record<string, unknown>;
+    const proyeccion = this.mapDashboardItem(productoId, data);
+    const problemas: string[] = [];
+    const tallaIds = normalizeTallaIds(data.tallaIds);
+
+    if (tallaIds.length > 0) {
+      const sumaTallas = proyeccion.inventarioPorTalla.reduce(
+        (acc, row) => acc + row.cantidad,
+        0,
+      );
+      if (sumaTallas !== proyeccion.existencias) {
+        problemas.push(
+          `existencias (${proyeccion.existencias}) no coincide con suma por talla (${sumaTallas})`,
+        );
+      }
+    }
+
+    for (const row of proyeccion.inventarioPorTalla) {
+      const esperado = Math.max(
+        0,
+        row.fisica - row.reservada - row.noDisponible,
+      );
+      if (esperado !== row.cantidad) {
+        problemas.push(
+          `talla ${row.tallaId}: cantidad (${row.cantidad}) != física-reservada-noDisponible (${esperado})`,
+        );
+      }
+    }
+
+    if (proyeccion.tallaIds.length === 0) {
+      const esperado = Math.max(0, proyeccion.fisica - proyeccion.reservada - proyeccion.noDisponible);
+      if (esperado !== proyeccion.disponible) {
+        problemas.push("inventario global inconsistente con disponible proyectado");
+      }
+    }
+
+    const reservasSnapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("productoId", "==", productoId)
+      .where("estado", "==", "activa")
+      .get();
+
+    const reservasActivas = reservasSnapshot.docs.reduce(
+      (acc, item) => acc + Number(item.data().cantidad ?? 0),
+      0,
+    );
+
+    if (reservasActivas !== proyeccion.reservada) {
+      problemas.push(
+        `reservada en producto (${proyeccion.reservada}) != suma reservas activas (${reservasActivas})`,
+      );
+    }
+
+    return {
+      productoId,
+      clave: proyeccion.clave,
+      descripcion: proyeccion.descripcion,
+      consistente: problemas.length === 0,
+      problemas,
+      proyeccion,
+      reservasActivas,
     };
   }
 }

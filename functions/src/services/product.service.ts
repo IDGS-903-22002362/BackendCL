@@ -26,12 +26,18 @@ import {
   AlertaStockProducto,
   AlertaStockTalla,
   ListarAlertasStockQuery,
+  TipoMovimientoInventario,
 } from "../models/inventario.model";
 import {
   completeInventarioPorTalla,
   deriveExistenciasFromSizeInventory,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
+import {
+  buildFirestoreInventoryPatch,
+  normalizeGlobalBuckets,
+  normalizeSizeBuckets,
+} from "../utils/inventory-stock.util";
 import stockAlertService from "./stock-alert.service";
 import productCardsService from "./recomendaciones/product-cards.service";
 
@@ -61,7 +67,7 @@ export class CatalogQueryError extends Error {
 export interface UpdateProductStockDTO {
   cantidadNueva: number;
   tallaId?: string;
-  tipo?: "entrada" | "salida" | "ajuste" | "venta" | "devolucion";
+  tipo?: TipoMovimientoInventario | "ajuste";
   motivo?: string;
   referencia?: string;
   ordenId?: string;
@@ -1702,10 +1708,28 @@ export class ProductService {
             inventarioMap.set(tallaId, cantidadNueva);
 
             tallaIdMovimiento = tallaId;
-            inventarioPorTallaActualizado = tallaIdsProducto.map((id) => ({
-              tallaId: id,
-              cantidad: inventarioMap.get(id) ?? 0,
-            }));
+            inventarioPorTallaActualizado = tallaIdsProducto.map((id) => {
+              const cantidad = inventarioMap.get(id) ?? 0;
+              const existing = inventarioPorTallaActual.find(
+                (row) => row.tallaId === id,
+              );
+              const buckets = normalizeSizeBuckets(id, existing, cantidad);
+              if (id === tallaId) {
+                buckets.fisica = Math.max(
+                  0,
+                  cantidadNueva + buckets.reservada + buckets.noDisponible,
+                );
+                buckets.disponible = cantidadNueva;
+              }
+              return {
+                tallaId: id,
+                cantidad: id === tallaId ? cantidadNueva : buckets.disponible,
+                fisica: buckets.fisica,
+                reservada: buckets.reservada,
+                noDisponible: buckets.noDisponible,
+                entrante: buckets.entrante,
+              };
+            });
 
             existenciasActualizadas = this.getDerivedExistencias(
               tallaIdsProducto,
@@ -1714,10 +1738,10 @@ export class ProductService {
             );
 
             transaction.update(docRef, {
-              inventarioPorTalla: inventarioPorTallaActualizado,
-              tallaIds: tallaIdsProducto,
-              existencias: existenciasActualizadas,
-              disponible: existenciasActualizadas > 0,
+              ...(buildFirestoreInventoryPatch({
+                tallaIds: tallaIdsProducto,
+                inventarioPorTalla: inventarioPorTallaActualizado,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>),
               updatedAt: now,
             });
           } else {
@@ -1729,12 +1753,22 @@ export class ProductService {
 
             cantidadAnterior = existenciasActualizadas;
             existenciasActualizadas = cantidadNueva;
+            const globalBuckets = normalizeGlobalBuckets(
+              data as unknown as Record<string, unknown>,
+              existenciasActualizadas,
+            );
+            globalBuckets.fisica = Math.max(
+              0,
+              cantidadNueva + globalBuckets.reservada + globalBuckets.noDisponible,
+            );
+            globalBuckets.disponible = cantidadNueva;
 
             transaction.update(docRef, {
-              tallaIds: [],
-              inventarioPorTalla: [],
-              existencias: existenciasActualizadas,
-              disponible: existenciasActualizadas > 0,
+              ...(buildFirestoreInventoryPatch({
+                tallaIds: [],
+                inventarioPorTalla: [],
+                inventarioGlobal: globalBuckets,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>),
               updatedAt: now,
             });
           }

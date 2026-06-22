@@ -111,3 +111,73 @@ export const getLowStockAlerts = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getDashboard = async (req: Request, res: Response) => {
+  try {
+    const limit =
+      typeof req.query.limit === "number"
+        ? req.query.limit
+        : Number(req.query.limit) || 50;
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+
+    const result = await inventoryService.listDashboard({
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      lineaId:
+        typeof req.query.lineaId === "string" ? req.query.lineaId : undefined,
+      categoriaId:
+        typeof req.query.categoriaId === "string"
+          ? req.query.categoriaId
+          : undefined,
+      soloBajoStock: String(req.query.soloBajoStock).toLowerCase() === "true",
+      limit,
+      cursor,
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: result.items.length,
+      data: result.items,
+      pagination: {
+        limit,
+        nextCursor: result.nextCursor,
+        hasNextPage: result.nextCursor !== null,
+      },
+    });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/dashboard:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar dashboard de inventario",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getDiagnostic = async (req: Request, res: Response) => {
+  try {
+    const { productoId } = req.params;
+    const result = await inventoryService.diagnoseProduct(productoId);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/diagnostico/:productoId:", error);
+    const statusCode =
+      error instanceof Error &&
+      error.message.toLowerCase().includes("no encontrado")
+        ? 404
+        : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Producto no encontrado"
+          : "Error al diagnosticar inventario del producto",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};

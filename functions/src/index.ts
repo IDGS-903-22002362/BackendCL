@@ -15,6 +15,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import app from "./app";
 import { assertAiConfig, getAiRuntimeSummary } from "./config/ai.config";
 import { sendLowStockDailyDigest } from "./stock-alert.cron";
+import { expireInventoryReservations } from "./inventory-reservation.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
 import { reconcileAplazoPayments } from "./aplazo-payments.cron";
@@ -71,6 +72,7 @@ export const api = onRequest(
 );
 
 export const lowStockDailyDigest = sendLowStockDailyDigest;
+export const expireInventoryReservationsFunction = expireInventoryReservations;
 //exportación de funcion
 export const syncInstagramPostsFunction = syncInstagramPosts;
 export const scheduledAccountDeletionFunction = scheduledAccountDeletion;

@@ -34,6 +34,7 @@ import {
 import pickupOrderService from "./pickup-order.service";
 import paidOrderFinalizerService from "./paid-order-finalizer.service";
 import ordenService from "./orden.service";
+import inventoryReservationService from "./inventory-reservation.service";
 import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
@@ -1210,6 +1211,12 @@ async createStripeCheckoutSession(
     orderId,
     userId,
   );
+
+    await inventoryReservationService.reserveForOrder({
+      ordenId: orderId,
+      usuarioId: userId,
+      idempotencyPrefix: "stripe",
+    });
 
   const stripeCustomerId = await this.getOrCreateStripeCustomerId(
     stripe,

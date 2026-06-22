@@ -179,3 +179,96 @@ export const listLowStockAlertsQuerySchema = z.object({
     .max(200, "El límite no puede exceder 200")
     .default(50),
 });
+
+export const listInventoryDashboardQuerySchema = z.object({
+  q: z.string().trim().max(120).optional(),
+  lineaId: z.string().trim().min(1).max(120).optional(),
+  categoriaId: z.string().trim().min(1).max(120).optional(),
+  soloBajoStock: z.coerce.boolean().default(false),
+  limit: z.coerce
+    .number()
+    .int("El límite debe ser un número entero")
+    .min(1, "El límite debe ser al menos 1")
+    .max(200, "El límite no puede exceder 200")
+    .default(50),
+  cursor: z.string().trim().min(1).max(200).optional(),
+});
+
+export const createRecepcionSchema = z
+  .object({
+    proveedorId: z.string().trim().min(1).max(120).optional(),
+    proveedorNombre: z.string().trim().min(1).max(200).optional(),
+    referencia: z
+      .string({ required_error: "La referencia es requerida" })
+      .trim()
+      .min(1, "La referencia no puede estar vacía")
+      .max(120),
+    fechaRecepcion: z
+      .string({ required_error: "fechaRecepcion es requerida" })
+      .datetime({ message: "fechaRecepcion debe ser ISO 8601" }),
+    notas: z.string().trim().max(500).optional(),
+    lineas: z
+      .array(
+        z.object({
+          productoId: z.string().trim().min(1).max(120),
+          tallaId: z.string().trim().min(1).max(120).optional(),
+          cantidadEsperada: z
+            .number()
+            .int()
+            .positive("cantidadEsperada debe ser mayor a 0"),
+        }),
+      )
+      .optional(),
+  })
+  .strict();
+
+export const updateRecepcionLineasSchema = z
+  .object({
+    lineas: z
+      .array(
+        z.object({
+          productoId: z.string().trim().min(1).max(120),
+          tallaId: z.string().trim().min(1).max(120).optional(),
+          cantidadEsperada: z.number().int().positive(),
+        }),
+      )
+      .min(1, "Se requiere al menos una línea"),
+  })
+  .strict();
+
+export const confirmRecepcionSchema = z
+  .object({
+    lineas: z
+      .array(
+        z.object({
+          productoId: z.string().trim().min(1).max(120),
+          tallaId: z.string().trim().min(1).max(120).optional(),
+          cantidadAceptada: z.number().int().nonnegative(),
+          cantidadRechazada: z.number().int().nonnegative(),
+        }),
+      )
+      .min(1, "Se requiere al menos una línea a confirmar"),
+    idempotencyKey: z.string().trim().min(8).max(255).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const hasQuantity = value.lineas.some(
+      (linea) => linea.cantidadAceptada > 0 || linea.cantidadRechazada > 0,
+    );
+    if (!hasQuantity) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lineas"],
+        message:
+          "Al menos una línea debe incluir cantidadAceptada o cantidadRechazada mayor a 0",
+      });
+    }
+  });
+
+export const listRecepcionesQuerySchema = z.object({
+  estado: z.enum(["borrador", "parcial", "cerrada", "cancelada"]).optional(),
+  proveedorId: z.string().trim().min(1).max(120).optional(),
+  referencia: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().trim().min(1).max(200).optional(),
+});
