@@ -179,6 +179,14 @@ class AiStorageService {
     };
   }
 
+  async deleteObject(objectPath: string, bucketName = this.bucket.name): Promise<void> {
+    await storageTienda.bucket(bucketName).file(objectPath).delete({ ignoreNotFound: true });
+    this.baseLogger.info("ai_storage_deleted", {
+      bucket: bucketName,
+      objectPath,
+    });
+  }
+
   async copyGcsFile(sourceUri: string, destinationPath: string): Promise<{ bucket: string; objectPath: string; gcsUri: string }> {
     const match = sourceUri.match(/^gs:\/\/([^/]+)\/(.+)$/);
     if (!match) {

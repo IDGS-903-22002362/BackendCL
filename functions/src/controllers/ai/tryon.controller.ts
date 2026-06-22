@@ -18,6 +18,7 @@ export const createTryOnJob = async (req: Request, res: Response) => {
       sku: req.body.sku,
       userImageAssetId: req.body.userImageAssetId,
       consentAccepted: req.body.consentAccepted,
+      idempotencyKey: req.body.idempotencyKey,
       requestedByRole: req.user!.rol as RolUsuario,
     });
 

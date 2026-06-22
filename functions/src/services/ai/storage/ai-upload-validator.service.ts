@@ -7,6 +7,7 @@ export interface ValidatedAiImage {
   width: number;
   height: number;
   format: string;
+  sanitizedPath?: string;
 }
 
 class AiUploadValidatorService {
@@ -59,6 +60,32 @@ class AiUploadValidatorService {
       width: metadata.width,
       height: metadata.height,
       format: metadata.format || "unknown",
+    };
+  }
+
+  async sanitizeImage(
+    filePath: string,
+    validated: ValidatedAiImage,
+  ): Promise<{ outputPath: string; mimeType: string; sizeBytes: number }> {
+    const outputMimeType =
+      validated.mimeType === "image/webp" ? "image/jpeg" : validated.mimeType;
+    const outputPath = `${filePath}.sanitized.jpg`;
+    const pipeline = sharp(filePath, {
+      sequentialRead: true,
+      limitInputPixels: aiConfig.uploads.maxPixels,
+    }).rotate();
+
+    const buffer =
+      outputMimeType === "image/png"
+        ? await pipeline.png({ force: true }).toBuffer()
+        : await pipeline.jpeg({ quality: 90, mozjpeg: true, force: true }).toBuffer();
+
+    await fs.writeFile(outputPath, buffer);
+
+    return {
+      outputPath,
+      mimeType: outputMimeType === "image/png" ? "image/png" : "image/jpeg",
+      sizeBytes: buffer.length,
     };
   }
 }

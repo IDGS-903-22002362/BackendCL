@@ -129,6 +129,8 @@ export const aiConfig = {
       "us-central1",
   },
   tryOn: {
+    enabled: toBool(process.env.AI_TRYON_ENABLED, true),
+    consentVersion: process.env.AI_TRYON_CONSENT_VERSION?.trim() || "v1",
     project: resolveGcpProjectId(),
     region:
       process.env.GCP_REGION ||
@@ -138,6 +140,12 @@ export const aiConfig = {
     endpointPublisher: process.env.VERTEX_TRYON_PUBLISHER || "google",
     timeoutMs: toInt(process.env.AI_TRYON_TIMEOUT_MS, 120000),
     pollIntervalMs: toInt(process.env.AI_TRYON_POLL_INTERVAL_MS, 4000),
+    userRateLimitWindowMs: toInt(
+      process.env.AI_TRYON_USER_RATE_LIMIT_WINDOW_MS,
+      3_600_000,
+    ),
+    userRateLimitMax: toInt(process.env.AI_TRYON_USER_RATE_LIMIT_MAX, 10),
+    idempotencyWindowMs: toInt(process.env.AI_TRYON_IDEMPOTENCY_WINDOW_MS, 300_000),
   },
   previewMockup: {
     project: resolveGcpProjectId(),
@@ -179,6 +187,7 @@ export const aiConfig = {
     resultFolder: process.env.AI_STORAGE_RESULT_FOLDER || "ai/tryon-results",
     signedUrlTtlSec: toInt(process.env.AI_SIGNED_URL_TTL_SEC, 900),
     makePublic: toBool(process.env.AI_STORAGE_PUBLIC, false),
+    retentionHours: toInt(process.env.AI_STORAGE_RETENTION_HOURS, 24),
   },
   api: {
     rateLimitWindowMs: toInt(process.env.AI_RATE_LIMIT_WINDOW_MS, 60000),
@@ -210,9 +219,11 @@ export const getAiRuntimeSummary = () => ({
   geminiProject: aiConfig.gemini.project,
   geminiRegion: aiConfig.gemini.region,
   hasGeminiApiKey: Boolean(aiConfig.gemini.apiKey),
+  tryOnEnabled: aiConfig.tryOn.enabled,
   tryOnProject: aiConfig.tryOn.project,
   tryOnRegion: aiConfig.tryOn.region,
   tryOnModel: aiConfig.tryOn.model,
+  tryOnConsentVersion: aiConfig.tryOn.consentVersion,
   previewMockupModel: aiConfig.previewMockup.model,
   previewMockupFallbackModel: aiConfig.previewMockup.fallbackModel,
   previewMockupFallbackRegion: aiConfig.previewMockup.fallbackRegion,
@@ -254,7 +265,7 @@ export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
     );
   }
 
-  if (options.requireTryOn) {
+  if (options.requireTryOn && aiConfig.tryOn.enabled) {
     if (!aiConfig.tryOn.project) {
       throw new Error("GCP_PROJECT_ID es requerido para Vertex Try-On");
     }

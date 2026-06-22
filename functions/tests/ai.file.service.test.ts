@@ -9,6 +9,7 @@ jest.mock("../src/services/ai/storage/ai-upload-validator.service", () => ({
   __esModule: true,
   default: {
     validateImage: jest.fn(),
+    sanitizeImage: jest.fn(),
   },
 }));
 
@@ -64,11 +65,17 @@ describe("AI file service", () => {
       id: "session_1",
       userId: "user_1",
     } as never);
+    const sanitizedPath = `${tempFilePath}.sanitized.jpg`;
     mockedValidator.validateImage.mockResolvedValue({
       mimeType: "image/png",
       width: 1024,
       height: 1024,
       format: "png",
+    });
+    mockedValidator.sanitizeImage.mockResolvedValue({
+      outputPath: sanitizedPath,
+      mimeType: "image/png",
+      sizeBytes: 123,
     });
     mockedStorage.uploadPrivateFileFromPath.mockResolvedValue({
       bucket: "bucket",
@@ -91,10 +98,14 @@ describe("AI file service", () => {
     });
 
     expect(mockedValidator.validateImage).toHaveBeenCalledWith(tempFilePath);
+    expect(mockedValidator.sanitizeImage).toHaveBeenCalledWith(
+      tempFilePath,
+      expect.objectContaining({ mimeType: "image/png" }),
+    );
     expect(mockedStorage.uploadPrivateFileFromPath).toHaveBeenCalledWith(
       expect.objectContaining({
-        filePath: tempFilePath,
-        originalName: "photo.png",
+        filePath: sanitizedPath,
+        originalName: "user-upload.png",
       }),
     );
 

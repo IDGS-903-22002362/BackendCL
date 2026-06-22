@@ -22,6 +22,9 @@ class TryOnJobService {
     inputUserImageUrl?: string;
     inputProductImageUrl: string;
     consentAccepted: boolean;
+    consentVersion?: string;
+    consentAcceptedAt?: FirebaseFirestore.Timestamp;
+    idempotencyKey?: string;
     requestedByRole: RolUsuario;
     previewMode: ProductPreviewMode;
     productPreviewType: ProductPreviewType;
@@ -47,6 +50,28 @@ class TryOnJobService {
     }
 
     return { id: snapshot.id, ...(snapshot.data() as Omit<TryOnJob, "id">) };
+  }
+
+  async findRecentJobByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+    since: FirebaseFirestore.Timestamp,
+  ): Promise<TryOnJob | null> {
+    const snapshot = await firestoreTienda
+      .collection(AI_COLLECTIONS.tryOnJobs)
+      .where("userId", "==", userId)
+      .where("idempotencyKey", "==", idempotencyKey)
+      .where("createdAt", ">=", since)
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...(doc.data() as Omit<TryOnJob, "id">) };
   }
 
   async listJobsByUser(userId: string): Promise<TryOnJob[]> {

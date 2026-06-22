@@ -18,6 +18,7 @@ import { sendLowStockDailyDigest } from "./stock-alert.cron";
 import { expireInventoryReservations } from "./inventory-reservation.cron";
 import { syncInstagramPosts } from "./social.cron";
 import { processTryOnJobTrigger } from "./services/ai/jobs/tryon-processor.trigger";
+import { cleanupTryOnAssets } from "./tryon-cleanup.cron";
 import { reconcileAplazoPayments } from "./aplazo-payments.cron";
 import { expirePickupOrders } from "./pickup-orders.cron";
 import {
@@ -77,6 +78,7 @@ export const expireInventoryReservationsFunction = expireInventoryReservations;
 export const syncInstagramPostsFunction = syncInstagramPosts;
 export const scheduledAccountDeletionFunction = scheduledAccountDeletion;
 export const processTryOnJob = processTryOnJobTrigger;
+export const cleanupTryOnAssetsFunction = cleanupTryOnAssets;
 export const processNotificationEvent = processNotificationEventTrigger;
 export const processPaymentEvent = processPaymentEventTrigger;
 export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;

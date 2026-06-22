@@ -1,6 +1,6 @@
 jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
   __esModule: true,
-  default: {
+    default: {
     buildGcsUri: jest.fn(),
     getBucketName: jest.fn(),
     downloadGcsFile: jest.fn(),
@@ -8,6 +8,7 @@ jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
     generateSignedDownloadUrl: jest.fn(),
     copyGcsFile: jest.fn(),
     getObjectMetadata: jest.fn(),
+    deleteObject: jest.fn(),
   },
 }));
 
@@ -17,6 +18,7 @@ jest.mock("../src/services/ai/jobs/tryon-asset.service", () => ({
     getAssetById: jest.fn(),
     attachJob: jest.fn(),
     createAsset: jest.fn(),
+    deleteAsset: jest.fn(),
   },
 }));
 
@@ -303,7 +305,7 @@ describe("AI try-on workflow", () => {
     expect(mockedJobService.markFailed).toHaveBeenCalledWith(
       "job_1",
       "VERTEX_TIMEOUT",
-      "Tiempo agotado",
+      "La generacion tardo demasiado. Intenta de nuevo con otra foto.",
     );
     expect(mockedJobService.markCompleted).not.toHaveBeenCalled();
   });

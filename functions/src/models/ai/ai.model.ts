@@ -266,6 +266,9 @@ export interface TryOnJob {
   outputImageUrl?: string;
   status: TryOnJobStatus;
   consentAccepted: boolean;
+  consentVersion?: string;
+  consentAcceptedAt?: Timestamp;
+  idempotencyKey?: string;
   requestedByRole: RolUsuario;
   previewMode: ProductPreviewMode;
   productPreviewType: ProductPreviewType;

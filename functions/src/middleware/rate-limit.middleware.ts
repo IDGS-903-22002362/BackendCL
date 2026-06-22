@@ -4,6 +4,7 @@ type RateLimitOptions = {
   windowMs: number;
   maxRequests: number;
   keyPrefix: string;
+  resolveKey?: (req: Request) => string;
 };
 
 type RateLimitEntry = {
@@ -27,7 +28,9 @@ export const createSimpleRateLimiter = (options: RateLimitOptions) => {
     cleanupExpired(now);
 
     const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-    const key = `${options.keyPrefix}:${String(ip)}`;
+    const key = options.resolveKey
+      ? options.resolveKey(req)
+      : `${options.keyPrefix}:${String(ip)}`;
     const current = store.get(key);
 
     if (!current || current.expiresAt <= now) {
