@@ -4,6 +4,15 @@ jest.mock("../src/services/ai/jobs/tryon-workflow.service", () => ({
     createJob: jest.fn(),
     getJobStatus: jest.fn(),
     getDownloadUrl: jest.fn(),
+    getDownloadAsset: jest.fn(),
+  },
+}));
+
+jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
+  __esModule: true,
+  default: {
+    buildGcsUri: jest.fn(),
+    downloadGcsFile: jest.fn(),
   },
 }));
 
@@ -15,16 +24,20 @@ import {
 import { RolUsuario } from "../src/models/usuario.model";
 import * as tryonController from "../src/controllers/ai/tryon.controller";
 import tryOnWorkflowService from "../src/services/ai/jobs/tryon-workflow.service";
+import aiStorageService from "../src/services/ai/storage/ai-storage.service";
 import { AiRuntimeError } from "../src/services/ai/ai.error";
 
 const mockedWorkflow = tryOnWorkflowService as jest.Mocked<
   typeof tryOnWorkflowService
 >;
+const mockedStorage = aiStorageService as jest.Mocked<typeof aiStorageService>;
 
 const createResponse = (): Response => {
   const res = {
     status: jest.fn().mockReturnThis(),
     json: jest.fn().mockReturnThis(),
+    setHeader: jest.fn().mockReturnThis(),
+    send: jest.fn().mockReturnThis(),
   };
 
   return res as unknown as Response;
@@ -168,5 +181,64 @@ describe("AI try-on ownership", () => {
       success: false,
       message: "No se pudo generar el link de descarga del try-on",
     });
+  });
+
+  it("bloquea stream de imagen de job ajeno para cliente", async () => {
+    mockedWorkflow.getJobStatus.mockResolvedValue({
+      id: "job_1",
+      userId: "other_user",
+      status: "completed",
+    } as never);
+
+    const req = {
+      params: { id: "job_1" },
+      user: { uid: "user_1", rol: RolUsuario.CLIENTE },
+    } as unknown as Request;
+    const res = createResponse();
+
+    await tryonController.streamTryOnImage(req, res);
+
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(403);
+    expect(mockedWorkflow.getDownloadAsset).not.toHaveBeenCalled();
+  });
+
+  it("stream de imagen devuelve bytes del asset privado", async () => {
+    mockedWorkflow.getJobStatus.mockResolvedValue({
+      id: "job_1",
+      userId: "user_1",
+      status: "completed",
+    } as never);
+    mockedWorkflow.getDownloadAsset.mockResolvedValue({
+      bucket: "bucket",
+      objectPath: "ai/tryon-results/user/session/job_1.png",
+    } as never);
+    mockedStorage.buildGcsUri.mockReturnValue(
+      "gs://bucket/ai/tryon-results/user/session/job_1.png",
+    );
+    mockedStorage.downloadGcsFile.mockResolvedValue({
+      buffer: Buffer.from("png-bytes"),
+      mimeType: "image/png",
+      sizeBytes: 8,
+    });
+
+    const req = {
+      params: { id: "job_1" },
+      user: { uid: "user_1", rol: RolUsuario.CLIENTE },
+    } as unknown as Request;
+    const res = createResponse();
+
+    await tryonController.streamTryOnImage(req, res);
+
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(200);
+    expect((res.setHeader as jest.Mock).mock.calls).toEqual(
+      expect.arrayContaining([
+        ["Content-Type", "image/png"],
+        ["Cache-Control", "private, max-age=300, no-store"],
+        ["Content-Length", "8"],
+      ]),
+    );
+    expect((res.send as jest.Mock).mock.calls[0][0]).toEqual(
+      Buffer.from("png-bytes"),
+    );
   });
 });

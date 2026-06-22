@@ -379,6 +379,13 @@ protectedRouter.get(
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.getTryOnDownloadLink),
 );
+protectedRouter.get(
+  "/tryon/jobs/:id/image",
+  requireTryOnEnabled,
+  aiTryOnUserRateLimiter,
+  validateParams(tryOnJobIdParamSchema),
+  asyncHandler(tryonController.streamTryOnImage),
+);
 
 /**
  * @swagger
