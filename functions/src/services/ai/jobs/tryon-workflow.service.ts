@@ -17,9 +17,6 @@ import {
   PRODUCT_PREVIEW_IMAGE_INVALID_CODE,
   PRODUCT_PREVIEW_UNSUPPORTED_CODE,
 } from "../ai.error";
-import vertexPreviewMockupAdapter, {
-  VertexPreviewMockupError,
-} from "../adapters/vertex-preview-mockup.adapter";
 import vertexTryOnAdapter, {
   VertexTryOnError,
 } from "../adapters/vertex-tryon.adapter";
@@ -285,13 +282,19 @@ class TryOnWorkflowService {
         since,
       );
 
-      if (
-        existingJob &&
-        (existingJob.status === TryOnJobStatus.QUEUED ||
+      if (existingJob) {
+        const isActiveJob =
+          existingJob.status === TryOnJobStatus.QUEUED ||
           existingJob.status === TryOnJobStatus.PROCESSING ||
-          existingJob.status === TryOnJobStatus.COMPLETED)
-      ) {
-        return existingJob;
+          existingJob.status === TryOnJobStatus.COMPLETED;
+        const isPermanentQuotaFailure =
+          existingJob.status === TryOnJobStatus.FAILED &&
+          (existingJob.errorCode === "VERTEX_QUOTA_EXCEEDED" ||
+            existingJob.errorCode === "PRODUCT_PREVIEW_QUOTA_EXCEEDED");
+
+        if (isActiveJob || isPermanentQuotaFailure) {
+          return existingJob;
+        }
       }
     }
 
@@ -330,11 +333,19 @@ class TryOnWorkflowService {
     }
 
     const previewPolicy = await productPreviewPolicyService.resolvePolicy(product);
-    if (previewPolicy.previewMode === ProductPreviewMode.UNSUPPORTED) {
-      throw resolvePreviewClassificationError(
-        previewPolicy.classificationSource,
-        previewPolicy.productCategorySnapshot.categoryName,
-        previewPolicy.productCategorySnapshot.lineName,
+    if (previewPolicy.previewMode !== ProductPreviewMode.BODY_TRYON) {
+      if (previewPolicy.previewMode === ProductPreviewMode.UNSUPPORTED) {
+        throw resolvePreviewClassificationError(
+          previewPolicy.classificationSource,
+          previewPolicy.productCategorySnapshot.categoryName,
+          previewPolicy.productCategorySnapshot.lineName,
+        );
+      }
+
+      throw new AiRuntimeError(
+        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
+        "El probador virtual solo esta disponible para prendas de adulto",
+        400,
       );
     }
 
@@ -389,11 +400,12 @@ class TryOnWorkflowService {
   }
 
   async processQueuedJob(jobId: string): Promise<void> {
-    const job = await tryOnJobService.getJobById(jobId);
-    if (!job || job.status !== TryOnJobStatus.QUEUED) {
+    const job = await tryOnJobService.claimJobForProcessing(jobId);
+    if (!job) {
+      const latestJob = await tryOnJobService.getJobById(jobId);
       this.baseLogger.info("tryon_job_skipped", {
         jobId,
-        status: job?.status ?? "missing",
+        status: latestJob?.status ?? "missing",
       });
       return;
     }
@@ -403,13 +415,12 @@ class TryOnWorkflowService {
       fromStatus: TryOnJobStatus.QUEUED,
       toStatus: TryOnJobStatus.PROCESSING,
     });
-    await tryOnJobService.markProcessing(jobId);
 
     try {
-      if (job.previewMode === ProductPreviewMode.UNSUPPORTED) {
+      if (job.previewMode !== ProductPreviewMode.BODY_TRYON) {
         throw new AiRuntimeError(
           PRODUCT_PREVIEW_UNSUPPORTED_CODE,
-          "El job no es compatible con un preview AI confiable",
+          "El job no es compatible con probador virtual de ropa adulta",
           400,
         );
       }
@@ -418,21 +429,10 @@ class TryOnWorkflowService {
         resolveVertexImageInput(job.inputUserImageUrl!),
         resolveVertexImageInput(job.inputProductImageUrl),
       ]);
-      const providerResult =
-        job.previewMode === ProductPreviewMode.BODY_TRYON
-          ? await vertexTryOnAdapter.runTryOn({
-              personImage,
-              garmentImage: productImage,
-            })
-          : await vertexPreviewMockupAdapter.generateMockup({
-              personImage,
-              productImage,
-              previewMode: job.previewMode,
-              productPreviewType: job.productPreviewType,
-              productDescription: job.productCategorySnapshot.productDescription,
-              categoryName: job.productCategorySnapshot.categoryName,
-              lineName: job.productCategorySnapshot.lineName,
-            });
+      const providerResult = await vertexTryOnAdapter.runTryOn({
+        personImage,
+        garmentImage: productImage,
+      });
 
       const { outputAsset } = await this.persistProviderOutput({
         job,
@@ -453,11 +453,9 @@ class TryOnWorkflowService {
       const errorCode =
         error instanceof VertexTryOnError
           ? error.code
-          : error instanceof VertexPreviewMockupError
+          : error instanceof AiRuntimeError
             ? error.code
-            : error instanceof AiRuntimeError
-              ? error.code
-          : "TRYON_FAILED";
+            : "TRYON_FAILED";
       const message = this.mapProviderErrorMessage(error);
 
       this.baseLogger.error("tryon_job_failed", {

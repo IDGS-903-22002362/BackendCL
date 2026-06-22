@@ -8,25 +8,72 @@ import {
 import categoryService from "../../../services/category.service";
 import lineService from "../../../services/line.service";
 
-const BODY_TRYON_CATEGORY_IDS = new Set([
+const ADULT_LINE_IDS = new Set(["caballero", "dama", "viejito"]);
+const NON_ADULT_LINE_IDS = new Set([
+  "bebe",
+  "infantil",
+  "adolescente",
+  "juvenil",
+  "nino",
+  "nina",
+  "kids",
+  "baby",
+]);
+
+const APPAREL_CATEGORY_IDS = new Set([
   "jersey",
   "playera",
   "sudadera",
   "chamarra",
+  "pantalon",
+  "short",
 ]);
-const ACCESSORY_MOCKUP_CATEGORY_IDS = new Set(["gorra", "calcetas"]);
-const PROP_MOCKUP_CATEGORY_IDS = new Set(["balon", "accesorios"]);
 
-const BODY_TRYON_KEYWORDS = [
+const EXCLUDED_CATEGORY_IDS = new Set([
+  "gorra",
+  "calcetas",
+  "balon",
+  "accesorios",
+]);
+
+const ADULT_LINE_KEYWORDS = [
+  "caballero",
+  "dama",
+  "viejito",
+  "viejita",
+  "adulto",
+  "adulta",
+  "hombre",
+  "mujer",
+];
+const NON_ADULT_LINE_KEYWORDS = [
+  "bebe",
+  "baby",
+  "infantil",
+  "adolescente",
+  "juvenil",
+  "nino",
+  "nina",
+  "kids",
+  "kid",
+];
+const APPAREL_KEYWORDS = [
   "jersey",
   "playera",
   "camiseta",
   "sudadera",
   "hoodie",
   "chamarra",
+  "pantalon",
+  "short",
+  "prenda",
 ];
-const ACCESSORY_KEYWORDS = ["gorra", "cachucha", "beanie", "calceta", "calcetin"];
-const PROP_KEYWORDS = [
+const EXCLUDED_CATEGORY_KEYWORDS = [
+  "gorra",
+  "cachucha",
+  "beanie",
+  "calceta",
+  "calcetin",
   "balon",
   "accesorio",
   "souvenir",
@@ -77,6 +124,36 @@ const buildPolicy = (
   productCategorySnapshot: snapshot,
 });
 
+const resolveLineEligibility = (
+  lineId: string,
+  lineName: string,
+): "adult" | "non_adult" | "unknown" => {
+  if (NON_ADULT_LINE_IDS.has(lineId) || hasKeyword(lineName, NON_ADULT_LINE_KEYWORDS)) {
+    return "non_adult";
+  }
+
+  if (ADULT_LINE_IDS.has(lineId) || hasKeyword(lineName, ADULT_LINE_KEYWORDS)) {
+    return "adult";
+  }
+
+  return "unknown";
+};
+
+const resolveCategoryEligibility = (
+  categoryId: string,
+  categoryName: string,
+): "apparel" | "excluded" | "unknown" => {
+  if (EXCLUDED_CATEGORY_IDS.has(categoryId) || hasKeyword(categoryName, EXCLUDED_CATEGORY_KEYWORDS)) {
+    return "excluded";
+  }
+
+  if (APPAREL_CATEGORY_IDS.has(categoryId) || hasKeyword(categoryName, APPAREL_KEYWORDS)) {
+    return "apparel";
+  }
+
+  return "unknown";
+};
+
 class ProductPreviewPolicyService {
   async resolvePolicy(product: Producto): Promise<ResolvedProductPreviewPolicy> {
     const [category, line] = await Promise.all([
@@ -92,97 +169,55 @@ class ProductPreviewPolicyService {
       productDescription: product.descripcion,
     };
 
-    const normalizedCategoryId = normalizeToken(product.categoriaId);
-    if (BODY_TRYON_CATEGORY_IDS.has(normalizedCategoryId)) {
-      return buildPolicy(
-        ProductPreviewMode.BODY_TRYON,
-        ProductPreviewType.APPAREL,
-        ProductPreviewClassificationSource.CATEGORY_ID,
-        snapshot,
-      );
-    }
-
-    if (ACCESSORY_MOCKUP_CATEGORY_IDS.has(normalizedCategoryId)) {
-      return buildPolicy(
-        ProductPreviewMode.ACCESSORY_MOCKUP,
-        ProductPreviewType.ACCESSORY,
-        ProductPreviewClassificationSource.CATEGORY_ID,
-        snapshot,
-      );
-    }
-
-    if (PROP_MOCKUP_CATEGORY_IDS.has(normalizedCategoryId)) {
-      return buildPolicy(
-        ProductPreviewMode.PROP_MOCKUP,
-        ProductPreviewType.PROP,
-        ProductPreviewClassificationSource.CATEGORY_ID,
-        snapshot,
-      );
-    }
-
-    const normalizedCategoryName = normalizeToken(category?.nombre);
-    if (hasKeyword(normalizedCategoryName, BODY_TRYON_KEYWORDS)) {
-      return buildPolicy(
-        ProductPreviewMode.BODY_TRYON,
-        ProductPreviewType.APPAREL,
-        ProductPreviewClassificationSource.CATEGORY_NAME,
-        snapshot,
-      );
-    }
-
-    if (hasKeyword(normalizedCategoryName, ACCESSORY_KEYWORDS)) {
-      return buildPolicy(
-        ProductPreviewMode.ACCESSORY_MOCKUP,
-        ProductPreviewType.ACCESSORY,
-        ProductPreviewClassificationSource.CATEGORY_NAME,
-        snapshot,
-      );
-    }
-
-    if (hasKeyword(normalizedCategoryName, PROP_KEYWORDS)) {
-      return buildPolicy(
-        ProductPreviewMode.PROP_MOCKUP,
-        ProductPreviewType.PROP,
-        ProductPreviewClassificationSource.CATEGORY_NAME,
-        snapshot,
-      );
-    }
-
+    const normalizedLineId = normalizeToken(product.lineaId);
     const normalizedLineName = normalizeToken(line?.nombre);
-    if (normalizedLineName === "souvenir") {
-      return buildPolicy(
-        ProductPreviewMode.PROP_MOCKUP,
-        ProductPreviewType.PROP,
-        ProductPreviewClassificationSource.LINE_NAME,
+    const normalizedCategoryId = normalizeToken(product.categoriaId);
+    const normalizedCategoryName = normalizeToken(category?.nombre);
+    const normalizedDescription = normalizeToken(product.descripcion);
+
+    const lineEligibility = resolveLineEligibility(normalizedLineId, normalizedLineName);
+    if (lineEligibility === "non_adult") {
+      return buildUnsupportedPolicy(
         snapshot,
+        ProductPreviewClassificationSource.LINE_NAME,
       );
     }
 
-    const normalizedDescription = normalizeToken(product.descripcion);
-    if (hasKeyword(normalizedDescription, BODY_TRYON_KEYWORDS)) {
+    const categoryEligibility = resolveCategoryEligibility(
+      normalizedCategoryId,
+      normalizedCategoryName,
+    );
+    if (categoryEligibility === "excluded") {
+      return buildUnsupportedPolicy(
+        snapshot,
+        ProductPreviewClassificationSource.CATEGORY_ID,
+      );
+    }
+
+    if (
+      lineEligibility === "adult" &&
+      (categoryEligibility === "apparel" ||
+        hasKeyword(normalizedDescription, APPAREL_KEYWORDS))
+    ) {
+      const classificationSource =
+        categoryEligibility === "apparel"
+          ? APPAREL_CATEGORY_IDS.has(normalizedCategoryId)
+            ? ProductPreviewClassificationSource.CATEGORY_ID
+            : ProductPreviewClassificationSource.CATEGORY_NAME
+          : ProductPreviewClassificationSource.DESCRIPTION_KEYWORD;
+
       return buildPolicy(
         ProductPreviewMode.BODY_TRYON,
         ProductPreviewType.APPAREL,
-        ProductPreviewClassificationSource.DESCRIPTION_KEYWORD,
+        classificationSource,
         snapshot,
       );
     }
 
-    if (hasKeyword(normalizedDescription, ACCESSORY_KEYWORDS)) {
-      return buildPolicy(
-        ProductPreviewMode.ACCESSORY_MOCKUP,
-        ProductPreviewType.ACCESSORY,
-        ProductPreviewClassificationSource.DESCRIPTION_KEYWORD,
+    if (hasKeyword(normalizedDescription, EXCLUDED_CATEGORY_KEYWORDS)) {
+      return buildUnsupportedPolicy(
         snapshot,
-      );
-    }
-
-    if (hasKeyword(normalizedDescription, PROP_KEYWORDS)) {
-      return buildPolicy(
-        ProductPreviewMode.PROP_MOCKUP,
-        ProductPreviewType.PROP,
         ProductPreviewClassificationSource.DESCRIPTION_KEYWORD,
-        snapshot,
       );
     }
 

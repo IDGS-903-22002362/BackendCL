@@ -88,6 +88,40 @@ class TryOnJobService {
     }));
   }
 
+  async claimJobForProcessing(jobId: string): Promise<TryOnJob | null> {
+    const ref = firestoreTienda.collection(AI_COLLECTIONS.tryOnJobs).doc(jobId);
+
+    return firestoreTienda.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) {
+        return null;
+      }
+
+      const job = {
+        id: snapshot.id,
+        ...(snapshot.data() as Omit<TryOnJob, "id">),
+      };
+
+      if (job.status !== TryOnJobStatus.QUEUED) {
+        return null;
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(ref, {
+        status: TryOnJobStatus.PROCESSING,
+        errorCode: admin.firestore.FieldValue.delete(),
+        errorMessage: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      });
+
+      return {
+        ...job,
+        status: TryOnJobStatus.PROCESSING,
+        updatedAt: now,
+      };
+    });
+  }
+
   async markProcessing(jobId: string, providerJobId?: string): Promise<void> {
     await firestoreTienda.collection(AI_COLLECTIONS.tryOnJobs).doc(jobId).update({
       status: TryOnJobStatus.PROCESSING,

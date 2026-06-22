@@ -26,6 +26,7 @@ import {
   aiUploadRateLimiter,
 } from "../middleware/ai-rate-limit.middleware";
 import {
+  aiTryOnPollRateLimiter,
   aiTryOnUserRateLimiter,
   requireTryOnEnabled,
 } from "../middleware/ai-tryon.middleware";
@@ -344,7 +345,7 @@ protectedRouter.get(
 protectedRouter.get(
   "/tryon/jobs/:id",
   requireTryOnEnabled,
-  aiTryOnUserRateLimiter,
+  aiTryOnPollRateLimiter,
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.getTryOnJob),
 );
@@ -375,14 +376,14 @@ protectedRouter.get(
 protectedRouter.get(
   "/tryon/jobs/:id/download",
   requireTryOnEnabled,
-  aiTryOnUserRateLimiter,
+  aiTryOnPollRateLimiter,
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.getTryOnDownloadLink),
 );
 protectedRouter.get(
   "/tryon/jobs/:id/image",
   requireTryOnEnabled,
-  aiTryOnUserRateLimiter,
+  aiTryOnPollRateLimiter,
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.streamTryOnImage),
 );

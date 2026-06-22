@@ -791,6 +791,7 @@ export class ProductService {
       case "nombre_asc":
         return { field: "descripcion", direction: "asc" };
       case "destacados":
+        return { field: "destacado", direction: "desc" };
       default:
         return { field: "createdAt", direction: "desc" };
     }
@@ -1151,6 +1152,36 @@ export class ProductService {
     );
   }
 
+  private isBroadCatalogListing(filters: CatalogCursor["filters"]): boolean {
+    return (
+      !filters.category &&
+      !filters.line &&
+      !filters.talla &&
+      !filters.q &&
+      filters.minPrice === undefined &&
+      filters.maxPrice === undefined &&
+      !filters.onlyOffers
+    );
+  }
+
+  private shouldUseAggregateCatalogRanking(
+    sort: CatalogSort,
+    filters: CatalogCursor["filters"],
+  ): boolean {
+    if (filters.q || this.isBroadCatalogListing(filters)) {
+      return false;
+    }
+
+    return (
+      sort === "destacados" ||
+      sort === "populares" ||
+      sort === "mas_comprados" ||
+      sort === "ofertas_populares" ||
+      sort === "ofertas_mas_compradas" ||
+      sort === "ofertas_recientes"
+    );
+  }
+
   private isOfertasCatalogSort(sort: CatalogSort): boolean {
     return (
       sort === "ofertas_populares" ||
@@ -1176,28 +1207,30 @@ export class ProductService {
     const resolvedSort = this.resolveCatalogSort(query);
     const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : resolvedSort;
 
-    if (effectiveSort === "destacados" && !filters.q) {
-      return this.listCatalogProductsByDestacados(query, filters);
-    }
+    if (this.shouldUseAggregateCatalogRanking(effectiveSort, filters)) {
+      if (effectiveSort === "destacados") {
+        return this.listCatalogProductsByDestacados(query, filters);
+      }
 
-    if (effectiveSort === "populares" && !filters.q) {
-      return this.listCatalogProductsByPopulares(query, filters);
-    }
+      if (effectiveSort === "populares") {
+        return this.listCatalogProductsByPopulares(query, filters);
+      }
 
-    if (effectiveSort === "mas_comprados" && !filters.q) {
-      return this.listCatalogProductsByMasComprados(query, filters);
-    }
+      if (effectiveSort === "mas_comprados") {
+        return this.listCatalogProductsByMasComprados(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_populares" && !filters.q) {
-      return this.listCatalogProductsByOfertasPopulares(query, filters);
-    }
+      if (effectiveSort === "ofertas_populares") {
+        return this.listCatalogProductsByOfertasPopulares(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_mas_compradas" && !filters.q) {
-      return this.listCatalogProductsByOfertasMasCompradas(query, filters);
-    }
+      if (effectiveSort === "ofertas_mas_compradas") {
+        return this.listCatalogProductsByOfertasMasCompradas(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_recientes" && !filters.q) {
-      return this.listCatalogProductsByOfertasRecientes(query, filters);
+      if (effectiveSort === "ofertas_recientes") {
+        return this.listCatalogProductsByOfertasRecientes(query, filters);
+      }
     }
 
     const sortConfig = filters.q
