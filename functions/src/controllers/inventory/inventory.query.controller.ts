@@ -181,3 +181,89 @@ export const getDiagnostic = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getOperationalSummary = async (_req: Request, res: Response) => {
+  try {
+    const summary = await inventoryService.getOperationalSummary();
+    return res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/resumen-operativo:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener resumen operativo admin",
+    });
+  }
+};
+
+export const listAdminNotifications = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const payload = await inventoryService.listAdminNotifications(req.user.uid);
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/notificaciones-admin:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener notificaciones admin",
+    });
+  }
+};
+
+export const markAdminNotificationsRead = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.map(String).filter(Boolean)
+      : [];
+
+    if (ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Se requiere al menos un id de notificacion",
+      });
+    }
+
+    const payload = await inventoryService.markAdminNotificationsRead(
+      req.user.uid,
+      ids,
+    );
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error("Error en POST /api/inventario/notificaciones-admin/read:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar notificaciones como leidas",
+    });
+  }
+};
+
+export const markAllAdminNotificationsRead = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const payload = await inventoryService.markAllAdminNotificationsRead(
+      req.user.uid,
+    );
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error(
+      "Error en POST /api/inventario/notificaciones-admin/read-all:",
+      error,
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar todas las notificaciones como leidas",
+    });
+  }
+};

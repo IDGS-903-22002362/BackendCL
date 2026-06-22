@@ -369,6 +369,34 @@ router.get(
 );
 
 router.get(
+  "/resumen-operativo",
+  authMiddleware,
+  requireAdmin,
+  queryController.getOperationalSummary,
+);
+
+router.get(
+  "/notificaciones-admin",
+  authMiddleware,
+  requireAdmin,
+  queryController.listAdminNotifications,
+);
+
+router.post(
+  "/notificaciones-admin/read",
+  authMiddleware,
+  requireAdmin,
+  queryController.markAdminNotificationsRead,
+);
+
+router.post(
+  "/notificaciones-admin/read-all",
+  authMiddleware,
+  requireAdmin,
+  queryController.markAllAdminNotificationsRead,
+);
+
+router.get(
   "/diagnostico/:productoId",
   authMiddleware,
   requireAdmin,

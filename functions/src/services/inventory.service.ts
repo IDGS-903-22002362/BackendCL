@@ -15,6 +15,8 @@ import {
   TipoMovimientoInventario,
 } from "../models/inventario.model";
 import { RolUsuario } from "../models/usuario.model";
+import { EstadoOrden } from "../models/orden.model";
+import { COLECCION_PAGOS, EstadoPago } from "../models/pago.model";
 import productService from "./product.service";
 import {
   completeInventarioPorTalla,
@@ -28,6 +30,7 @@ const AJUSTES_IDEMPOTENCY_COLLECTION = "inventarioAjustesIdempotency";
 const MOVIMIENTOS_IDEMPOTENCY_COLLECTION = "inventarioMovimientosIdempotency";
 const POS_SALES_COLLECTION = "ventasPos";
 const PRODUCTOS_COLLECTION = "productos";
+const ADMIN_NOTIFICATION_READS_COLLECTION = "adminNotificationReads";
 const RESERVAS_INVENTARIO_COLLECTION = "reservasInventario";
 
 class InventoryService {
@@ -770,6 +773,206 @@ class InventoryService {
       proyeccion,
       reservasActivas,
     };
+  }
+
+  async getOperationalSummary() {
+    const pendingStates = [
+      EstadoOrden.PENDIENTE,
+      EstadoOrden.CONFIRMADA,
+      EstadoOrden.EN_PROCESO,
+    ];
+    const sevenDaysAgo = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    );
+
+    const [
+      pendingOrdersSnapshot,
+      activeProductsSnapshot,
+      alertsResult,
+      recentMovementsSnapshot,
+    ] = await Promise.all([
+      firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .where("estado", "in", pendingStates)
+        .count()
+        .get(),
+      firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .count()
+        .get(),
+      this.listLowStockAlerts({ limit: 100, soloCriticas: false }),
+      firestoreTienda
+        .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+        .where("createdAt", ">=", sevenDaysAgo)
+        .count()
+        .get(),
+    ]);
+
+    return {
+      pendingOrdersCount: pendingOrdersSnapshot.data().count,
+      lowStockCount: alertsResult.resumen.totalProductosBajoStock,
+      activeProductsCount: activeProductsSnapshot.data().count,
+      recentMovementsCount: recentMovementsSnapshot.data().count,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async getAdminReadNotificationIds(userId: string): Promise<Set<string>> {
+    const snapshot = await firestoreTienda
+      .collection(ADMIN_NOTIFICATION_READS_COLLECTION)
+      .doc(userId)
+      .get();
+
+    if (!snapshot.exists) {
+      return new Set();
+    }
+
+    const readIds = snapshot.data()?.readNotificationIds;
+    return new Set(Array.isArray(readIds) ? readIds.map(String) : []);
+  }
+
+  private async saveAdminReadNotificationIds(
+    userId: string,
+    readIds: Set<string>,
+  ): Promise<void> {
+    await firestoreTienda
+      .collection(ADMIN_NOTIFICATION_READS_COLLECTION)
+      .doc(userId)
+      .set(
+        {
+          readNotificationIds: Array.from(readIds).slice(-500),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+  }
+
+  async listAdminNotifications(userId: string) {
+    const since = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 72 * 60 * 60 * 1000),
+    );
+    const readIds = await this.getAdminReadNotificationIds(userId);
+    const items: Array<{
+      id: string;
+      type: string;
+      title: string;
+      message: string;
+      href: string;
+      createdAt: string;
+      read: boolean;
+    }> = [];
+
+    const [ordersSnapshot, paymentsSnapshot, alertsResult] = await Promise.all([
+      firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .where("createdAt", ">=", since)
+        .orderBy("createdAt", "desc")
+        .limit(40)
+        .get(),
+      firestoreTienda
+        .collection(COLECCION_PAGOS)
+        .where("updatedAt", ">=", since)
+        .orderBy("updatedAt", "desc")
+        .limit(40)
+        .get(),
+      this.listLowStockAlerts({ limit: 15, soloCriticas: true }),
+    ]);
+
+    ordersSnapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      const estado = String(data.estado ?? "");
+      if (estado === EstadoOrden.CANCELADA || estado === EstadoOrden.ENTREGADA) {
+        return;
+      }
+
+      const type = estado === EstadoOrden.PENDIENTE ? "order_new" : "order_pending";
+      const id = `${type}:${doc.id}`;
+      items.push({
+        id,
+        type,
+        title:
+          type === "order_new"
+            ? "Nueva orden recibida"
+            : "Orden pendiente de atencion",
+        message: `Orden ${doc.id.slice(0, 8).toUpperCase()} (${estado})`,
+        href: `/admin/ordenes?orden=${doc.id}`,
+        createdAt:
+          data.createdAt?.toDate?.().toISOString() ?? new Date().toISOString(),
+        read: readIds.has(id),
+      });
+    });
+
+    paymentsSnapshot.docs.forEach((doc) => {
+      const data = doc.data();
+      const estado = String(data.estado ?? "") as EstadoPago;
+      if (estado !== EstadoPago.COMPLETADO && estado !== EstadoPago.FALLIDO) {
+        return;
+      }
+
+      const ordenId = String(data.ordenId ?? "");
+      if (!ordenId) {
+        return;
+      }
+
+      const type =
+        estado === EstadoPago.FALLIDO ? "payment_failed" : "payment_confirmed";
+      const id = `${type}:${doc.id}`;
+      items.push({
+        id,
+        type,
+        title: estado === EstadoPago.FALLIDO ? "Pago fallido" : "Pago confirmado",
+        message:
+          estado === EstadoPago.FALLIDO
+            ? `Pago fallido en orden ${ordenId.slice(0, 8).toUpperCase()}`
+            : `Pago confirmado en orden ${ordenId.slice(0, 8).toUpperCase()}`,
+        href: `/admin/ordenes?orden=${ordenId}`,
+        createdAt:
+          data.updatedAt?.toDate?.().toISOString() ??
+          data.createdAt?.toDate?.().toISOString() ??
+          new Date().toISOString(),
+        read: readIds.has(id),
+      });
+    });
+
+    alertsResult.alertas.slice(0, 10).forEach((alert) => {
+      const id = `stock_low:${alert.productoId}`;
+      items.push({
+        id,
+        type: "stock_low",
+        title: "Alerta de stock bajo",
+        message: `${alert.descripcion} (${alert.clave}) · ${alert.existencias} disponibles`,
+        href: `/admin/inventario/alertas-stock?producto=${alert.productoId}`,
+        createdAt: new Date().toISOString(),
+        read: readIds.has(id),
+      });
+    });
+
+    const sorted = items
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 30);
+
+    return {
+      items: sorted,
+      unreadCount: sorted.filter((item) => !item.read).length,
+    };
+  }
+
+  async markAdminNotificationsRead(userId: string, notificationIds: string[]) {
+    const readIds = await this.getAdminReadNotificationIds(userId);
+    notificationIds.forEach((id) => readIds.add(id));
+    await this.saveAdminReadNotificationIds(userId, readIds);
+    return this.listAdminNotifications(userId);
+  }
+
+  async markAllAdminNotificationsRead(userId: string) {
+    const current = await this.listAdminNotifications(userId);
+    const readIds = new Set(current.items.map((item) => item.id));
+    await this.saveAdminReadNotificationIds(userId, readIds);
+    return this.listAdminNotifications(userId);
   }
 }
 

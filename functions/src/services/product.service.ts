@@ -740,6 +740,43 @@ export class ProductService {
     }
   }
 
+  /**
+   * Búsqueda admin por nombre, clave o texto indexado (incluye inactivos).
+   */
+  async searchAdminProducts(
+    searchTerm: string,
+    limit = 40,
+  ): Promise<AdminProductListItemDTO[]> {
+    const normalizedTerm = this.normalizeSearchText(searchTerm);
+    if (!normalizedTerm) {
+      return [];
+    }
+
+    try {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .orderBy("updatedAt", "desc")
+        .limit(500)
+        .get();
+
+      return snapshot.docs
+        .map((doc) => this.normalizeProduct(doc.id, doc.data()))
+        .filter((producto) => {
+          const haystack = this.normalizeSearchText(
+            [producto.descripcion, producto.clave, producto.searchText]
+              .filter(Boolean)
+              .join(" "),
+          );
+          return haystack.includes(normalizedTerm);
+        })
+        .slice(0, limit)
+        .map((product) => this.toAdminProductListItem(product));
+    } catch (error) {
+      console.error("Error al buscar productos admin:", error);
+      throw new Error("Error al buscar productos para admin");
+    }
+  }
+
   private getCatalogSortConfig(sort: CatalogSort): {
     field: string;
     direction: FirebaseFirestore.OrderByDirection;
