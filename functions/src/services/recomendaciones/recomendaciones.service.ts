@@ -14,6 +14,14 @@ import visitorService from "./visitor.service";
 import { diversifyCandidates } from "./utils/diversification.util";
 import { excludeProductIds } from "./utils/product-eligibility.util";
 
+const SKIP_EMPTY_CACHE_STRATEGIES = new Set<RecomendacionEstrategia>([
+  RecomendacionEstrategia.RECIENTEMENTE_VISTOS,
+  RecomendacionEstrategia.MAS_VENDIDOS,
+  RecomendacionEstrategia.POPULARIDAD,
+  RecomendacionEstrategia.TENDENCIAS,
+  RecomendacionEstrategia.NOVEDADES,
+]);
+
 const SECTION_TITLES: Record<RecomendacionEstrategia, { titulo: string; subtitulo?: string }> = {
   [RecomendacionEstrategia.RECIENTEMENTE_VISTOS]: {
     titulo: "Vistos recientemente",
@@ -24,16 +32,16 @@ const SECTION_TITLES: Record<RecomendacionEstrategia, { titulo: string; subtitul
     subtitulo: "Basado en tu actividad",
   },
   [RecomendacionEstrategia.MAS_VENDIDOS]: {
-    titulo: "Los más vendidos",
-    subtitulo: "Favoritos de la afición",
+    titulo: "Más comprados",
+    subtitulo: "Top ventas de la tienda",
   },
   [RecomendacionEstrategia.TENDENCIAS]: {
     titulo: "En tendencia",
     subtitulo: "Crecimiento reciente",
   },
   [RecomendacionEstrategia.POPULARIDAD]: {
-    titulo: "Populares ahora",
-    subtitulo: "Alta demanda en la tienda",
+    titulo: "Populares",
+    subtitulo: "Lo más visto y guardado",
   },
   [RecomendacionEstrategia.SIMILARES]: {
     titulo: "Productos similares",
@@ -47,16 +55,16 @@ const SECTION_TITLES: Record<RecomendacionEstrategia, { titulo: string; subtitul
     subtitulo: "Piezas que combinan con tu selección",
   },
   [RecomendacionEstrategia.COMPRAR_NUEVAMENTE]: {
-    titulo: "Comprar nuevamente",
-    subtitulo: "Tus favoritos de siempre",
+    titulo: "Volver a comprar",
+    subtitulo: "Tus compras anteriores",
   },
   [RecomendacionEstrategia.NOVEDADES]: {
     titulo: "Novedades",
     subtitulo: "Lo más reciente del catálogo",
   },
   [RecomendacionEstrategia.OFERTAS_RELEVANTES]: {
-    titulo: "Ofertas relevantes",
-    subtitulo: "Ahorra en piezas seleccionadas",
+    titulo: "Ofertas dinámicas",
+    subtitulo: "Descuentos en piezas con mayor demanda",
   },
   [RecomendacionEstrategia.POR_CATEGORIA]: {
     titulo: "Por categoría",
@@ -160,7 +168,7 @@ class RecomendacionesService {
 
     let productIds = await cacheService.getCachedProductIds(cacheKey, params.estrategia);
 
-    if (!productIds) {
+    if (productIds === null) {
       const candidates = await this.runStrategy(enrichedContext, params.estrategia, limite * 2);
       const productsById = await productCardsService.getProductsByIds(
         candidates.map((item) => item.productoId),
@@ -184,12 +192,18 @@ class RecomendacionesService {
         ).slice(0, limite);
       }
 
-      await cacheService.setCachedProductIds({
-        contextKey: cacheKey,
-        estrategia: params.estrategia,
-        productoIds: productIds,
-        ttlSeconds: config.cacheTtlSegundos,
-      });
+      const shouldCache =
+        productIds.length > 0 ||
+        !SKIP_EMPTY_CACHE_STRATEGIES.has(params.estrategia);
+
+      if (shouldCache) {
+        await cacheService.setCachedProductIds({
+          contextKey: cacheKey,
+          estrategia: params.estrategia,
+          productoIds: productIds,
+          ttlSeconds: config.cacheTtlSegundos,
+        });
+      }
     }
 
     const items = await productCardsService.buildCatalogCards(productIds || []);

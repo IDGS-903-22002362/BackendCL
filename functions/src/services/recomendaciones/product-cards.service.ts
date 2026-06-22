@@ -87,6 +87,9 @@ class ProductCardsService {
         Array.isArray(product.imagenes) && product.imagenes.length > 0
           ? product.imagenes[0]
           : null,
+      imagenes: Array.isArray(product.imagenes)
+        ? product.imagenes.filter(Boolean)
+        : [],
       stockTotal,
       disponible:
         typeof product.disponible === "boolean"

@@ -14,6 +14,7 @@ export const recalculateRecommendationAggregates = functions.pubsub
     await Promise.all([
       aggregatesService.recalculateBestSellers(),
       aggregatesService.recalculateTrending(),
+      aggregatesService.recalculateDestacados(),
       aggregatesService.recalculatePopularity(),
       aggregatesService.recalculateFrequentlyBoughtTogether(),
     ]);

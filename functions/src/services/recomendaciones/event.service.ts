@@ -3,6 +3,7 @@ import { firestoreTienda } from "../../config/firebase";
 import {
   RecomendacionEvento,
   RecomendacionEventoTipo,
+  RecomendacionEstrategia,
 } from "../../models/recomendaciones.model";
 import {
   RECOMENDACIONES_DEFAULT_RETENTION_DAYS,
@@ -12,6 +13,7 @@ import { recomendacionCollections } from "./collections";
 import visitorService from "./visitor.service";
 import metricsService from "./metrics.service";
 import configService from "./config.service";
+import cacheService from "./cache.service";
 
 type TrackEventInput = Omit<
   RecomendacionEvento,
@@ -71,6 +73,13 @@ class EventService {
 
     await firestoreTienda.collection(recomendacionCollections.eventos).add(payload);
     await metricsService.incrementFromEvent(payload);
+
+    if (input.tipo === RecomendacionEventoTipo.VISTA_PRODUCTO) {
+      await cacheService.invalidateByEstrategias([
+        RecomendacionEstrategia.RECIENTEMENTE_VISTOS,
+        RecomendacionEstrategia.PARA_TI,
+      ]);
+    }
 
     return { accepted: true };
   }

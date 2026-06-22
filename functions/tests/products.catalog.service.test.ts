@@ -134,6 +134,7 @@ jest.mock("../src/config/firebase", () => ({
     collection: (name: string) => ({
       ...createQuery(name),
       doc: (id: string) => ({
+        id,
         get: async () => ({
           exists: Boolean(dbState[name]?.[id]),
           id,
@@ -141,6 +142,13 @@ jest.mock("../src/config/firebase", () => ({
         }),
       }),
     }),
+    getAll: async (...refs: Array<{ id: string }>) =>
+      refs.map((ref) => ({
+        exists: Boolean(dbState.productos?.[ref.id]),
+        id: ref.id,
+        data: () =>
+          dbState.productos?.[ref.id] ? clone(dbState.productos[ref.id]) : undefined,
+      })),
   },
 }));
 
@@ -314,7 +322,29 @@ describe("ProductService.listCatalogProducts", () => {
     expect(result.items.map((item) => item.id)).toEqual(["prod_1"]);
   });
 
-  it("returns an empty page for onlyOffers without applying side effects", async () => {
+  it("filters unavailable products from destacados when onlyAvailable is true", async () => {
+    const availableOnly = await productService.listCatalogProducts({
+      limit: 24,
+      sort: "destacados",
+      onlyOffers: false,
+      onlyAvailable: true,
+    });
+
+    const includingUnavailable = await productService.listCatalogProducts({
+      limit: 24,
+      sort: "destacados",
+      onlyOffers: false,
+      onlyAvailable: false,
+    });
+
+    expect(availableOnly.items.map((item) => item.id)).toEqual(["prod_1"]);
+    expect(includingUnavailable.items.map((item) => item.id)).toEqual([
+      "prod_1",
+      "prod_2",
+    ]);
+  });
+
+  it("maps onlyOffers=true to ofertas_populares ranking", async () => {
     const result = await productService.listCatalogProducts({
       limit: 24,
       sort: "precio_asc",

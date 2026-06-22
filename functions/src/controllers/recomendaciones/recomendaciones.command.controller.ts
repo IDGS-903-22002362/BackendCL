@@ -53,6 +53,7 @@ export const rebuildAggregates = async (_req: Request, res: Response) => {
     await Promise.all([
       aggregatesService.recalculateBestSellers(),
       aggregatesService.recalculateTrending(),
+      aggregatesService.recalculateDestacados(),
       aggregatesService.recalculatePopularity(),
       aggregatesService.recalculateFrequentlyBoughtTogether(),
     ]);

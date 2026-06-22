@@ -120,7 +120,7 @@ export interface RecomendacionAgregadoProducto {
 
 export interface RecomendacionAgregadoDocumento {
   id: string;
-  tipo: "mas_vendidos" | "tendencias" | "popularidad" | "comprados_juntos";
+  tipo: "mas_vendidos" | "tendencias" | "popularidad" | "comprados_juntos" | "destacados";
   productoId?: string;
   items: RecomendacionAgregadoProducto[];
   pares?: Array<{ productoIdA: string; productoIdB: string; score: number }>;

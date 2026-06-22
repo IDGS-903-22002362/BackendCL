@@ -7,6 +7,8 @@ import {
   RecomendacionCandidato,
   RecomendacionContexto,
   RecomendacionEstrategia,
+  RecomendacionEvento,
+  RecomendacionEventoTipo,
 } from "../../models/recomendaciones.model";
 import { Producto } from "../../models/producto.model";
 import productService from "../product.service";
@@ -163,6 +165,203 @@ class AggregatesService {
     });
   }
 
+  async recalculateDestacados(): Promise<void> {
+    const cutoff = Timestamp.fromDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+
+    const eventsSnap = await firestoreTienda
+      .collection(recomendacionCollections.eventos)
+      .where("createdAt", ">=", cutoff)
+      .limit(5000)
+      .get();
+
+    const scores = new Map<
+      string,
+      { vistas: number; clics: number; score: number }
+    >();
+
+    eventsSnap.docs.forEach((doc) => {
+      const data = doc.data() as RecomendacionEvento;
+      if (!data.productoId) {
+        return;
+      }
+
+      const productoId = String(data.productoId);
+      const current = scores.get(productoId) ?? { vistas: 0, clics: 0, score: 0 };
+
+      if (data.tipo === RecomendacionEventoTipo.VISTA_PRODUCTO) {
+        current.vistas += 1;
+        current.score += 1;
+      } else if (data.tipo === RecomendacionEventoTipo.CLIC_PRODUCTO) {
+        current.clics += 1;
+        current.score += 2;
+      } else {
+        return;
+      }
+
+      scores.set(productoId, current);
+    });
+
+    const items = Array.from(scores.entries())
+      .map(([productoId, metrics]) => ({
+        productoId,
+        score: metrics.score,
+        vistas: metrics.vistas,
+        clics: metrics.clics,
+      }))
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          right.clics - left.clics ||
+          right.vistas - left.vistas,
+      )
+      .slice(0, 100);
+
+    await this.saveAggregate({
+      id: "destacados",
+      tipo: "destacados",
+      items,
+      calculatedAt: Timestamp.now(),
+      expiresAt: Timestamp.fromDate(new Date(Date.now() + 6 * 60 * 60 * 1000)),
+    });
+  }
+
+  private async getAggregateRankedProductIds(
+    aggregateId: RecomendacionAgregadoDocumento["tipo"],
+    limit: number,
+    resolveFallbackIds: () => Promise<string[]>,
+  ): Promise<string[]> {
+    const aggregate = await this.getAggregate(aggregateId);
+    const analyticsIds = (aggregate?.items ?? [])
+      .map((item) => item.productoId)
+      .filter(Boolean);
+
+    if (analyticsIds.length >= Math.min(limit, 4)) {
+      return analyticsIds.slice(0, limit);
+    }
+
+    const fallbackIds = await resolveFallbackIds();
+    return uniqueProductIds([...analyticsIds, ...fallbackIds]).slice(0, limit);
+  }
+
+  async getDestacadosRankedProductIds(limit = 100): Promise<string[]> {
+    return this.getAggregateRankedProductIds("destacados", limit, async () => {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .orderBy("destacado", "desc")
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+
+      return snapshot.docs.map((doc) => doc.id);
+    });
+  }
+
+  async getPopularesRankedProductIds(limit = 100): Promise<string[]> {
+    return this.getAggregateRankedProductIds("popularidad", limit, () =>
+      this.getDestacadosRankedProductIds(limit),
+    );
+  }
+
+  async getMasCompradosRankedProductIds(limit = 100): Promise<string[]> {
+    return this.getAggregateRankedProductIds("mas_vendidos", limit, async () => {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get();
+
+      return snapshot.docs.map((doc) => doc.id);
+    });
+  }
+
+  async getActiveOfferProductIds(limit = 300): Promise<string[]> {
+    const [products, ofertasActivas] = await Promise.all([
+      productCardsService.listEligibleActiveProducts(Math.min(limit, 500)),
+      ofertasService.listarOfertasActivas(),
+    ]);
+
+    const ids: string[] = [];
+
+    for (const product of products) {
+      const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
+        id: product.id || "",
+        precioPublico: product.precioPublico,
+        categoriaId: product.categoriaId,
+        lineaId: product.lineaId,
+      });
+
+      if (mejorOferta) {
+        ids.push(product.id || "");
+      }
+    }
+
+    return uniqueProductIds(ids.filter(Boolean)).slice(0, limit);
+  }
+
+  private async rankOfferProductIds(
+    rankedIds: string[],
+    limit: number,
+  ): Promise<string[]> {
+    const offerIds = await this.getActiveOfferProductIds(Math.max(limit, 200));
+    if (offerIds.length === 0) {
+      return [];
+    }
+
+    const offerSet = new Set(offerIds);
+    const ranked = rankedIds.filter((id) => offerSet.has(id));
+    const remaining = offerIds.filter((id) => !ranked.includes(id));
+
+    return uniqueProductIds([...ranked, ...remaining]).slice(0, limit);
+  }
+
+  async getOfertasPopularesRankedProductIds(limit = 100): Promise<string[]> {
+    const popularIds = await this.getPopularesRankedProductIds(Math.max(limit, 200));
+    return this.rankOfferProductIds(popularIds, limit);
+  }
+
+  async getOfertasMasCompradasRankedProductIds(limit = 100): Promise<string[]> {
+    const bestSellerIds = await this.getMasCompradosRankedProductIds(
+      Math.max(limit, 200),
+    );
+    return this.rankOfferProductIds(bestSellerIds, limit);
+  }
+
+  async getOfertasRecientesRankedProductIds(limit = 100): Promise<string[]> {
+    const [ofertasActivas, snapshot] = await Promise.all([
+      ofertasService.listarOfertasActivas(),
+      firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .orderBy("createdAt", "desc")
+        .limit(Math.max(limit, 200))
+        .get(),
+    ]);
+
+    const ids: string[] = [];
+
+    for (const doc of snapshot.docs) {
+      const product = { id: doc.id, ...(doc.data() as Producto) };
+      const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
+        id: product.id || doc.id,
+        precioPublico: product.precioPublico,
+        categoriaId: product.categoriaId,
+        lineaId: product.lineaId,
+      });
+
+      if (mejorOferta) {
+        ids.push(doc.id);
+      }
+
+      if (ids.length >= limit) {
+        break;
+      }
+    }
+
+    return ids;
+  }
+
   async recalculatePopularity(): Promise<void> {
     const cutoff = Timestamp.fromDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
 
@@ -193,12 +392,22 @@ class AggregatesService {
     });
 
     eventsSnap.docs.forEach((doc) => {
-      const data = doc.data() as { productoId?: string; tipo?: string };
+      const data = doc.data() as RecomendacionEvento;
       if (!data.productoId) {
         return;
       }
-      const weight =
-        data.tipo === "agregar_carrito" ? 2 : data.tipo === "vista_producto" ? 0.5 : 1;
+
+      let weight = 1;
+      if (data.tipo === RecomendacionEventoTipo.AGREGAR_CARRITO) {
+        weight = 2;
+      } else if (data.tipo === RecomendacionEventoTipo.VISTA_PRODUCTO) {
+        weight = 0.5;
+      } else if (data.tipo === RecomendacionEventoTipo.CLIC_PRODUCTO) {
+        weight = 1.5;
+      } else if (data.tipo === RecomendacionEventoTipo.FAVORITO) {
+        weight = 2.5;
+      }
+
       scores.set(data.productoId, (scores.get(data.productoId) ?? 0) + weight);
     });
 
@@ -286,6 +495,55 @@ class AggregatesService {
     }));
   }
 
+  private async getCatalogRecencyFallbackCandidates(
+    limite: number,
+    estrategia: RecomendacionEstrategia,
+  ): Promise<RecomendacionCandidato[]> {
+    const response = await productService.listCatalogProducts({
+      limit: limite,
+      sort: "recientes",
+      onlyAvailable: true,
+      onlyOffers: false,
+    });
+
+    return response.items.map((item, index) => ({
+      productoId: item.id,
+      score: limite - index,
+      estrategia,
+    }));
+  }
+
+  private async getRankingFallbackCandidates(
+    limite: number,
+    estrategia: RecomendacionEstrategia,
+  ): Promise<RecomendacionCandidato[]> {
+    const productIds = await this.getDestacadosRankedProductIds(limite);
+
+    return productIds.map((productoId, index) => ({
+      productoId,
+      score: limite - index,
+      estrategia,
+    }));
+  }
+
+  private async resolveAggregateCandidates(
+    aggregateTipo: RecomendacionAgregadoDocumento["tipo"],
+    estrategia: RecomendacionEstrategia,
+    limite: number,
+    fallback: "ranking" | "recientes",
+  ): Promise<RecomendacionCandidato[]> {
+    const aggregate = await this.getAggregate(aggregateTipo);
+    const candidates = this.aggregateToCandidates(aggregate, estrategia, limite);
+
+    if (candidates.length > 0) {
+      return candidates;
+    }
+
+    return fallback === "ranking"
+      ? this.getRankingFallbackCandidates(limite, estrategia)
+      : this.getCatalogRecencyFallbackCandidates(limite, estrategia);
+  }
+
   async getRecentlyViewed(context: RecomendacionContexto, limite: number) {
     const productIds = await eventService.listRecentProductIds({
       usuarioId: context.usuarioId,
@@ -370,18 +628,30 @@ class AggregatesService {
   }
 
   async getBestSellers(_context: RecomendacionContexto, limite: number) {
-    const aggregate = await this.getAggregate("mas_vendidos");
-    return this.aggregateToCandidates(aggregate, RecomendacionEstrategia.MAS_VENDIDOS, limite);
+    return this.resolveAggregateCandidates(
+      "mas_vendidos",
+      RecomendacionEstrategia.MAS_VENDIDOS,
+      limite,
+      "recientes",
+    );
   }
 
   async getTrending(_context: RecomendacionContexto, limite: number) {
-    const aggregate = await this.getAggregate("tendencias");
-    return this.aggregateToCandidates(aggregate, RecomendacionEstrategia.TENDENCIAS, limite);
+    return this.resolveAggregateCandidates(
+      "tendencias",
+      RecomendacionEstrategia.TENDENCIAS,
+      limite,
+      "recientes",
+    );
   }
 
   async getPopularity(_context: RecomendacionContexto, limite: number) {
-    const aggregate = await this.getAggregate("popularidad");
-    return this.aggregateToCandidates(aggregate, RecomendacionEstrategia.POPULARIDAD, limite);
+    return this.resolveAggregateCandidates(
+      "popularidad",
+      RecomendacionEstrategia.POPULARIDAD,
+      limite,
+      "ranking",
+    );
   }
 
   async getSimilar(context: RecomendacionContexto, limite: number) {
@@ -494,17 +764,24 @@ class AggregatesService {
       return [];
     }
 
-    const cutoff = Timestamp.fromDate(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000));
+    const cutoffMs = Date.now() - 365 * 24 * 60 * 60 * 1000;
     const snapshot = await firestoreTienda
       .collection(ORDENES_COLLECTION)
       .where("usuarioId", "==", context.usuarioId)
-      .where("createdAt", ">=", cutoff)
       .get();
 
     const counts = new Map<string, number>();
 
     snapshot.docs.forEach((doc) => {
       const order = doc.data() as Orden;
+      const createdAtMs =
+        order.createdAt &&
+        typeof order.createdAt.toMillis === "function"
+          ? order.createdAt.toMillis()
+          : 0;
+      if (createdAtMs < cutoffMs) {
+        return;
+      }
       if (!isOrdenPagada(order)) {
         return;
       }
@@ -524,19 +801,33 @@ class AggregatesService {
   }
 
   async getNewArrivals(_context: RecomendacionContexto, limite: number) {
-    const products = await productCardsService.listEligibleActiveProducts(limite * 2);
-    return products.slice(0, limite).map((product, index) => ({
-      productoId: product.id || "",
+    const response = await productService.listCatalogProducts({
+      limit: limite,
+      sort: "recientes",
+      onlyAvailable: true,
+      onlyOffers: false,
+    });
+
+    return response.items.map((item, index) => ({
+      productoId: item.id,
       score: limite - index,
       estrategia: RecomendacionEstrategia.NOVEDADES,
     }));
   }
 
   async getRelevantOffers(context: RecomendacionContexto, limite: number) {
-    const [products, ofertasActivas] = await Promise.all([
+    const [products, ofertasActivas, popularAggregate] = await Promise.all([
       productCardsService.listEligibleActiveProducts(200),
       ofertasService.listarOfertasActivas(),
+      this.getAggregate("popularidad"),
     ]);
+
+    const popularityByProductId = new Map<string, number>(
+      (popularAggregate?.items ?? []).map((item, index) => [
+        item.productoId,
+        item.score ?? popularAggregate!.items!.length - index,
+      ]),
+    );
 
     const candidates: RecomendacionCandidato[] = [];
 
@@ -552,10 +843,12 @@ class AggregatesService {
         continue;
       }
 
+      const popularityScore = popularityByProductId.get(product.id || "") ?? 0;
       const ahorro = product.precioPublico - mejorOferta.precioFinal;
+
       candidates.push({
         productoId: product.id || "",
-        score: ahorro,
+        score: popularityScore * 100 + ahorro,
         estrategia: RecomendacionEstrategia.OFERTAS_RELEVANTES,
       });
     }
