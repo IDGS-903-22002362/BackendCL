@@ -102,9 +102,52 @@ export function tieneUsosDisponiblesCodigoPromocion(
   return usosActuales < usoMaximoTotal;
 }
 
+function getItemCategoriaIds(
+  item: ItemValidarCodigoPromocionDto & { categoriaIds?: string[] },
+): string[] {
+  const ids = new Set<string>();
+
+  if (typeof item.categoriaId === "string" && item.categoriaId.trim()) {
+    ids.add(item.categoriaId.trim());
+  }
+
+  if (Array.isArray(item.categoriaIds)) {
+    for (const categoriaId of item.categoriaIds) {
+      if (typeof categoriaId === "string" && categoriaId.trim()) {
+        ids.add(categoriaId.trim());
+      }
+    }
+  }
+
+  return [...ids];
+}
+
+function getItemLineaIds(
+  item: ItemValidarCodigoPromocionDto & { lineaIds?: string[] },
+): string[] {
+  const ids = new Set<string>();
+
+  if (typeof item.lineaId === "string" && item.lineaId.trim()) {
+    ids.add(item.lineaId.trim());
+  }
+
+  if (Array.isArray(item.lineaIds)) {
+    for (const lineaId of item.lineaIds) {
+      if (typeof lineaId === "string" && lineaId.trim()) {
+        ids.add(lineaId.trim());
+      }
+    }
+  }
+
+  return [...ids];
+}
+
 export function codigoPromocionAplicaAItem(
   codigoPromocion: CodigoPromocion,
-  item: ItemValidarCodigoPromocionDto,
+  item: ItemValidarCodigoPromocionDto & {
+    categoriaIds?: string[];
+    lineaIds?: string[];
+  },
 ): boolean {
   if (codigoPromocion.tallaIds.length > 0) {
     if (!item.tallaId) return false;
@@ -116,13 +159,23 @@ export function codigoPromocionAplicaAItem(
   }
 
   if (codigoPromocion.aplicaA === "categorias") {
-    if (!item.categoriaId) return false;
-    return codigoPromocion.categoriaIds.includes(item.categoriaId);
+    const itemCategoriaIds = getItemCategoriaIds(item);
+
+    if (itemCategoriaIds.length === 0) return false;
+
+    return itemCategoriaIds.some((categoriaId) =>
+      codigoPromocion.categoriaIds.includes(categoriaId),
+    );
   }
 
   if (codigoPromocion.aplicaA === "lineas") {
-    if (!item.lineaId) return false;
-    return codigoPromocion.lineaIds.includes(item.lineaId);
+    const itemLineaIds = getItemLineaIds(item);
+
+    if (itemLineaIds.length === 0) return false;
+
+    return itemLineaIds.some((lineaId) =>
+      codigoPromocion.lineaIds.includes(lineaId),
+    );
   }
 
   return false;

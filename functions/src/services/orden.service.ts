@@ -256,6 +256,7 @@ export class OrdenService {
       // PASO 1: Validar y obtener información de todos los productos
       const itemsValidados: ItemOrden[] = [];
 let subtotalCalculado = 0;
+let tieneItemsConOferta = false;
 let descuentoCodigoPromocion = 0;
 let codigoPromocionSnapshot:
   | {
@@ -519,6 +520,7 @@ console.log(
               precioFinalOferta >= 0;
 
             if (ofertaValida) {
+              tieneItemsConOferta = true;
               itemValidado.precioUnitario = roundCurrency(precioFinalOferta);
               itemValidado.subtotal = roundCurrency(subtotalFinalOferta);
 
@@ -542,6 +544,12 @@ console.log(
       }
 
       if (codigoPromocion) {
+  if (tieneItemsConOferta) {
+    throw new Error(
+      "No se puede aplicar un código promocional cuando hay productos con oferta en el carrito.",
+    );
+  }
+
   const resultadoCodigo = await codigosPromocionService.validar({
     codigo: codigoPromocion,
     items: itemsParaCodigoPromocion,
