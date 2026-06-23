@@ -7,6 +7,23 @@ import aiSessionService from "./memory/session.service";
 import { promises as fs } from "fs";
 
 class AiFileService {
+  async deleteUserImage(input: {
+    userId: string;
+    assetId: string;
+  }): Promise<void> {
+    const asset = await tryOnAssetService.getAssetById(input.assetId);
+    if (!asset || asset.userId !== input.userId) {
+      throw new Error("Imagen no encontrada");
+    }
+
+    if (asset.kind !== TryOnAssetKind.USER_UPLOAD) {
+      throw new Error("Solo puedes eliminar fotos personales subidas para try-on");
+    }
+
+    await aiStorageService.deleteObject(asset.objectPath, asset.bucket);
+    await tryOnAssetService.deleteAsset(input.assetId);
+  }
+
   async uploadUserImage(input: {
     userId: string;
     sessionId?: string;
@@ -25,11 +42,15 @@ class AiFileService {
 
     try {
       const validated = await aiUploadValidatorService.validateImage(input.file.path);
+      const sanitized = await aiUploadValidatorService.sanitizeImage(
+        input.file.path,
+        validated,
+      );
       const folder = `${aiConfig.storage.uploadFolder}/${input.userId}`;
       const uploaded = await aiStorageService.uploadPrivateFileFromPath({
-        filePath: input.file.path,
-        originalName: input.file.originalname,
-        mimeType: validated.mimeType,
+        filePath: sanitized.outputPath,
+        originalName: `user-upload.${sanitized.mimeType === "image/png" ? "png" : "jpg"}`,
+        mimeType: sanitized.mimeType,
         folder,
       });
 
@@ -39,8 +60,8 @@ class AiFileService {
         kind: TryOnAssetKind.USER_UPLOAD,
         bucket: uploaded.bucket,
         objectPath: uploaded.objectPath,
-        mimeType: validated.mimeType,
-        fileName: input.file.originalname,
+        mimeType: sanitized.mimeType,
+        fileName: "user-upload",
         sizeBytes: uploaded.sizeBytes,
         width: validated.width,
         height: validated.height,
@@ -48,6 +69,8 @@ class AiFileService {
       });
     } finally {
       await fs.unlink(input.file.path).catch(() => undefined);
+      const sanitizedPath = `${input.file.path}.sanitized.jpg`;
+      await fs.unlink(sanitizedPath).catch(() => undefined);
     }
   }
 }

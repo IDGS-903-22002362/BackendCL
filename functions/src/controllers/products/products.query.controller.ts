@@ -177,6 +177,26 @@ export const search = async (req: Request, res: Response) => {
   }
 };
 
+export const searchAdmin = async (req: Request, res: Response) => {
+  try {
+    const { termino } = req.params;
+    const productos = await productService.searchAdminProducts(termino);
+
+    return res.status(200).json({
+      success: true,
+      count: productos.length,
+      data: productos,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/productos/admin/buscar/:termino:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al buscar productos para admin",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
 export const getStockBySize = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

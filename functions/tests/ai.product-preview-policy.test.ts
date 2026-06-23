@@ -36,7 +36,7 @@ describe("AI product preview policy", () => {
     } as never);
   });
 
-  it("clasifica jersey como body_tryon", async () => {
+  it("clasifica jersey adulto como body_tryon", async () => {
     mockedCategoryService.getCategoryById.mockResolvedValue({
       id: "jersey",
       nombre: "Jersey Oficial",
@@ -56,32 +56,68 @@ describe("AI product preview policy", () => {
     });
   });
 
-  it("clasifica gorra como accessory_mockup", async () => {
+  it("clasifica pantalon adulto como body_tryon", async () => {
+    mockedCategoryService.getCategoryById.mockResolvedValue({
+      id: "pantalon",
+      nombre: "Pantalón",
+    } as never);
+    mockedLineService.getLineById.mockResolvedValue({
+      id: "dama",
+      nombre: "Dama",
+      codigo: 2,
+    } as never);
+
+    const result = await productPreviewPolicyService.resolvePolicy({
+      id: "prod_pantalon",
+      categoriaId: "pantalon",
+      lineaId: "dama",
+      descripcion: "Pantalón oficial",
+    } as never);
+
+    expect(result.previewMode).toBe(ProductPreviewMode.BODY_TRYON);
+  });
+
+  it("rechaza gorra aunque sea linea adulta", async () => {
     mockedCategoryService.getCategoryById.mockResolvedValue({
       id: "gorra",
       nombre: "Gorra",
-    } as never);
-    mockedLineService.getLineById.mockResolvedValue({
-      id: "souvenir",
-      nombre: "Souvenir",
-      codigo: 5,
     } as never);
 
     const result = await productPreviewPolicyService.resolvePolicy({
       id: "prod_2",
       categoriaId: "gorra",
-      lineaId: "souvenir",
+      lineaId: "caballero",
       descripcion: "Gorra oficial verde",
     } as never);
 
     expect(result).toMatchObject({
-      previewMode: ProductPreviewMode.ACCESSORY_MOCKUP,
-      productPreviewType: ProductPreviewType.ACCESSORY,
+      previewMode: ProductPreviewMode.UNSUPPORTED,
       classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
     });
   });
 
-  it("clasifica balon como prop_mockup", async () => {
+  it("rechaza playera infantil", async () => {
+    mockedCategoryService.getCategoryById.mockResolvedValue({
+      id: "playera",
+      nombre: "Playera",
+    } as never);
+    mockedLineService.getLineById.mockResolvedValue({
+      id: "infantil",
+      nombre: "Infantil",
+      codigo: 3,
+    } as never);
+
+    const result = await productPreviewPolicyService.resolvePolicy({
+      id: "prod_infantil",
+      categoriaId: "playera",
+      lineaId: "infantil",
+      descripcion: "Playera infantil verde",
+    } as never);
+
+    expect(result.previewMode).toBe(ProductPreviewMode.UNSUPPORTED);
+  });
+
+  it("rechaza balon como unsupported", async () => {
     mockedCategoryService.getCategoryById.mockResolvedValue({
       id: "balon",
       nombre: "Balón",
@@ -100,9 +136,8 @@ describe("AI product preview policy", () => {
     } as never);
 
     expect(result).toMatchObject({
-      previewMode: ProductPreviewMode.PROP_MOCKUP,
-      productPreviewType: ProductPreviewType.PROP,
-      classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
+      previewMode: ProductPreviewMode.UNSUPPORTED,
+      productPreviewType: ProductPreviewType.UNKNOWN,
     });
   });
 

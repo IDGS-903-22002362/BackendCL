@@ -203,7 +203,6 @@ class VertexTryOnAdapter {
         this.baseLogger.error("vertex_tryon_failed", {
           status: response.status,
           code,
-          response: rawResponse,
         });
 
         throw new VertexTryOnError(

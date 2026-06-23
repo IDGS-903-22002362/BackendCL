@@ -284,7 +284,9 @@ describe("TASK-065 - Movimientos de inventario", () => {
         productoId: "prod_1",
         cantidad: 2,
       }),
-    ).rejects.toThrow("ordenId es requerido");
+    ).rejects.toThrow(
+      "ordenId o ventaPosId es requerido para movimientos tipo venta o devolucion",
+    );
   });
 
   it("rechaza registrar tipo ajuste desde registerMovement", async () => {

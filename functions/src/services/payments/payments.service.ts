@@ -14,6 +14,7 @@ import {
 import { RolUsuario } from "../../models/usuario.model";
 import logger from "../../utils/logger";
 import productService from "../product.service";
+import inventoryReservationService from "../inventory-reservation.service";
 import {
   createPaymentValidationError,
   PaymentApiError,
@@ -439,6 +440,13 @@ backendOrderShipping: order.shipping,
 
     await this.paymentAttemptRepo.update(attempt.id!, {
       status: PaymentStatus.PENDING_PROVIDER,
+    });
+
+    await inventoryReservationService.reserveForOrder({
+      ordenId: order.id!,
+      usuarioId: user.uid,
+      paymentAttemptId: attempt.id,
+      idempotencyPrefix: "aplazo",
     });
 
     try {

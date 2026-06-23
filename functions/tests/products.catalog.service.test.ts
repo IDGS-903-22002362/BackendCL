@@ -344,6 +344,46 @@ describe("ProductService.listCatalogProducts", () => {
     ]);
   });
 
+  it("includes products with stock when stored disponible is stale", async () => {
+    dbState.productos.prod_4 = {
+      clave: "STK-001",
+      descripcion: "Producto con stock y disponible desactualizado",
+      searchText: "producto stock disponible desactualizado stk-001 jerseys hombre",
+      lineaId: "hombre",
+      categoriaId: "jerseys",
+      precioPublico: 499,
+      precioCompra: 200,
+      existencias: 10,
+      disponible: false,
+      proveedorId: "prov_1",
+      tallaIds: [],
+      inventarioPorTalla: [],
+      stockMinimoGlobal: 5,
+      stockMinimoPorTalla: [],
+      imagenes: [],
+      detalleIds: [],
+      ratingSummary: { average: 0, count: 0 },
+      activo: true,
+      createdAt: ts("2026-05-01T00:00:00.000Z"),
+      updatedAt: ts("2026-06-04T00:00:00.000Z"),
+    };
+
+    const result = await productService.listCatalogProducts({
+      limit: 24,
+      sort: "recientes",
+      onlyOffers: false,
+      onlyAvailable: true,
+    });
+
+    expect(result.items.map((item) => item.id)).toContain("prod_4");
+    expect(
+      result.items.find((item) => item.id === "prod_4"),
+    ).toMatchObject({
+      stockTotal: 10,
+      disponible: true,
+    });
+  });
+
   it("maps onlyOffers=true to ofertas_populares ranking", async () => {
     const result = await productService.listCatalogProducts({
       limit: 24,

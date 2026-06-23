@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { RolUsuario } from "../../models/usuario.model";
 import aiConfig from "../../config/ai.config";
 import { toAiErrorPayload } from "../../services/ai/ai.error";
+import aiStorageService from "../../services/ai/storage/ai-storage.service";
 import tryOnWorkflowService from "../../services/ai/jobs/tryon-workflow.service";
 import tryOnJobService from "../../services/ai/jobs/tryon-job.service";
 import logger from "../../utils/logger";
@@ -18,6 +19,7 @@ export const createTryOnJob = async (req: Request, res: Response) => {
       sku: req.body.sku,
       userImageAssetId: req.body.userImageAssetId,
       consentAccepted: req.body.consentAccepted,
+      idempotencyKey: req.body.idempotencyKey,
       requestedByRole: req.user!.rol as RolUsuario,
     });
 
@@ -101,4 +103,45 @@ export const getTryOnDownloadLink = async (req: Request, res: Response) => {
       expiresInSec: aiConfig.storage.signedUrlTtlSec,
     },
   });
+};
+
+export const streamTryOnImage = async (req: Request, res: Response) => {
+  const job = await tryOnWorkflowService.getJobStatus(req.params.id);
+  if (!job) {
+    return res.status(404).json({ success: false, message: "Job de try-on no encontrado" });
+  }
+
+  if (job.userId !== req.user!.uid && req.user!.rol !== RolUsuario.ADMIN) {
+    return res.status(403).json({ success: false, message: "No tienes permisos para ver este try-on" });
+  }
+
+  const asset = await tryOnWorkflowService.getDownloadAsset(req.params.id);
+  if (!asset) {
+    return res.status(409).json({
+      success: false,
+      message: "El resultado del try-on aun no esta disponible",
+    });
+  }
+
+  try {
+    const downloaded = await aiStorageService.downloadGcsFile(
+      aiStorageService.buildGcsUri(asset.objectPath, asset.bucket),
+    );
+
+    res.setHeader("Content-Type", downloaded.mimeType || "image/png");
+    res.setHeader("Cache-Control", "private, max-age=300, no-store");
+    res.setHeader("Content-Length", String(downloaded.sizeBytes));
+    return res.status(200).send(downloaded.buffer);
+  } catch (error) {
+    tryOnControllerLogger.error("tryon_image_stream_failed", {
+      jobId: req.params.id,
+      userId: req.user?.uid,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "No se pudo cargar la imagen del try-on",
+    });
+  }
 };

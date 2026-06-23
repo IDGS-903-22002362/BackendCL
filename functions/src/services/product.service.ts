@@ -26,12 +26,18 @@ import {
   AlertaStockProducto,
   AlertaStockTalla,
   ListarAlertasStockQuery,
+  TipoMovimientoInventario,
 } from "../models/inventario.model";
 import {
   completeInventarioPorTalla,
   deriveExistenciasFromSizeInventory,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
+import {
+  buildFirestoreInventoryPatch,
+  normalizeGlobalBuckets,
+  normalizeSizeBuckets,
+} from "../utils/inventory-stock.util";
 import stockAlertService from "./stock-alert.service";
 import productCardsService from "./recomendaciones/product-cards.service";
 
@@ -61,7 +67,7 @@ export class CatalogQueryError extends Error {
 export interface UpdateProductStockDTO {
   cantidadNueva: number;
   tallaId?: string;
-  tipo?: "entrada" | "salida" | "ajuste" | "venta" | "devolucion";
+  tipo?: TipoMovimientoInventario | "ajuste";
   motivo?: string;
   referencia?: string;
   ordenId?: string;
@@ -734,6 +740,43 @@ export class ProductService {
     }
   }
 
+  /**
+   * Búsqueda admin por nombre, clave o texto indexado (incluye inactivos).
+   */
+  async searchAdminProducts(
+    searchTerm: string,
+    limit = 40,
+  ): Promise<AdminProductListItemDTO[]> {
+    const normalizedTerm = this.normalizeSearchText(searchTerm);
+    if (!normalizedTerm) {
+      return [];
+    }
+
+    try {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .orderBy("updatedAt", "desc")
+        .limit(500)
+        .get();
+
+      return snapshot.docs
+        .map((doc) => this.normalizeProduct(doc.id, doc.data()))
+        .filter((producto) => {
+          const haystack = this.normalizeSearchText(
+            [producto.descripcion, producto.clave, producto.searchText]
+              .filter(Boolean)
+              .join(" "),
+          );
+          return haystack.includes(normalizedTerm);
+        })
+        .slice(0, limit)
+        .map((product) => this.toAdminProductListItem(product));
+    } catch (error) {
+      console.error("Error al buscar productos admin:", error);
+      throw new Error("Error al buscar productos para admin");
+    }
+  }
+
   private getCatalogSortConfig(sort: CatalogSort): {
     field: string;
     direction: FirebaseFirestore.OrderByDirection;
@@ -744,12 +787,13 @@ export class ProductService {
       case "precio_desc":
         return { field: "precioPublico", direction: "desc" };
       case "recientes":
-        return { field: "createdAt", direction: "desc" };
+        return { field: "updatedAt", direction: "desc" };
       case "nombre_asc":
         return { field: "descripcion", direction: "asc" };
       case "destacados":
+        return { field: "destacado", direction: "desc" };
       default:
-        return { field: "createdAt", direction: "desc" };
+        return { field: "updatedAt", direction: "desc" };
     }
   }
 
@@ -781,12 +825,21 @@ export class ProductService {
     }
   }
 
+  private getProductStockTotal(product: Producto): number {
+    return Math.max(0, Math.floor(Number(product.existencias || 0)));
+  }
+
+  private isProductAvailableForCatalog(product: Producto): boolean {
+    return this.getProductStockTotal(product) > 0;
+  }
+
   private toCatalogOrderValue(
     product: Producto,
     sortField: string,
   ): string | number | boolean | null {
-    if (sortField === "createdAt") {
-      const value = product.createdAt;
+    if (sortField === "createdAt" || sortField === "updatedAt") {
+      const value =
+        sortField === "createdAt" ? product.createdAt : product.updatedAt;
       return typeof value?.toMillis === "function" ? value.toMillis() : null;
     }
 
@@ -812,7 +865,7 @@ export class ProductService {
     value: CatalogCursor["last"]["value"],
     sortField: string,
   ): string | number | boolean | FirebaseFirestore.Timestamp | null {
-    if (sortField === "createdAt") {
+    if (sortField === "createdAt" || sortField === "updatedAt") {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new CatalogQueryError("cursor invalido para ordenamiento");
       }
@@ -856,7 +909,8 @@ export class ProductService {
     labels: { categorias: Map<string, string>; lineas: Map<string, string> },
   ): CatalogProductCardDTO {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
-    const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
+    const stockTotal = this.getProductStockTotal(product);
+    const disponible = this.isProductAvailableForCatalog(product);
 
     return {
       id: product.id || "",
@@ -881,10 +935,7 @@ export class ProductService {
         ? product.imagenes.filter(Boolean)
         : [],
       stockTotal,
-      disponible:
-        typeof product.disponible === "boolean"
-          ? product.disponible
-          : stockTotal > 0,
+      disponible,
       destacado: product.destacado === true,
     };
   }
@@ -922,19 +973,171 @@ export class ProductService {
       return false;
     }
 
-    if (filters.onlyAvailable) {
-      const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
-      const disponible =
-        typeof product.disponible === "boolean"
-          ? product.disponible
-          : stockTotal > 0;
-
-      if (!disponible) {
-        return false;
-      }
+    if (filters.onlyAvailable && !this.isProductAvailableForCatalog(product)) {
+      return false;
     }
 
     return true;
+  }
+
+  private buildCatalogFirestoreQuery(
+    filters: CatalogCursor["filters"],
+    sortConfig: { field: string; direction: FirebaseFirestore.OrderByDirection },
+  ): FirebaseFirestore.Query {
+    let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true);
+
+    if (filters.category) {
+      firestoreQuery = firestoreQuery.where("categoriaId", "==", filters.category);
+    }
+
+    if (filters.line) {
+      firestoreQuery = firestoreQuery.where("lineaId", "==", filters.line);
+    }
+
+    if (filters.talla) {
+      firestoreQuery = firestoreQuery.where(
+        "tallaIds",
+        "array-contains",
+        filters.talla,
+      );
+    }
+
+    if (filters.minPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        ">=",
+        filters.minPrice,
+      );
+    }
+
+    if (filters.maxPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        "<=",
+        filters.maxPrice,
+      );
+    }
+
+    if (filters.q) {
+      firestoreQuery = firestoreQuery
+        .where("searchText", ">=", filters.q)
+        .where("searchText", "<=", `${filters.q}\uf8ff`);
+    }
+
+    return firestoreQuery
+      .orderBy(sortConfig.field, sortConfig.direction)
+      .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
+  }
+
+  private async listCatalogProductsFromFirestore(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+    effectiveSort: CatalogSort,
+    sortConfig: { field: string; direction: FirebaseFirestore.OrderByDirection },
+  ): Promise<CatalogResponse> {
+    const pageLimit = query.limit;
+    const batchSize = Math.max(pageLimit * 3, 48);
+    const maxScanDocs = 1000;
+    const labels = await this.loadCatalogLabels();
+    const baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
+
+    let startAfterValue:
+      | string
+      | number
+      | boolean
+      | FirebaseFirestore.Timestamp
+      | null = null;
+    let startAfterId: string | null = null;
+
+    if (query.cursor) {
+      const cursor = this.decodeCatalogCursor(query.cursor);
+      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
+      startAfterValue = this.getCursorStartAfterValue(
+        cursor.last.value,
+        sortConfig.field,
+      );
+      startAfterId = cursor.last.id;
+    }
+
+    const matched: Producto[] = [];
+    let lastScannedProduct: Producto | null = null;
+    let scannedDocs = 0;
+    let firestoreExhausted = false;
+
+    while (
+      matched.length < pageLimit + 1 &&
+      !firestoreExhausted &&
+      scannedDocs < maxScanDocs
+    ) {
+      let firestoreQuery = baseQuery;
+
+      if (startAfterValue !== null && startAfterId) {
+        firestoreQuery = firestoreQuery.startAfter(
+          startAfterValue,
+          startAfterId,
+        );
+      }
+
+      const snapshot = await firestoreQuery.limit(batchSize).get();
+
+      if (snapshot.empty) {
+        firestoreExhausted = true;
+        break;
+      }
+
+      scannedDocs += snapshot.docs.length;
+
+      for (const doc of snapshot.docs) {
+        const product = this.normalizeProduct(doc.id, doc.data());
+        lastScannedProduct = product;
+
+        if (!this.matchesCatalogFilters(product, filters)) {
+          continue;
+        }
+
+        matched.push(product);
+
+        if (matched.length >= pageLimit + 1) {
+          break;
+        }
+      }
+
+      if (snapshot.docs.length < batchSize) {
+        firestoreExhausted = true;
+      } else if (matched.length < pageLimit + 1 && lastScannedProduct) {
+        startAfterValue = this.getCursorStartAfterValue(
+          this.toCatalogOrderValue(lastScannedProduct, sortConfig.field),
+          sortConfig.field,
+        );
+        startAfterId = lastScannedProduct.id || "";
+      }
+    }
+
+    const hasMore = matched.length > pageLimit;
+    const pageProducts = matched.slice(0, pageLimit);
+    const items = pageProducts.map((product) =>
+      this.toCatalogCard(product, labels),
+    );
+    const cursorProduct = pageProducts[pageProducts.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && cursorProduct
+          ? this.encodeCatalogCursor({
+              v: CURSOR_VERSION,
+              sort: effectiveSort,
+              filters,
+              last: {
+                value: this.toCatalogOrderValue(cursorProduct, sortConfig.field),
+                id: cursorProduct.id || "",
+              },
+            })
+          : null,
+    };
   }
 
   private async listCatalogProductsByAggregateRanking(
@@ -1108,6 +1311,24 @@ export class ProductService {
     );
   }
 
+  private shouldUseAggregateCatalogRanking(
+    sort: CatalogSort,
+    filters: CatalogCursor["filters"],
+  ): boolean {
+    if (filters.q) {
+      return false;
+    }
+
+    return (
+      sort === "destacados" ||
+      sort === "populares" ||
+      sort === "mas_comprados" ||
+      sort === "ofertas_populares" ||
+      sort === "ofertas_mas_compradas" ||
+      sort === "ofertas_recientes"
+    );
+  }
+
   private isOfertasCatalogSort(sort: CatalogSort): boolean {
     return (
       sort === "ofertas_populares" ||
@@ -1133,28 +1354,30 @@ export class ProductService {
     const resolvedSort = this.resolveCatalogSort(query);
     const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : resolvedSort;
 
-    if (effectiveSort === "destacados" && !filters.q) {
-      return this.listCatalogProductsByDestacados(query, filters);
-    }
+    if (this.shouldUseAggregateCatalogRanking(effectiveSort, filters)) {
+      if (effectiveSort === "destacados") {
+        return this.listCatalogProductsByDestacados(query, filters);
+      }
 
-    if (effectiveSort === "populares" && !filters.q) {
-      return this.listCatalogProductsByPopulares(query, filters);
-    }
+      if (effectiveSort === "populares") {
+        return this.listCatalogProductsByPopulares(query, filters);
+      }
 
-    if (effectiveSort === "mas_comprados" && !filters.q) {
-      return this.listCatalogProductsByMasComprados(query, filters);
-    }
+      if (effectiveSort === "mas_comprados") {
+        return this.listCatalogProductsByMasComprados(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_populares" && !filters.q) {
-      return this.listCatalogProductsByOfertasPopulares(query, filters);
-    }
+      if (effectiveSort === "ofertas_populares") {
+        return this.listCatalogProductsByOfertasPopulares(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_mas_compradas" && !filters.q) {
-      return this.listCatalogProductsByOfertasMasCompradas(query, filters);
-    }
+      if (effectiveSort === "ofertas_mas_compradas") {
+        return this.listCatalogProductsByOfertasMasCompradas(query, filters);
+      }
 
-    if (effectiveSort === "ofertas_recientes" && !filters.q) {
-      return this.listCatalogProductsByOfertasRecientes(query, filters);
+      if (effectiveSort === "ofertas_recientes") {
+        return this.listCatalogProductsByOfertasRecientes(query, filters);
+      }
     }
 
     const sortConfig = filters.q
@@ -1170,89 +1393,12 @@ export class ProductService {
       );
     }
 
-    let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
-      .collection(PRODUCTOS_COLLECTION)
-      .where("activo", "==", true);
-
-    if (filters.category) {
-      firestoreQuery = firestoreQuery.where("categoriaId", "==", filters.category);
-    }
-
-    if (filters.line) {
-      firestoreQuery = firestoreQuery.where("lineaId", "==", filters.line);
-    }
-
-    if (filters.talla) {
-      firestoreQuery = firestoreQuery.where(
-        "tallaIds",
-        "array-contains",
-        filters.talla,
-      );
-    }
-
-    if (filters.onlyAvailable) {
-      firestoreQuery = firestoreQuery.where("disponible", "==", true);
-    }
-
-    if (filters.minPrice !== undefined) {
-      firestoreQuery = firestoreQuery.where(
-        "precioPublico",
-        ">=",
-        filters.minPrice,
-      );
-    }
-
-    if (filters.maxPrice !== undefined) {
-      firestoreQuery = firestoreQuery.where(
-        "precioPublico",
-        "<=",
-        filters.maxPrice,
-      );
-    }
-
-    if (filters.q) {
-      firestoreQuery = firestoreQuery
-        .where("searchText", ">=", filters.q)
-        .where("searchText", "<=", `${filters.q}\uf8ff`);
-    }
-
-    firestoreQuery = firestoreQuery
-      .orderBy(sortConfig.field, sortConfig.direction)
-      .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
-
-    if (query.cursor) {
-      const cursor = this.decodeCatalogCursor(query.cursor);
-      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
-      firestoreQuery = firestoreQuery.startAfter(
-        this.getCursorStartAfterValue(cursor.last.value, sortConfig.field),
-        cursor.last.id,
-      );
-    }
-
-    const snapshot = await firestoreQuery.limit(query.limit + 1).get();
-    const docs = snapshot.docs.slice(0, query.limit);
-    const hasMore = snapshot.docs.length > query.limit;
-    const labels = await this.loadCatalogLabels();
-    const products = docs.map((doc) => this.normalizeProduct(doc.id, doc.data()));
-    const items = products.map((product) => this.toCatalogCard(product, labels));
-    const lastProduct = products[products.length - 1];
-
-    return {
-      items,
-      hasMore,
-      nextCursor:
-        hasMore && lastProduct
-          ? this.encodeCatalogCursor({
-              v: CURSOR_VERSION,
-              sort: effectiveSort,
-              filters,
-              last: {
-                value: this.toCatalogOrderValue(lastProduct, sortConfig.field),
-                id: lastProduct.id || "",
-              },
-            })
-          : null,
-    };
+    return this.listCatalogProductsFromFirestore(
+      query,
+      filters,
+      effectiveSort,
+      sortConfig,
+    );
   }
 
   private toAdminProductListItem(product: Producto): AdminProductListItemDTO {
@@ -1702,10 +1848,28 @@ export class ProductService {
             inventarioMap.set(tallaId, cantidadNueva);
 
             tallaIdMovimiento = tallaId;
-            inventarioPorTallaActualizado = tallaIdsProducto.map((id) => ({
-              tallaId: id,
-              cantidad: inventarioMap.get(id) ?? 0,
-            }));
+            inventarioPorTallaActualizado = tallaIdsProducto.map((id) => {
+              const cantidad = inventarioMap.get(id) ?? 0;
+              const existing = inventarioPorTallaActual.find(
+                (row) => row.tallaId === id,
+              );
+              const buckets = normalizeSizeBuckets(id, existing, cantidad);
+              if (id === tallaId) {
+                buckets.fisica = Math.max(
+                  0,
+                  cantidadNueva + buckets.reservada + buckets.noDisponible,
+                );
+                buckets.disponible = cantidadNueva;
+              }
+              return {
+                tallaId: id,
+                cantidad: id === tallaId ? cantidadNueva : buckets.disponible,
+                fisica: buckets.fisica,
+                reservada: buckets.reservada,
+                noDisponible: buckets.noDisponible,
+                entrante: buckets.entrante,
+              };
+            });
 
             existenciasActualizadas = this.getDerivedExistencias(
               tallaIdsProducto,
@@ -1714,10 +1878,10 @@ export class ProductService {
             );
 
             transaction.update(docRef, {
-              inventarioPorTalla: inventarioPorTallaActualizado,
-              tallaIds: tallaIdsProducto,
-              existencias: existenciasActualizadas,
-              disponible: existenciasActualizadas > 0,
+              ...(buildFirestoreInventoryPatch({
+                tallaIds: tallaIdsProducto,
+                inventarioPorTalla: inventarioPorTallaActualizado,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>),
               updatedAt: now,
             });
           } else {
@@ -1729,12 +1893,22 @@ export class ProductService {
 
             cantidadAnterior = existenciasActualizadas;
             existenciasActualizadas = cantidadNueva;
+            const globalBuckets = normalizeGlobalBuckets(
+              data as unknown as Record<string, unknown>,
+              existenciasActualizadas,
+            );
+            globalBuckets.fisica = Math.max(
+              0,
+              cantidadNueva + globalBuckets.reservada + globalBuckets.noDisponible,
+            );
+            globalBuckets.disponible = cantidadNueva;
 
             transaction.update(docRef, {
-              tallaIds: [],
-              inventarioPorTalla: [],
-              existencias: existenciasActualizadas,
-              disponible: existenciasActualizadas > 0,
+              ...(buildFirestoreInventoryPatch({
+                tallaIds: [],
+                inventarioPorTalla: [],
+                inventarioGlobal: globalBuckets,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>),
               updatedAt: now,
             });
           }

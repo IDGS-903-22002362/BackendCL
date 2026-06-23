@@ -26,6 +26,7 @@ import {
 import paymentAttemptRepository from "./payment-attempt.repository";
 import posSaleRepository from "./pos-sale.repository";
 import inventoryService from "../inventory.service";
+import inventoryReservationService from "../inventory-reservation.service";
 import ordenService from "../orden.service";
 import pickupOrderService from "../pickup-order.service";
 import paidOrderFinalizerService from "../paid-order-finalizer.service";
@@ -456,6 +457,12 @@ export class PaymentFinalizerService {
     if (order.estado === EstadoOrden.CANCELADA) {
       return;
     }
+
+    await inventoryReservationService.releaseOrderReservations({
+      ordenId: paymentAttempt.ordenId,
+      motivo: `Liberación por pago ${targetStatus}`,
+      usuarioId: context.requestedBy,
+    });
 
     if (
       order.estado !== EstadoOrden.PENDIENTE &&

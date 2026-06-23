@@ -94,6 +94,34 @@ export enum TipoMovimientoInventario {
   AJUSTE = "ajuste",
   VENTA = "venta",
   DEVOLUCION = "devolucion",
+  RESERVA = "reserva",
+  LIBERACION_RESERVA = "liberacion_reserva",
+  RECEPCION = "recepcion",
+  CONTEO_FISICO = "conteo_fisico",
+}
+
+export enum EstadoReservaInventario {
+  ACTIVA = "activa",
+  CONFIRMADA = "confirmada",
+  LIBERADA = "liberada",
+  EXPIRADA = "expirada",
+}
+
+export interface ReservaInventario {
+  id?: string;
+  ordenId: string;
+  productoId: string;
+  tallaId: string | null;
+  cantidad: number;
+  estado: EstadoReservaInventario;
+  paymentAttemptId?: string;
+  pagoId?: string;
+  usuarioId?: string;
+  expiraEn: Date;
+  createdAt: Date;
+  updatedAt?: Date;
+  idempotencyKey: string;
+  motivo?: string;
 }
 
 /**
@@ -113,6 +141,9 @@ export interface MovimientoInventario {
   ordenId?: string;
   ventaPosId?: string;
   usuarioId?: string;
+  rolUsuario?: string;
+  origen?: "manual" | "checkout" | "pago" | "sistema" | "migracion";
+  idempotencyKey?: string;
   createdAt: Date;
 }
 
@@ -127,6 +158,7 @@ export interface RegistrarMovimientoInventarioDTO {
   ordenId?: string;
   ventaPosId?: string;
   usuarioId?: string;
+  rolUsuario?: string;
   idempotencyKey?: string;
 }
 
@@ -137,6 +169,7 @@ export interface RegistrarAjusteInventarioDTO {
   motivo: string;
   referencia?: string;
   usuarioId?: string;
+  rolUsuario?: string;
   idempotencyKey?: string;
 }
 
@@ -184,6 +217,117 @@ export interface ListarAlertasStockQuery {
   productoId?: string;
   soloCriticas?: boolean;
   limit: number;
+}
+
+export interface DashboardInventarioItem {
+  productoId: string;
+  clave: string;
+  descripcion: string;
+  lineaId: string;
+  categoriaId: string;
+  tallaIds: string[];
+  existencias: number;
+  fisica: number;
+  reservada: number;
+  noDisponible: number;
+  entrante: number;
+  disponible: number;
+  inventarioPorTalla: Array<{
+    tallaId: string;
+    cantidad: number;
+    fisica: number;
+    reservada: number;
+    noDisponible: number;
+    entrante: number;
+  }>;
+  stockMinimoGlobal: number;
+  bajoStock: boolean;
+}
+
+export interface DiagnosticoInventarioProducto {
+  productoId: string;
+  clave: string;
+  descripcion: string;
+  consistente: boolean;
+  problemas: string[];
+  proyeccion: DashboardInventarioItem;
+  reservasActivas: number;
+}
+
+export interface ListarDashboardInventarioQuery {
+  q?: string;
+  lineaId?: string;
+  categoriaId?: string;
+  soloBajoStock?: boolean;
+  limit: number;
+  cursor?: string;
+}
+
+export enum EstadoRecepcionMercancia {
+  BORRADOR = "borrador",
+  PARCIAL = "parcial",
+  CERRADA = "cerrada",
+  CANCELADA = "cancelada",
+}
+
+export interface LineaRecepcionMercancia {
+  productoId: string;
+  tallaId: string | null;
+  cantidadEsperada: number;
+  cantidadAceptada: number;
+  cantidadRechazada: number;
+  cantidadPendiente: number;
+}
+
+export interface RecepcionMercancia {
+  id?: string;
+  proveedorId?: string;
+  proveedorNombre?: string;
+  referencia: string;
+  fechaRecepcion: Date;
+  responsableId: string;
+  responsableNombre?: string;
+  estado: EstadoRecepcionMercancia;
+  lineas: LineaRecepcionMercancia[];
+  notas?: string;
+  cerradaEn?: Date;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface CrearRecepcionMercanciaDTO {
+  proveedorId?: string;
+  proveedorNombre?: string;
+  referencia: string;
+  fechaRecepcion: string;
+  notas?: string;
+  lineas?: Array<{
+    productoId: string;
+    tallaId?: string;
+    cantidadEsperada: number;
+  }>;
+  responsableId: string;
+  responsableNombre?: string;
+}
+
+export interface ConfirmarRecepcionMercanciaDTO {
+  recepcionId: string;
+  lineas: Array<{
+    productoId: string;
+    tallaId?: string;
+    cantidadAceptada: number;
+    cantidadRechazada: number;
+  }>;
+  responsableId: string;
+  idempotencyKey?: string;
+}
+
+export interface ListarRecepcionesMercanciaQuery {
+  estado?: EstadoRecepcionMercancia;
+  proveedorId?: string;
+  referencia?: string;
+  limit: number;
+  cursor?: string;
 }
 
 export interface DashboardAlertasStock {

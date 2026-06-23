@@ -22,6 +22,9 @@ class TryOnJobService {
     inputUserImageUrl?: string;
     inputProductImageUrl: string;
     consentAccepted: boolean;
+    consentVersion?: string;
+    consentAcceptedAt?: FirebaseFirestore.Timestamp;
+    idempotencyKey?: string;
     requestedByRole: RolUsuario;
     previewMode: ProductPreviewMode;
     productPreviewType: ProductPreviewType;
@@ -49,6 +52,28 @@ class TryOnJobService {
     return { id: snapshot.id, ...(snapshot.data() as Omit<TryOnJob, "id">) };
   }
 
+  async findRecentJobByIdempotencyKey(
+    userId: string,
+    idempotencyKey: string,
+    since: FirebaseFirestore.Timestamp,
+  ): Promise<TryOnJob | null> {
+    const snapshot = await firestoreTienda
+      .collection(AI_COLLECTIONS.tryOnJobs)
+      .where("userId", "==", userId)
+      .where("idempotencyKey", "==", idempotencyKey)
+      .where("createdAt", ">=", since)
+      .orderBy("createdAt", "desc")
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...(doc.data() as Omit<TryOnJob, "id">) };
+  }
+
   async listJobsByUser(userId: string): Promise<TryOnJob[]> {
     const snapshot = await firestoreTienda
       .collection(AI_COLLECTIONS.tryOnJobs)
@@ -61,6 +86,40 @@ class TryOnJobService {
       id: doc.id,
       ...(doc.data() as Omit<TryOnJob, "id">),
     }));
+  }
+
+  async claimJobForProcessing(jobId: string): Promise<TryOnJob | null> {
+    const ref = firestoreTienda.collection(AI_COLLECTIONS.tryOnJobs).doc(jobId);
+
+    return firestoreTienda.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) {
+        return null;
+      }
+
+      const job = {
+        id: snapshot.id,
+        ...(snapshot.data() as Omit<TryOnJob, "id">),
+      };
+
+      if (job.status !== TryOnJobStatus.QUEUED) {
+        return null;
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(ref, {
+        status: TryOnJobStatus.PROCESSING,
+        errorCode: admin.firestore.FieldValue.delete(),
+        errorMessage: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+      });
+
+      return {
+        ...job,
+        status: TryOnJobStatus.PROCESSING,
+        updatedAt: now,
+      };
+    });
   }
 
   async markProcessing(jobId: string, providerJobId?: string): Promise<void> {

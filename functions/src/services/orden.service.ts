@@ -29,6 +29,7 @@ import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model
 import { RolUsuario } from "../models/usuario.model";
 import { TipoMovimientoInventario } from "../models/inventario.model";
 import inventoryService from "./inventory.service";
+import inventoryReservationService from "./inventory-reservation.service";
 import {
   completeInventarioPorTalla,
   normalizeTallaIds,
@@ -1911,6 +1912,19 @@ subtotalFinal: subtotalCalculado,
     }
 
     if (await inventoryService.orderHasSaleMovements(ordenId)) {
+      return;
+    }
+
+    if (await inventoryReservationService.orderHasActiveReservations(ordenId)) {
+      const ordenDoc = await firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(ordenId)
+        .get();
+      const orden = ordenDoc.exists ? (ordenDoc.data() as Orden) : undefined;
+      await inventoryReservationService.confirmOrderReservations(
+        ordenId,
+        orden?.usuarioId,
+      );
       return;
     }
 

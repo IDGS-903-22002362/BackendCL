@@ -33,6 +33,7 @@ export const registerMovement = async (req: Request, res: Response) => {
     const movement = await inventoryService.registerMovement({
       ...req.body,
       usuarioId: req.user?.uid,
+      rolUsuario: req.user?.rol,
     });
 
     return res.status(201).json({
@@ -93,6 +94,7 @@ export const registerAdjustment = async (req: Request, res: Response) => {
       motivo: req.body.motivo,
       referencia: req.body.referencia,
       usuarioId: req.user?.uid,
+      rolUsuario: req.user?.rol,
       idempotencyKey,
     });
 
