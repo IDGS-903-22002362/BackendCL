@@ -84,3 +84,22 @@ export const mapFirebaseError = (
     message: options.internalMessage,
   };
 };
+
+export function isFirestoreMissingIndexError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const candidate = error as {
+    code?: number | string;
+    message?: string;
+    details?: string;
+  };
+
+  if (candidate.code === 9 || candidate.code === "failed-precondition") {
+    return true;
+  }
+
+  const text = `${candidate.message ?? ""} ${candidate.details ?? ""}`.toLowerCase();
+  return text.includes("requires an index");
+}

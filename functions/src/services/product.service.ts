@@ -39,7 +39,14 @@ import {
   normalizeSizeBuckets,
 } from "../utils/inventory-stock.util";
 import stockAlertService from "./stock-alert.service";
-import productCardsService from "./recomendaciones/product-cards.service";
+import {
+  productOfferSnapshotService,
+  readStoredOfferSnapshot,
+} from "./product-offer-snapshot.service";
+import { ofertasService } from "./ofertas.service";
+import { seleccionarMejorOferta } from "../utils/ofertas-pricing.util";
+import { isFirestoreMissingIndexError } from "../utils/firebase-error.util";
+import type { Oferta } from "../models/ofertas.model";
 
 /**
  * Colección de productos en Firestore
@@ -911,6 +918,24 @@ export class ProductService {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
     const stockTotal = this.getProductStockTotal(product);
     const disponible = this.isProductAvailableForCatalog(product);
+    const offerSnapshot = readStoredOfferSnapshot(product);
+    const tieneOferta =
+      offerSnapshot?.tieneOfertaActiva === true &&
+      typeof offerSnapshot.precioOferta === "number" &&
+      offerSnapshot.precioOferta > 0 &&
+      offerSnapshot.precioOferta < precioOriginal;
+    const precioFinal = tieneOferta
+      ? offerSnapshot!.precioOferta!
+      : precioOriginal;
+    const descuentoTotal = tieneOferta
+      ? Math.max(0, precioOriginal - precioFinal)
+      : 0;
+    const porcentajeDescuento = tieneOferta
+      ? offerSnapshot?.porcentajeDescuento ??
+        (precioOriginal > 0
+          ? Math.round((descuentoTotal / precioOriginal) * 100)
+          : 0)
+      : 0;
 
     return {
       id: product.id || "",
@@ -922,11 +947,14 @@ export class ProductService {
       linea: product.lineaId || "",
       lineaLabel: labels.lineas.get(product.lineaId) || product.lineaId || "",
       precioOriginal,
-      precioFinal: precioOriginal,
-      tieneOferta: false,
-      ofertaAplicadaId: null,
-      ofertaTitulo: null,
-      descuentoTotal: 0,
+      precioFinal,
+      tieneOferta,
+      ofertaAplicadaId: tieneOferta
+        ? offerSnapshot?.ofertaAplicadaId ?? null
+        : null,
+      ofertaTitulo: tieneOferta ? offerSnapshot?.ofertaTitulo ?? null : null,
+      descuentoTotal,
+      porcentajeDescuento,
       imagenPrincipal:
         Array.isArray(product.imagenes) && product.imagenes.length > 0
           ? product.imagenes[0]
@@ -943,6 +971,8 @@ export class ProductService {
   private matchesCatalogFilters(
     product: Producto,
     filters: CatalogCursor["filters"],
+    legacyOfertasActivas?: Oferta[] | null,
+    options?: { skipOfferFilter?: boolean },
   ): boolean {
     if (filters.category && product.categoriaId !== filters.category) {
       return false;
@@ -977,12 +1007,34 @@ export class ProductService {
       return false;
     }
 
+    if (filters.onlyOffers && !options?.skipOfferFilter) {
+      if (product.tieneOfertaActiva === true) {
+        // Indexed snapshot marks this product as on offer.
+      } else if (product.tieneOfertaActiva === false) {
+        return false;
+      } else if (legacyOfertasActivas) {
+        const mejorOferta = seleccionarMejorOferta(legacyOfertasActivas, {
+          id: product.id || "",
+          precioPublico: product.precioPublico,
+          categoriaId: product.categoriaId,
+          lineaId: product.lineaId,
+        });
+
+        if (!mejorOferta) {
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
+
     return true;
   }
 
   private buildCatalogFirestoreQuery(
     filters: CatalogCursor["filters"],
     sortConfig: { field: string; direction: FirebaseFirestore.OrderByDirection },
+    options?: { skipOfferIndexFilter?: boolean },
   ): FirebaseFirestore.Query {
     let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
       .collection(PRODUCTOS_COLLECTION)
@@ -1026,6 +1078,10 @@ export class ProductService {
         .where("searchText", "<=", `${filters.q}\uf8ff`);
     }
 
+    if (filters.onlyOffers && !options?.skipOfferIndexFilter) {
+      firestoreQuery = firestoreQuery.where("tieneOfertaActiva", "==", true);
+    }
+
     return firestoreQuery
       .orderBy(sortConfig.field, sortConfig.direction)
       .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
@@ -1041,7 +1097,8 @@ export class ProductService {
     const batchSize = Math.max(pageLimit * 3, 48);
     const maxScanDocs = 1000;
     const labels = await this.loadCatalogLabels();
-    const baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
+    let baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
+    let legacyOfertasActivas: Oferta[] | null = null;
 
     let startAfterValue:
       | string
@@ -1080,7 +1137,25 @@ export class ProductService {
         );
       }
 
-      const snapshot = await firestoreQuery.limit(batchSize).get();
+      let snapshot: FirebaseFirestore.QuerySnapshot;
+
+      try {
+        snapshot = await firestoreQuery.limit(batchSize).get();
+      } catch (error) {
+        if (
+          filters.onlyOffers &&
+          legacyOfertasActivas === null &&
+          isFirestoreMissingIndexError(error)
+        ) {
+          legacyOfertasActivas = await ofertasService.listarOfertasActivas();
+          baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig, {
+            skipOfferIndexFilter: true,
+          });
+          continue;
+        }
+
+        throw error;
+      }
 
       if (snapshot.empty) {
         firestoreExhausted = true;
@@ -1093,7 +1168,7 @@ export class ProductService {
         const product = this.normalizeProduct(doc.id, doc.data());
         lastScannedProduct = product;
 
-        if (!this.matchesCatalogFilters(product, filters)) {
+        if (!this.matchesCatalogFilters(product, filters, legacyOfertasActivas)) {
           continue;
         }
 
@@ -1178,23 +1253,19 @@ export class ProductService {
       .map((snapshot) =>
         this.normalizeProduct(snapshot.id, snapshot.data() as FirebaseFirestore.DocumentData),
       )
-      .filter((product) => product.activo === true)
-      .filter((product) => this.matchesCatalogFilters(product, filters));
+      .filter((product) => product.activo === true);
 
-    const pageProducts = products.slice(offset, offset + query.limit);
-    const hasMore = offset + query.limit < products.length;
-    const isOfertasAggregateSort =
-      sort === "ofertas_populares" ||
-      sort === "ofertas_mas_compradas" ||
-      sort === "ofertas_recientes";
-    const pageProductIds = pageProducts
-      .map((product) => product.id || "")
-      .filter(Boolean);
-    const items = isOfertasAggregateSort
-      ? await productCardsService.buildCatalogCards(pageProductIds, {
-          withOffers: true,
-        })
-      : pageProducts.map((product) => this.toCatalogCard(product, labels));
+    const skipOfferFilter = filters.onlyOffers && sort.startsWith("ofertas_");
+
+    const filteredProducts = products.filter((product) =>
+      this.matchesCatalogFilters(product, filters, null, {
+        skipOfferFilter,
+      }),
+    );
+
+    const pageProducts = filteredProducts.slice(offset, offset + query.limit);
+    const hasMore = offset + query.limit < filteredProducts.length;
+    const items = pageProducts.map((product) => this.toCatalogCard(product, labels));
     const lastProduct = pageProducts[pageProducts.length - 1];
 
     return {
@@ -1652,6 +1723,23 @@ export class ProductService {
         updatedProducto,
         "product_update",
       );
+
+      const pricingFieldsChanged =
+        updateData.precioPublico !== undefined ||
+        updateData.categoriaId !== undefined ||
+        updateData.lineaId !== undefined ||
+        updateData.activo !== undefined;
+
+      if (pricingFieldsChanged) {
+        await productOfferSnapshotService
+          .syncProductOfferSnapshot(updatedProducto.id || id)
+          .catch((error: unknown) => {
+            console.error(
+              "Error sincronizando snapshot de oferta tras actualizar producto:",
+              error,
+            );
+          });
+      }
 
       console.log(`Producto actualizado: ${updatedProducto.descripcion}`);
       return updatedProducto;
