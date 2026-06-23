@@ -984,6 +984,152 @@
       ]
     },
     {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "porcentajeDescuento",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "categoriaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lineaId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "disponible",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tallaIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "productos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "activo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "tieneOfertaActiva",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "precioOferta",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "reservasInventario",
       "queryScope": "COLLECTION",
       "fields": [

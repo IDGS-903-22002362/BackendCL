@@ -29,6 +29,7 @@ import {
   seleccionarMejorOferta,
   esOfertaVigente,
 } from "../utils/ofertas-pricing.util";
+import { productOfferSnapshotService } from "./product-offer-snapshot.service";
 
 const db = firestoreTienda;
 
@@ -288,6 +289,12 @@ export class OfertasService {
       throw new Error("No se pudo crear la oferta");
     }
 
+    await productOfferSnapshotService
+      .syncProductsAffectedByOffer(oferta)
+      .catch((error) => {
+        console.error("Error sincronizando snapshot de oferta tras crear:", error);
+      });
+
     return oferta;
   }
 
@@ -338,6 +345,15 @@ if (data.fechaFin) {
       throw new Error("No se pudo actualizar la oferta");
     }
 
+    await productOfferSnapshotService
+      .syncProductsAffectedByOffers(ofertaActualizada, ofertaActual)
+      .catch((error) => {
+        console.error(
+          "Error sincronizando snapshot de oferta tras actualizar:",
+          error,
+        );
+      });
+
     return ofertaActualizada;
   }
 
@@ -354,6 +370,12 @@ if (data.fechaFin) {
       updatedAt: FieldValue.serverTimestamp(),
       updatedBy: userId ?? null,
     });
+
+    await productOfferSnapshotService
+      .syncProductsAffectedByOffer(oferta)
+      .catch((error) => {
+        console.error("Error sincronizando snapshot de oferta tras eliminar:", error);
+      });
   }
 
   async calcularPreciosCarrito(

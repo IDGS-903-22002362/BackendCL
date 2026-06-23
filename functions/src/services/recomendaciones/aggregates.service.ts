@@ -26,6 +26,7 @@ import {
   isOrdenPagada,
 } from "./utils/order-paid.util";
 import { seleccionarMejorOferta } from "../../utils/ofertas-pricing.util";
+import { isFirestoreMissingIndexError } from "../../utils/firebase-error.util";
 
 const ORDENES_COLLECTION = "ordenes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -277,6 +278,31 @@ class AggregatesService {
   }
 
   async getActiveOfferProductIds(limit = 300): Promise<string[]> {
+    try {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .where("tieneOfertaActiva", "==", true)
+        .orderBy("porcentajeDescuento", "desc")
+        .orderBy("updatedAt", "desc")
+        .limit(Math.min(limit, 500))
+        .get();
+
+      if (snapshot.empty) {
+        return this.getActiveOfferProductIdsLegacy(limit);
+      }
+
+      return uniqueProductIds(snapshot.docs.map((doc) => doc.id)).slice(0, limit);
+    } catch (error) {
+      if (isFirestoreMissingIndexError(error)) {
+        return this.getActiveOfferProductIdsLegacy(limit);
+      }
+
+      throw error;
+    }
+  }
+
+  private async getActiveOfferProductIdsLegacy(limit = 300): Promise<string[]> {
     const [products, ofertasActivas] = await Promise.all([
       productCardsService.listEligibleActiveProducts(Math.min(limit, 500)),
       ofertasService.listarOfertasActivas(),
@@ -329,7 +355,25 @@ class AggregatesService {
   }
 
   async getOfertasRecientesRankedProductIds(limit = 100): Promise<string[]> {
-    const [ofertasActivas, snapshot] = await Promise.all([
+    try {
+      const snapshot = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .where("activo", "==", true)
+        .where("tieneOfertaActiva", "==", true)
+        .orderBy("createdAt", "desc")
+        .limit(Math.max(limit, 200))
+        .get();
+
+      if (!snapshot.empty) {
+        return snapshot.docs.map((doc) => doc.id).slice(0, limit);
+      }
+    } catch (error) {
+      if (!isFirestoreMissingIndexError(error)) {
+        throw error;
+      }
+    }
+
+    const [ofertasActivas, fallbackSnapshot] = await Promise.all([
       ofertasService.listarOfertasActivas(),
       firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
@@ -341,7 +385,7 @@ class AggregatesService {
 
     const ids: string[] = [];
 
-    for (const doc of snapshot.docs) {
+    for (const doc of fallbackSnapshot.docs) {
       const product = { id: doc.id, ...(doc.data() as Producto) };
       const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
         id: product.id || doc.id,

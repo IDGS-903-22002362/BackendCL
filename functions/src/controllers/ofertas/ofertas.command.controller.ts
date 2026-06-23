@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 
 import { ofertasService } from "../../services/ofertas.service";
+import productOfferSnapshotService from "../../services/product-offer-snapshot.service";
 import type {
   CreateOfertaDto,
   UpdateOfertaDto,
@@ -128,6 +129,27 @@ export class OfertasCommandController {
       res.status(200).json({
         success: true,
         message: "Oferta eliminada correctamente",
+      });
+    } catch (error: unknown) {
+      handleError(res, error);
+    }
+  };
+
+  sincronizarSnapshots = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const limitRaw = Number(req.body?.limit);
+      const limit =
+        Number.isFinite(limitRaw) && limitRaw > 0
+          ? Math.min(Math.floor(limitRaw), 500)
+          : 500;
+
+      const updated =
+        await productOfferSnapshotService.backfillAllActiveProducts(limit);
+
+      res.status(200).json({
+        success: true,
+        message: "Snapshots de ofertas sincronizados",
+        data: { updated, limit },
       });
     } catch (error: unknown) {
       handleError(res, error);

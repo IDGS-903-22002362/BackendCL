@@ -275,6 +275,7 @@ describe("ProductService.listCatalogProducts", () => {
       precioOriginal: 1200,
       precioFinal: 1200,
       tieneOferta: false,
+      porcentajeDescuento: 0,
       imagenPrincipal: "https://example.com/jersey.jpg",
       stockTotal: 5,
       disponible: true,

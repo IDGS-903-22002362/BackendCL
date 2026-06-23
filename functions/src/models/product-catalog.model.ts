@@ -59,6 +59,7 @@ export interface CatalogProductCardDTO {
   ofertaAplicadaId: string | null;
   ofertaTitulo: string | null;
   descuentoTotal: number;
+  porcentajeDescuento: number;
   imagenPrincipal: string | null;
   imagenes?: string[];
   stockTotal: number;

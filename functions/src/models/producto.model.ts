@@ -105,6 +105,12 @@ export interface Producto {
   imagenes: string[]; // Array de URLs de imágenes del producto
   detalleIds: string[]; // Array de IDs de detalles relacionados (opcional)
   ratingSummary: ProductRatingSummary; // Resumen denormalizado de calificaciones
+  /** Snapshot denormalizado de la mejor oferta vigente (catálogo/indexado). */
+  tieneOfertaActiva?: boolean;
+  precioOferta?: number | null;
+  porcentajeDescuento?: number;
+  ofertaAplicadaId?: string | null;
+  ofertaTitulo?: string | null;
   fedexShipping?: FedexProductShipping;
   shipping?: ProductShipping;
   activo: boolean; // Si el producto está disponible para venta
