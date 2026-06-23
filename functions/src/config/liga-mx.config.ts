@@ -69,17 +69,3 @@ export const obtenerPerfilDivision = (divisionKey: DivisionKey): PerfilDivision 
 export const obtenerNombreTorneo = (id: number): string => {
   return id === ID_TORNEO_APERTURA ? "Apertura" : "Clausura";
 };
-
-export const resolverIdTorneoActual = (date = new Date()): number => {
-  return date.getMonth() >= 6 ? ID_TORNEO_APERTURA : ID_TORNEO_CLAUSURA;
-};
-
-export const resolverNombreTemporadaActual = (date = new Date()): string => {
-  const year = date.getFullYear();
-
-  if (date.getMonth() >= 6) {
-    return `${year}-${year + 1}`;
-  }
-
-  return `${year - 1}-${year}`;
-};

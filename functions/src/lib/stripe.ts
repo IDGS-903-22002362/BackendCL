@@ -28,6 +28,29 @@ export const getStripeCurrency = (): string => {
   return configured && configured.length > 0 ? configured : "mxn";
 };
 
+/** Montos mínimos en unidad menor (centavos). Fuente: Stripe docs /currencies */
+const STRIPE_MIN_AMOUNT_MINOR_BY_CURRENCY: Record<string, number> = {
+  mxn: 1000, // 10.00 MXN
+  usd: 50, // 0.50 USD
+};
+
+export const getStripeMinimumAmountMinor = (currency: string): number => {
+  const normalized = currency.trim().toLowerCase();
+  return STRIPE_MIN_AMOUNT_MINOR_BY_CURRENCY[normalized] ?? 1000;
+};
+
+export const isStripeMissingResourceError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const stripeError = error as { code?: string; type?: string };
+  return (
+    stripeError.type === "StripeInvalidRequestError" &&
+    stripeError.code === "resource_missing"
+  );
+};
+
 export const getAppUrl = (): string => {
   const appUrl = process.env.APP_URL?.trim();
   if (!appUrl) {

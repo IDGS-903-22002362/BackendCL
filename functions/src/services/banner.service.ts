@@ -43,12 +43,8 @@ class BannerService {
     }
 
     async getActiveBanners(): Promise<Banner[]> {
-        const snapshot = await firestoreTienda
-            .collection(BANNERS_COLLECTION)
-            .where("active", "==", true)
-            .orderBy("order", "asc")
-            .get();
-        return snapshot.docs.map(doc => this.normalizeBanner(doc)!);
+        const banners = await this.getAllBanners();
+        return banners.filter((banner) => banner.active);
     }
 
     async getBannerById(id: string): Promise<Banner | null> {

@@ -1,9 +1,14 @@
 export type CatalogSort =
   | "destacados"
+  | "populares"
+  | "mas_comprados"
   | "precio_asc"
   | "precio_desc"
   | "recientes"
-  | "nombre_asc";
+  | "nombre_asc"
+  | "ofertas_populares"
+  | "ofertas_mas_compradas"
+  | "ofertas_recientes";
 
 export interface CatalogQuery {
   limit: number;
@@ -55,6 +60,7 @@ export interface CatalogProductCardDTO {
   ofertaTitulo: string | null;
   descuentoTotal: number;
   imagenPrincipal: string | null;
+  imagenes?: string[];
   stockTotal: number;
   disponible: boolean;
   destacado: boolean;

@@ -1,6 +1,8 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../config/firebase";
 import { Orden, FulfillmentMethod } from "../models/orden.model";
+import carritoService from "./carrito.service";
+import ordenService from "./orden.service";
 import { getFedexConfig } from "../modules/shipping/fedex/fedex.config";
 import {
   fedexShipService,
@@ -71,6 +73,14 @@ class PaidOrderFinalizerService {
     }
 
     const order = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
+
+    await ordenService.commitStockForOrder(input.orderId);
+
+    const cartId = order.paymentMetadata?.cartId;
+    if (typeof cartId === "string" && cartId.trim()) {
+      await carritoService.clearCartAfterSuccessfulPayment(cartId.trim());
+    }
+
     await this.writePaymentConfirmedEvent(input);
 
     if (

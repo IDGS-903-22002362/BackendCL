@@ -131,7 +131,18 @@ export const catalogProductQuerySchema = z
       z.number().nonnegative("maxPrice no puede ser negativo"),
     ).optional(),
     sort: z
-      .enum(["destacados", "precio_asc", "precio_desc", "recientes", "nombre_asc"])
+      .enum([
+        "destacados",
+        "populares",
+        "mas_comprados",
+        "precio_asc",
+        "precio_desc",
+        "recientes",
+        "nombre_asc",
+        "ofertas_populares",
+        "ofertas_mas_compradas",
+        "ofertas_recientes",
+      ])
       .optional()
       .default("destacados"),
     q: z.string().trim().min(1).max(80).optional(),

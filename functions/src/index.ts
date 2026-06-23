@@ -30,7 +30,19 @@ import { processNotificationEventTrigger } from "./services/notifications/notifi
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
+import { syncLigaMxData } from "./liga-mx.cron";
 import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
+import {
+  cleanupRecommendationEvents,
+  recalculateRecommendationAggregates,
+} from "./recomendaciones.cron";
+import {
+  invalidateRecommendationsOnConfigChange,
+  invalidateRecommendationsOnInventoryChange,
+  invalidateRecommendationsOnOfferChange,
+  invalidateRecommendationsOnOrderChange,
+  invalidateRecommendationsOnProductChange,
+} from "./recomendaciones-invalidation.trigger";
 
 let apiAiConfigValidated = false;
 
@@ -75,3 +87,17 @@ export const probableRepurchaseNotifications =
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
 export const userLevelSyncFunction = syncUserLevelOnPointsChange;
+export const syncLigaMxDataFunction = syncLigaMxData;
+export const recalculateRecommendationAggregatesFunction =
+  recalculateRecommendationAggregates;
+export const cleanupRecommendationEventsFunction = cleanupRecommendationEvents;
+export const invalidateRecommendationsOnOrderChangeFunction =
+  invalidateRecommendationsOnOrderChange;
+export const invalidateRecommendationsOnProductChangeFunction =
+  invalidateRecommendationsOnProductChange;
+export const invalidateRecommendationsOnInventoryChangeFunction =
+  invalidateRecommendationsOnInventoryChange;
+export const invalidateRecommendationsOnOfferChangeFunction =
+  invalidateRecommendationsOnOfferChange;
+export const invalidateRecommendationsOnConfigChangeFunction =
+  invalidateRecommendationsOnConfigChange;

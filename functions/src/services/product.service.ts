@@ -33,6 +33,7 @@ import {
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import stockAlertService from "./stock-alert.service";
+import productCardsService from "./recomendaciones/product-cards.service";
 
 /**
  * Colección de productos en Firestore
@@ -876,6 +877,9 @@ export class ProductService {
         Array.isArray(product.imagenes) && product.imagenes.length > 0
           ? product.imagenes[0]
           : null,
+      imagenes: Array.isArray(product.imagenes)
+        ? product.imagenes.filter(Boolean)
+        : [],
       stockTotal,
       disponible:
         typeof product.disponible === "boolean"
@@ -885,13 +889,274 @@ export class ProductService {
     };
   }
 
-  async listCatalogProducts(query: CatalogQuery): Promise<CatalogResponse> {
-    if (query.onlyOffers) {
-      return { items: [], nextCursor: null, hasMore: false };
+  private matchesCatalogFilters(
+    product: Producto,
+    filters: CatalogCursor["filters"],
+  ): boolean {
+    if (filters.category && product.categoriaId !== filters.category) {
+      return false;
     }
 
+    if (filters.line && product.lineaId !== filters.line) {
+      return false;
+    }
+
+    if (
+      filters.talla &&
+      !(product.tallaIds ?? []).includes(filters.talla)
+    ) {
+      return false;
+    }
+
+    if (
+      filters.minPrice !== undefined &&
+      Number(product.precioPublico || 0) < filters.minPrice
+    ) {
+      return false;
+    }
+
+    if (
+      filters.maxPrice !== undefined &&
+      Number(product.precioPublico || 0) > filters.maxPrice
+    ) {
+      return false;
+    }
+
+    if (filters.onlyAvailable) {
+      const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
+      const disponible =
+        typeof product.disponible === "boolean"
+          ? product.disponible
+          : stockTotal > 0;
+
+      if (!disponible) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private async listCatalogProductsByAggregateRanking(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+    sort: Extract<
+      CatalogSort,
+      | "destacados"
+      | "populares"
+      | "mas_comprados"
+      | "ofertas_populares"
+      | "ofertas_mas_compradas"
+      | "ofertas_recientes"
+    >,
+    getRankedIds: (limit: number) => Promise<string[]>,
+  ): Promise<CatalogResponse> {
+    const rankedIds = await getRankedIds(200);
+    const labels = await this.loadCatalogLabels();
+
+    let offset = 0;
+    if (query.cursor) {
+      const cursor = this.decodeCatalogCursor(query.cursor);
+      this.assertCursorMatchesQuery(cursor, sort, filters);
+      offset =
+        typeof cursor.last.value === "number" && Number.isFinite(cursor.last.value)
+          ? cursor.last.value
+          : 0;
+    }
+
+    const refs = rankedIds.map((id) =>
+      firestoreTienda.collection(PRODUCTOS_COLLECTION).doc(id),
+    );
+    const snapshots =
+      refs.length > 0 ? await firestoreTienda.getAll(...refs) : [];
+
+    const products = snapshots
+      .filter((snapshot) => snapshot.exists && snapshot.data())
+      .map((snapshot) =>
+        this.normalizeProduct(snapshot.id, snapshot.data() as FirebaseFirestore.DocumentData),
+      )
+      .filter((product) => product.activo === true)
+      .filter((product) => this.matchesCatalogFilters(product, filters));
+
+    const pageProducts = products.slice(offset, offset + query.limit);
+    const hasMore = offset + query.limit < products.length;
+    const isOfertasAggregateSort =
+      sort === "ofertas_populares" ||
+      sort === "ofertas_mas_compradas" ||
+      sort === "ofertas_recientes";
+    const pageProductIds = pageProducts
+      .map((product) => product.id || "")
+      .filter(Boolean);
+    const items = isOfertasAggregateSort
+      ? await productCardsService.buildCatalogCards(pageProductIds, {
+          withOffers: true,
+        })
+      : pageProducts.map((product) => this.toCatalogCard(product, labels));
+    const lastProduct = pageProducts[pageProducts.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && lastProduct
+          ? this.encodeCatalogCursor({
+              v: CURSOR_VERSION,
+              sort,
+              filters,
+              last: {
+                value: offset + pageProducts.length,
+                id: lastProduct.id || "",
+              },
+            })
+          : null,
+    };
+  }
+
+  private async listCatalogProductsByDestacados(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "destacados",
+      (limit) => aggregatesService.getDestacadosRankedProductIds(limit),
+    );
+  }
+
+  private async listCatalogProductsByPopulares(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "populares",
+      (limit) => aggregatesService.getPopularesRankedProductIds(limit),
+    );
+  }
+
+  private async listCatalogProductsByMasComprados(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "mas_comprados",
+      (limit) => aggregatesService.getMasCompradosRankedProductIds(limit),
+    );
+  }
+
+  private async listCatalogProductsByOfertasPopulares(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "ofertas_populares",
+      (limit) => aggregatesService.getOfertasPopularesRankedProductIds(limit),
+    );
+  }
+
+  private async listCatalogProductsByOfertasMasCompradas(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "ofertas_mas_compradas",
+      (limit) => aggregatesService.getOfertasMasCompradasRankedProductIds(limit),
+    );
+  }
+
+  private async listCatalogProductsByOfertasRecientes(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+  ): Promise<CatalogResponse> {
+    const aggregatesService = (
+      await import("./recomendaciones/aggregates.service")
+    ).default;
+
+    return this.listCatalogProductsByAggregateRanking(
+      query,
+      filters,
+      "ofertas_recientes",
+      (limit) => aggregatesService.getOfertasRecientesRankedProductIds(limit),
+    );
+  }
+
+  private isOfertasCatalogSort(sort: CatalogSort): boolean {
+    return (
+      sort === "ofertas_populares" ||
+      sort === "ofertas_mas_compradas" ||
+      sort === "ofertas_recientes"
+    );
+  }
+
+  private resolveCatalogSort(query: CatalogQuery): CatalogSort {
+    if (this.isOfertasCatalogSort(query.sort)) {
+      return query.sort;
+    }
+
+    if (query.onlyOffers) {
+      return "ofertas_populares";
+    }
+
+    return query.sort;
+  }
+
+  async listCatalogProducts(query: CatalogQuery): Promise<CatalogResponse> {
     const filters = this.normalizeCatalogFilters(query);
-    const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : query.sort;
+    const resolvedSort = this.resolveCatalogSort(query);
+    const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : resolvedSort;
+
+    if (effectiveSort === "destacados" && !filters.q) {
+      return this.listCatalogProductsByDestacados(query, filters);
+    }
+
+    if (effectiveSort === "populares" && !filters.q) {
+      return this.listCatalogProductsByPopulares(query, filters);
+    }
+
+    if (effectiveSort === "mas_comprados" && !filters.q) {
+      return this.listCatalogProductsByMasComprados(query, filters);
+    }
+
+    if (effectiveSort === "ofertas_populares" && !filters.q) {
+      return this.listCatalogProductsByOfertasPopulares(query, filters);
+    }
+
+    if (effectiveSort === "ofertas_mas_compradas" && !filters.q) {
+      return this.listCatalogProductsByOfertasMasCompradas(query, filters);
+    }
+
+    if (effectiveSort === "ofertas_recientes" && !filters.q) {
+      return this.listCatalogProductsByOfertasRecientes(query, filters);
+    }
+
     const sortConfig = filters.q
       ? { field: "searchText", direction: "asc" as const }
       : this.getCatalogSortConfig(effectiveSort);

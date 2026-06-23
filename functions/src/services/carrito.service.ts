@@ -879,7 +879,7 @@ export class CarritoService {
    *    - Recalcular precios desde el servidor (seguridad)
    *    - Crear la orden en Firestore
    *    - Decrementar stock con transacciones atómicas
-   * 6. Vacía el carrito tras crear la orden exitosamente
+   * 6. El carrito se vacía solo cuando el pago queda confirmado
    * 7. Si falla la creación, el carrito queda intacto (rollback)
    *
    * @param usuarioId - UID de Firebase Auth del usuario
@@ -1004,20 +1004,27 @@ const crearOrdenDTO: CrearOrdenDTO = {
       `✅ Orden ${orden.id} creada exitosamente desde carrito ${carrito.id}`,
     );
 
-    // PASO 6: Vaciar carrito tras orden exitosa
+    return orden;
+  }
+
+  /**
+   * Vacía el carrito asociado a una orden pagada.
+   * No lanza error si el carrito ya fue vaciado o no existe.
+   */
+  async clearCartAfterSuccessfulPayment(cartId: string): Promise<void> {
+    if (!cartId) {
+      return;
+    }
+
     try {
-      await this.clearCart(carrito.id!);
-      console.log(`🧹 Carrito ${carrito.id} vaciado después del checkout`);
+      await this.clearCart(cartId);
+      console.log(`🧹 Carrito ${cartId} vaciado tras confirmar pago`);
     } catch (clearError) {
-      // Si falla el vaciado del carrito, loggear pero NO fallar el checkout
-      // La orden ya fue creada y el stock ya fue decrementado
       console.error(
-        `⚠️ Error al vaciar carrito ${carrito.id} después del checkout:`,
+        `⚠️ Error al vaciar carrito ${cartId} tras confirmar pago:`,
         clearError,
       );
     }
-
-    return orden;
   }
 
   // ===================================

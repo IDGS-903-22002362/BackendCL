@@ -1,9 +1,5 @@
 import { createHash } from "crypto";
-import {
-  obtenerNombreTorneo,
-  obtenerPerfilDivision,
-  resolverNombreTemporadaActual,
-} from "../../config/liga-mx.config";
+import { obtenerNombreTorneo, obtenerPerfilDivision } from "../../config/liga-mx.config";
 import {
   CalendarioLigaMxDoc,
   ClasificacionLigaMxDoc,
@@ -181,39 +177,11 @@ const construirResumenTorneo = (idTorneo: number): ResumenTorneo => ({
   nombre: obtenerNombreTorneo(idTorneo),
 });
 
-export const seleccionarTemporadaActual = (
-  seasons: Array<{ idTemporada: number; nombre: string }>,
-  now = new Date(),
-): ResumenTemporada => {
-  const nombreObjetivo = resolverNombreTemporadaActual(now);
-  const exacta = seasons.find((season) => season.nombre === nombreObjetivo);
-
-  if (exacta) {
-    return { id: exacta.idTemporada, nombre: exacta.nombre };
-  }
-
-  const conAnio = seasons.find((season) =>
-    season.nombre.includes(String(now.getFullYear())),
-  );
-
-  if (conAnio) {
-    return { id: conAnio.idTemporada, nombre: conAnio.nombre };
-  }
-
-  const fallback = [...seasons].sort(
-    (left, right) => right.idTemporada - left.idTemporada,
-  )[0];
-
-  return { id: fallback.idTemporada, nombre: fallback.nombre };
-};
-
 export const construirContextoActual = (
-  seasons: Array<{ idTemporada: number; nombre: string }>,
+  temporadaActual: ResumenTemporada,
   idTorneoActual: number,
   actualizadoEn: string,
-  now = new Date(),
 ): ContextoLigaMxDoc => {
-  const temporadaActual = seleccionarTemporadaActual(seasons, now);
   const payloadSinHash = {
     temporadaActual,
     torneoActual: construirResumenTorneo(idTorneoActual),
@@ -319,6 +287,27 @@ export const normalizarPartidoCalendario = (
     ...payloadSinHash,
     hashFuente: generarHashNormalizado(payloadSinHash),
   };
+};
+
+export const fusionarPartidosCalendario = (
+  anteriores: PartidoLigaMxDoc[],
+  nuevos: PartidoLigaMxDoc[],
+): PartidoLigaMxDoc[] => {
+  const porId = new Map<string, PartidoLigaMxDoc>();
+
+  anteriores.forEach((partido) => {
+    porId.set(partido.id, partido);
+  });
+
+  nuevos.forEach((partido) => {
+    porId.set(partido.id, partido);
+  });
+
+  return [...porId.values()].sort((left, right) => {
+    const leftDate = left.fechaHoraPartido ? new Date(left.fechaHoraPartido).getTime() : 0;
+    const rightDate = right.fechaHoraPartido ? new Date(right.fechaHoraPartido).getTime() : 0;
+    return leftDate - rightDate;
+  });
 };
 
 export const construirCalendarioActual = (
