@@ -111,3 +111,159 @@ export const getLowStockAlerts = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getDashboard = async (req: Request, res: Response) => {
+  try {
+    const limit =
+      typeof req.query.limit === "number"
+        ? req.query.limit
+        : Number(req.query.limit) || 50;
+    const cursor =
+      typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+
+    const result = await inventoryService.listDashboard({
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      lineaId:
+        typeof req.query.lineaId === "string" ? req.query.lineaId : undefined,
+      categoriaId:
+        typeof req.query.categoriaId === "string"
+          ? req.query.categoriaId
+          : undefined,
+      soloBajoStock: String(req.query.soloBajoStock).toLowerCase() === "true",
+      limit,
+      cursor,
+    });
+
+    return res.status(200).json({
+      success: true,
+      count: result.items.length,
+      data: result.items,
+      pagination: {
+        limit,
+        nextCursor: result.nextCursor,
+        hasNextPage: result.nextCursor !== null,
+      },
+    });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/dashboard:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al consultar dashboard de inventario",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getDiagnostic = async (req: Request, res: Response) => {
+  try {
+    const { productoId } = req.params;
+    const result = await inventoryService.diagnoseProduct(productoId);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/diagnostico/:productoId:", error);
+    const statusCode =
+      error instanceof Error &&
+      error.message.toLowerCase().includes("no encontrado")
+        ? 404
+        : 500;
+
+    return res.status(statusCode).json({
+      success: false,
+      message:
+        statusCode === 404
+          ? "Producto no encontrado"
+          : "Error al diagnosticar inventario del producto",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getOperationalSummary = async (_req: Request, res: Response) => {
+  try {
+    const summary = await inventoryService.getOperationalSummary();
+    return res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/resumen-operativo:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener resumen operativo admin",
+    });
+  }
+};
+
+export const listAdminNotifications = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const payload = await inventoryService.listAdminNotifications(req.user.uid);
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error("Error en GET /api/inventario/notificaciones-admin:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener notificaciones admin",
+    });
+  }
+};
+
+export const markAdminNotificationsRead = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.map(String).filter(Boolean)
+      : [];
+
+    if (ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Se requiere al menos un id de notificacion",
+      });
+    }
+
+    const payload = await inventoryService.markAdminNotificationsRead(
+      req.user.uid,
+      ids,
+    );
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error("Error en POST /api/inventario/notificaciones-admin/read:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar notificaciones como leidas",
+    });
+  }
+};
+
+export const markAllAdminNotificationsRead = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ success: false, message: "No autorizado" });
+    }
+
+    const payload = await inventoryService.markAllAdminNotificationsRead(
+      req.user.uid,
+    );
+    return res.status(200).json({ success: true, data: payload });
+  } catch (error) {
+    console.error(
+      "Error en POST /api/inventario/notificaciones-admin/read-all:",
+      error,
+    );
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar todas las notificaciones como leidas",
+    });
+  }
+};

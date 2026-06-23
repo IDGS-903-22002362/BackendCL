@@ -37,6 +37,27 @@ class TryOnAssetService {
 
     return { id: snapshot.id, ...(snapshot.data() as Omit<TryOnAsset, "id">) };
   }
+
+  async deleteAsset(id: string): Promise<void> {
+    await firestoreTienda.collection(AI_COLLECTIONS.tryOnAssets).doc(id).delete();
+  }
+
+  async listExpiredAssets(
+    olderThan: FirebaseFirestore.Timestamp,
+    limit = 100,
+  ): Promise<TryOnAsset[]> {
+    const snapshot = await firestoreTienda
+      .collection(AI_COLLECTIONS.tryOnAssets)
+      .where("createdAt", "<", olderThan)
+      .orderBy("createdAt", "asc")
+      .limit(limit)
+      .get();
+
+    return snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as Omit<TryOnAsset, "id">),
+    }));
+  }
 }
 
 export const tryOnAssetService = new TryOnAssetService();

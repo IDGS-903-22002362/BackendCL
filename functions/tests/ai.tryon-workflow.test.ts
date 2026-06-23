@@ -1,6 +1,6 @@
 jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
   __esModule: true,
-  default: {
+    default: {
     buildGcsUri: jest.fn(),
     getBucketName: jest.fn(),
     downloadGcsFile: jest.fn(),
@@ -8,6 +8,7 @@ jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
     generateSignedDownloadUrl: jest.fn(),
     copyGcsFile: jest.fn(),
     getObjectMetadata: jest.fn(),
+    deleteObject: jest.fn(),
   },
 }));
 
@@ -17,6 +18,7 @@ jest.mock("../src/services/ai/jobs/tryon-asset.service", () => ({
     getAssetById: jest.fn(),
     attachJob: jest.fn(),
     createAsset: jest.fn(),
+    deleteAsset: jest.fn(),
   },
 }));
 
@@ -25,6 +27,7 @@ jest.mock("../src/services/ai/jobs/tryon-job.service", () => ({
   default: {
     createJob: jest.fn(),
     getJobById: jest.fn(),
+    claimJobForProcessing: jest.fn(),
     markProcessing: jest.fn(),
     markCompleted: jest.fn(),
     markFailed: jest.fn(),
@@ -200,7 +203,7 @@ describe("AI try-on workflow", () => {
   });
 
   it("procesa job queued a completed y persiste referencia estable", async () => {
-    mockedJobService.getJobById.mockResolvedValue({
+    mockedJobService.claimJobForProcessing.mockResolvedValue({
       id: "job_1",
       userId: "user_1",
       sessionId: "session_1",
@@ -210,7 +213,7 @@ describe("AI try-on workflow", () => {
         "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
       inputProductImageUrl:
         "gs://e-comerce-leon.appspot.com/productos/jersey.png",
-      status: TryOnJobStatus.QUEUED,
+      status: TryOnJobStatus.PROCESSING,
       previewMode: ProductPreviewMode.BODY_TRYON,
       productPreviewType: ProductPreviewType.APPAREL,
       classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
@@ -246,7 +249,8 @@ describe("AI try-on workflow", () => {
 
     await tryOnWorkflowService.processQueuedJob("job_1");
 
-    expect(mockedJobService.markProcessing).toHaveBeenCalledWith("job_1");
+    expect(mockedJobService.claimJobForProcessing).toHaveBeenCalledWith("job_1");
+    expect(mockedJobService.markProcessing).not.toHaveBeenCalled();
     expect(mockedStorage.downloadGcsFile).toHaveBeenCalledWith(
       "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
     );
@@ -277,7 +281,7 @@ describe("AI try-on workflow", () => {
   });
 
   it("marca failed con errorCode estable cuando Vertex falla", async () => {
-    mockedJobService.getJobById.mockResolvedValue({
+    mockedJobService.claimJobForProcessing.mockResolvedValue({
       id: "job_1",
       userId: "user_1",
       sessionId: "session_1",
@@ -285,7 +289,7 @@ describe("AI try-on workflow", () => {
       inputUserImageAssetId: "asset_1",
       inputUserImageUrl: "gs://bucket/person.png",
       inputProductImageUrl: "gs://bucket/product.png",
-      status: TryOnJobStatus.QUEUED,
+      status: TryOnJobStatus.PROCESSING,
       previewMode: ProductPreviewMode.BODY_TRYON,
       productPreviewType: ProductPreviewType.APPAREL,
       classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
@@ -299,17 +303,17 @@ describe("AI try-on workflow", () => {
 
     await tryOnWorkflowService.processQueuedJob("job_1");
 
-    expect(mockedJobService.markProcessing).toHaveBeenCalledWith("job_1");
+    expect(mockedJobService.claimJobForProcessing).toHaveBeenCalledWith("job_1");
     expect(mockedJobService.markFailed).toHaveBeenCalledWith(
       "job_1",
       "VERTEX_TIMEOUT",
-      "Tiempo agotado",
+      "La generacion tardo demasiado. Intenta de nuevo con otra foto.",
     );
     expect(mockedJobService.markCompleted).not.toHaveBeenCalled();
   });
 
-  it("envia gorra al adapter de mockup y no al try-on corporal", async () => {
-    mockedJobService.getJobById.mockResolvedValue({
+  it("rechaza jobs legacy de mockup sin llamar a Vertex", async () => {
+    mockedJobService.claimJobForProcessing.mockResolvedValue({
       id: "job_2",
       userId: "user_1",
       sessionId: "session_1",
@@ -318,7 +322,7 @@ describe("AI try-on workflow", () => {
       inputUserImageUrl:
         "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
       inputProductImageUrl: "gs://e-comerce-leon.appspot.com/productos/gorra.png",
-      status: TryOnJobStatus.QUEUED,
+      status: TryOnJobStatus.PROCESSING,
       previewMode: ProductPreviewMode.ACCESSORY_MOCKUP,
       productPreviewType: ProductPreviewType.ACCESSORY,
       classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
@@ -330,43 +334,17 @@ describe("AI try-on workflow", () => {
         productDescription: "Gorra oficial verde",
       },
     } as never);
-    mockedStorage.downloadGcsFile.mockResolvedValue({
-      buffer: Buffer.from("person-image"),
-      mimeType: "image/png",
-      sizeBytes: 12,
-    });
-    mockedPreviewMockupAdapter.generateMockup.mockResolvedValue({
-      outputImageBytesBase64: Buffer.from("mockup-image").toString("base64"),
-      mimeType: "image/png",
-      rawResponse: {},
-    } as never);
-    mockedStorage.uploadPrivateFile.mockResolvedValue({
-      bucket: "e-comerce-leon-ai-private",
-      objectPath: "ai/tryon-results/user_1/session_1/mockup.png",
-      sizeBytes: 456,
-      sha256: "hash",
-      gcsUri:
-        "gs://e-comerce-leon-ai-private/ai/tryon-results/user_1/session_1/mockup.png",
-    });
-    mockedAssetService.createAsset.mockResolvedValue({
-      id: "asset_out_mockup",
-    } as never);
 
     await tryOnWorkflowService.processQueuedJob("job_2");
 
     expect(mockedVertexAdapter.runTryOn).not.toHaveBeenCalled();
-    expect(mockedPreviewMockupAdapter.generateMockup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        previewMode: ProductPreviewMode.ACCESSORY_MOCKUP,
-        productPreviewType: ProductPreviewType.ACCESSORY,
-        categoryName: "Gorra",
-      }),
-    );
-    expect(mockedJobService.markCompleted).toHaveBeenCalledWith(
+    expect(mockedPreviewMockupAdapter.generateMockup).not.toHaveBeenCalled();
+    expect(mockedJobService.markFailed).toHaveBeenCalledWith(
       "job_2",
-      "asset_out_mockup",
-      "gs://e-comerce-leon-ai-private/ai/tryon-results/user_1/session_1/mockup.png",
+      "PRODUCT_PREVIEW_UNSUPPORTED",
+      expect.any(String),
     );
+    expect(mockedJobService.markCompleted).not.toHaveBeenCalled();
   });
 
   it("rechaza producto ambiguo antes de crear un job util", async () => {

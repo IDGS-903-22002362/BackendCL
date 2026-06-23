@@ -1,5 +1,6 @@
 import path from "path";
 import aiConfig from "../../../config/ai.config";
+import { admin } from "../../../config/firebase.admin";
 import {
   ProductPreviewClassificationSource,
   ProductPreviewMode,
@@ -11,13 +12,11 @@ import productService from "../../../services/product.service";
 import logger from "../../../utils/logger";
 import {
   AiRuntimeError,
+  AI_TRYON_DISABLED_CODE,
   PRODUCT_PREVIEW_CLASSIFICATION_FAILED_CODE,
   PRODUCT_PREVIEW_IMAGE_INVALID_CODE,
   PRODUCT_PREVIEW_UNSUPPORTED_CODE,
 } from "../ai.error";
-import vertexPreviewMockupAdapter, {
-  VertexPreviewMockupError,
-} from "../adapters/vertex-preview-mockup.adapter";
 import vertexTryOnAdapter, {
   VertexTryOnError,
 } from "../adapters/vertex-tryon.adapter";
@@ -133,6 +132,47 @@ type ProviderImageResult = {
 class TryOnWorkflowService {
   private readonly baseLogger = logger.child({ component: "tryon-workflow-service" });
 
+  private async cleanupUserUploadAsset(job: TryOnJob): Promise<void> {
+    const asset = await tryOnAssetService.getAssetById(job.inputUserImageAssetId);
+    if (!asset || asset.kind !== TryOnAssetKind.USER_UPLOAD) {
+      return;
+    }
+
+    try {
+      await aiStorageService.deleteObject(asset.objectPath, asset.bucket);
+      await tryOnAssetService.deleteAsset(asset.id!);
+    } catch (error) {
+      this.baseLogger.warn("tryon_user_upload_cleanup_failed", {
+        jobId: job.id,
+        assetId: asset.id,
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  }
+
+  private mapProviderErrorMessage(error: unknown): string {
+    if (error instanceof VertexTryOnError) {
+      if (error.code === "VERTEX_QUOTA_EXCEEDED") {
+        return "El probador virtual esta temporalmente saturado. Intenta mas tarde.";
+      }
+      if (error.code === "VERTEX_PERMISSION_DENIED" || error.code === "VERTEX_AUTH_FAILED") {
+        return "No se pudo procesar la imagen en este momento.";
+      }
+      if (error.code === "VERTEX_INVALID_ARGUMENT") {
+        return "La imagen no cumple los requisitos para generar la vista previa.";
+      }
+      if (error.code === "VERTEX_TIMEOUT") {
+        return "La generacion tardo demasiado. Intenta de nuevo con otra foto.";
+      }
+    }
+
+    if (error instanceof AiRuntimeError) {
+      return error.message;
+    }
+
+    return "No se pudo generar la vista previa. Intenta con otra foto.";
+  }
+
   private async persistProviderOutput(input: {
     job: TryOnJob;
     jobId: string;
@@ -221,8 +261,43 @@ class TryOnWorkflowService {
     sku?: string;
     userImageAssetId: string;
     consentAccepted: boolean;
+    idempotencyKey?: string;
     requestedByRole: TryOnJob["requestedByRole"];
   }): Promise<TryOnJob> {
+    if (!aiConfig.tryOn.enabled) {
+      throw new AiRuntimeError(
+        AI_TRYON_DISABLED_CODE,
+        "El probador virtual no esta disponible temporalmente",
+        503,
+      );
+    }
+
+    if (input.idempotencyKey) {
+      const since = admin.firestore.Timestamp.fromMillis(
+        Date.now() - aiConfig.tryOn.idempotencyWindowMs,
+      );
+      const existingJob = await tryOnJobService.findRecentJobByIdempotencyKey(
+        input.userId,
+        input.idempotencyKey,
+        since,
+      );
+
+      if (existingJob) {
+        const isActiveJob =
+          existingJob.status === TryOnJobStatus.QUEUED ||
+          existingJob.status === TryOnJobStatus.PROCESSING ||
+          existingJob.status === TryOnJobStatus.COMPLETED;
+        const isPermanentQuotaFailure =
+          existingJob.status === TryOnJobStatus.FAILED &&
+          (existingJob.errorCode === "VERTEX_QUOTA_EXCEEDED" ||
+            existingJob.errorCode === "PRODUCT_PREVIEW_QUOTA_EXCEEDED");
+
+        if (isActiveJob || isPermanentQuotaFailure) {
+          return existingJob;
+        }
+      }
+    }
+
     const [session, asset, product] = await Promise.all([
       aiSessionService.getSessionById(input.sessionId),
       tryOnAssetService.getAssetById(input.userImageAssetId),
@@ -249,12 +324,28 @@ class TryOnWorkflowService {
       );
     }
 
+    if (product.activo === false) {
+      throw new AiRuntimeError(
+        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
+        "El producto seleccionado no esta disponible para probador virtual",
+        400,
+      );
+    }
+
     const previewPolicy = await productPreviewPolicyService.resolvePolicy(product);
-    if (previewPolicy.previewMode === ProductPreviewMode.UNSUPPORTED) {
-      throw resolvePreviewClassificationError(
-        previewPolicy.classificationSource,
-        previewPolicy.productCategorySnapshot.categoryName,
-        previewPolicy.productCategorySnapshot.lineName,
+    if (previewPolicy.previewMode !== ProductPreviewMode.BODY_TRYON) {
+      if (previewPolicy.previewMode === ProductPreviewMode.UNSUPPORTED) {
+        throw resolvePreviewClassificationError(
+          previewPolicy.classificationSource,
+          previewPolicy.productCategorySnapshot.categoryName,
+          previewPolicy.productCategorySnapshot.lineName,
+        );
+      }
+
+      throw new AiRuntimeError(
+        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
+        "El probador virtual solo esta disponible para prendas de adulto",
+        400,
       );
     }
 
@@ -273,6 +364,8 @@ class TryOnWorkflowService {
       inputUserImageAssetId: asset.id!,
       inputUserImageUrl: aiStorageService.buildGcsUri(asset.objectPath, asset.bucket),
       inputProductImageUrl: productImageGcsUri,
+      consentVersion: aiConfig.tryOn.consentVersion,
+      consentAcceptedAt: admin.firestore.Timestamp.now(),
       previewMode: previewPolicy.previewMode,
       productPreviewType: previewPolicy.productPreviewType,
       classificationSource: previewPolicy.classificationSource,
@@ -307,11 +400,12 @@ class TryOnWorkflowService {
   }
 
   async processQueuedJob(jobId: string): Promise<void> {
-    const job = await tryOnJobService.getJobById(jobId);
-    if (!job || job.status !== TryOnJobStatus.QUEUED) {
+    const job = await tryOnJobService.claimJobForProcessing(jobId);
+    if (!job) {
+      const latestJob = await tryOnJobService.getJobById(jobId);
       this.baseLogger.info("tryon_job_skipped", {
         jobId,
-        status: job?.status ?? "missing",
+        status: latestJob?.status ?? "missing",
       });
       return;
     }
@@ -321,13 +415,12 @@ class TryOnWorkflowService {
       fromStatus: TryOnJobStatus.QUEUED,
       toStatus: TryOnJobStatus.PROCESSING,
     });
-    await tryOnJobService.markProcessing(jobId);
 
     try {
-      if (job.previewMode === ProductPreviewMode.UNSUPPORTED) {
+      if (job.previewMode !== ProductPreviewMode.BODY_TRYON) {
         throw new AiRuntimeError(
           PRODUCT_PREVIEW_UNSUPPORTED_CODE,
-          "El job no es compatible con un preview AI confiable",
+          "El job no es compatible con probador virtual de ropa adulta",
           400,
         );
       }
@@ -336,23 +429,12 @@ class TryOnWorkflowService {
         resolveVertexImageInput(job.inputUserImageUrl!),
         resolveVertexImageInput(job.inputProductImageUrl),
       ]);
-      const providerResult =
-        job.previewMode === ProductPreviewMode.BODY_TRYON
-          ? await vertexTryOnAdapter.runTryOn({
-              personImage,
-              garmentImage: productImage,
-            })
-          : await vertexPreviewMockupAdapter.generateMockup({
-              personImage,
-              productImage,
-              previewMode: job.previewMode,
-              productPreviewType: job.productPreviewType,
-              productDescription: job.productCategorySnapshot.productDescription,
-              categoryName: job.productCategorySnapshot.categoryName,
-              lineName: job.productCategorySnapshot.lineName,
-            });
+      const providerResult = await vertexTryOnAdapter.runTryOn({
+        personImage,
+        garmentImage: productImage,
+      });
 
-      const { outputAsset, stableOutputUri } = await this.persistProviderOutput({
+      const { outputAsset } = await this.persistProviderOutput({
         job,
         jobId,
         result: providerResult,
@@ -365,20 +447,16 @@ class TryOnWorkflowService {
       this.baseLogger.info("tryon_job_completed", {
         jobId,
         outputAssetId: outputAsset.id,
-        outputImageUrl: stableOutputUri,
         previewMode: job.previewMode,
       });
     } catch (error) {
       const errorCode =
         error instanceof VertexTryOnError
           ? error.code
-          : error instanceof VertexPreviewMockupError
+          : error instanceof AiRuntimeError
             ? error.code
-            : error instanceof AiRuntimeError
-              ? error.code
-          : "TRYON_FAILED";
-      const message =
-        error instanceof Error ? error.message : "Error procesando preview AI";
+            : "TRYON_FAILED";
+      const message = this.mapProviderErrorMessage(error);
 
       this.baseLogger.error("tryon_job_failed", {
         jobId,
@@ -392,7 +470,37 @@ class TryOnWorkflowService {
         toStatus: TryOnJobStatus.FAILED,
         errorCode,
       });
+    } finally {
+      const latestJob = await tryOnJobService.getJobById(jobId);
+      if (latestJob) {
+        await this.cleanupUserUploadAsset(latestJob);
+      }
     }
+  }
+
+  async cleanupExpiredAssets(limit = 100): Promise<{ deleted: number }> {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - aiConfig.storage.retentionHours * 60 * 60 * 1000,
+    );
+    const expiredAssets = await tryOnAssetService.listExpiredAssets(cutoff, limit);
+    let deleted = 0;
+
+    for (const asset of expiredAssets) {
+      try {
+        await aiStorageService.deleteObject(asset.objectPath, asset.bucket);
+        if (asset.id) {
+          await tryOnAssetService.deleteAsset(asset.id);
+        }
+        deleted += 1;
+      } catch (error) {
+        this.baseLogger.warn("tryon_asset_retention_cleanup_failed", {
+          assetId: asset.id,
+          error: error instanceof Error ? error.message : "unknown_error",
+        });
+      }
+    }
+
+    return { deleted };
   }
 }
 

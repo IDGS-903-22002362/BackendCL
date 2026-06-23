@@ -17,14 +17,19 @@ import {
 } from "../middleware/validators/ai-public-chat.validator";
 import {
   createTryOnJobSchema,
+  tryOnAssetIdParamSchema,
   tryOnJobIdParamSchema,
 } from "../middleware/validators/ai-tryon.validator";
 import {
   aiChatRateLimiter,
   aiPublicChatRateLimiter,
-  aiTryOnRateLimiter,
   aiUploadRateLimiter,
 } from "../middleware/ai-rate-limit.middleware";
+import {
+  aiTryOnPollRateLimiter,
+  aiTryOnUserRateLimiter,
+  requireTryOnEnabled,
+} from "../middleware/ai-tryon.middleware";
 import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { requireAiAdmin } from "../middleware/ai-authz.middleware";
 import * as chatController from "../controllers/ai/chat.controller";
@@ -223,6 +228,7 @@ protectedRouter.post(
  */
 protectedRouter.post(
   "/files/upload",
+  requireTryOnEnabled,
   aiUploadRateLimiter,
   parseMultipartImages({
     fieldName: "file",
@@ -230,6 +236,13 @@ protectedRouter.post(
     maxFileSizeBytes: aiConfig.uploads.maxBytes,
   }),
   asyncHandler(filesController.uploadUserImage),
+);
+
+protectedRouter.delete(
+  "/files/:id",
+  requireTryOnEnabled,
+  validateParams(tryOnAssetIdParamSchema),
+  asyncHandler(filesController.deleteUserImage),
 );
 
 /**
@@ -270,7 +283,8 @@ protectedRouter.post(
  */
 protectedRouter.post(
   "/tryon/jobs",
-  aiTryOnRateLimiter,
+  requireTryOnEnabled,
+  aiTryOnUserRateLimiter,
   validateBody(createTryOnJobSchema),
   asyncHandler(tryonController.createTryOnJob),
 );
@@ -290,7 +304,8 @@ protectedRouter.post(
  */
 protectedRouter.get(
   "/tryon/jobs",
-  aiTryOnRateLimiter,
+  requireTryOnEnabled,
+  aiTryOnUserRateLimiter,
   asyncHandler(tryonController.listTryOnJobs),
 );
 /**
@@ -329,7 +344,8 @@ protectedRouter.get(
  */
 protectedRouter.get(
   "/tryon/jobs/:id",
-  aiTryOnRateLimiter,
+  requireTryOnEnabled,
+  aiTryOnPollRateLimiter,
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.getTryOnJob),
 );
@@ -359,9 +375,17 @@ protectedRouter.get(
  */
 protectedRouter.get(
   "/tryon/jobs/:id/download",
-  aiTryOnRateLimiter,
+  requireTryOnEnabled,
+  aiTryOnPollRateLimiter,
   validateParams(tryOnJobIdParamSchema),
   asyncHandler(tryonController.getTryOnDownloadLink),
+);
+protectedRouter.get(
+  "/tryon/jobs/:id/image",
+  requireTryOnEnabled,
+  aiTryOnPollRateLimiter,
+  validateParams(tryOnJobIdParamSchema),
+  asyncHandler(tryonController.streamTryOnImage),
 );
 
 /**

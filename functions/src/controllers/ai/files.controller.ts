@@ -25,3 +25,22 @@ export const uploadUserImage = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const deleteUserImage = async (req: Request, res: Response) => {
+  try {
+    await aiFileService.deleteUserImage({
+      userId: req.user!.uid,
+      assetId: req.params.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Imagen eliminada",
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : "No se pudo eliminar la imagen",
+    });
+  }
+};

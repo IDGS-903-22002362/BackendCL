@@ -11,7 +11,32 @@ import { Timestamp } from "firebase-admin/firestore";
  */
 export interface InventarioPorTalla {
   tallaId: string;
+  /** Proyección pública: disponible = física - reservada - noDisponible */
   cantidad: number;
+  fisica?: number;
+  reservada?: number;
+  noDisponible?: number;
+  entrante?: number;
+}
+
+export type InventarioPorTallaExtended = InventarioPorTalla;
+
+export interface InventarioGlobalBuckets {
+  fisica: number;
+  reservada: number;
+  noDisponible: number;
+  entrante?: number;
+  stockObjetivo?: number;
+  disponible: number;
+}
+
+export interface InventarioPorTallaBuckets {
+  tallaId: string;
+  fisica: number;
+  reservada: number;
+  noDisponible: number;
+  entrante?: number;
+  disponible: number;
 }
 
 export interface StockMinimoPorTalla {
@@ -73,7 +98,8 @@ export interface Producto {
   destacado?: boolean;
   proveedorId: string; // Referencia a documento en colección 'proveedores'
   tallaIds: string[]; // Array de IDs de tallas disponibles
-  inventarioPorTalla: InventarioPorTalla[]; // Stock por talla (fuente de verdad)
+  inventarioPorTalla: InventarioPorTalla[]; // Stock por talla (proyección disponible)
+  inventarioGlobal?: InventarioGlobalBuckets; // Buckets cuando no hay tallas
   stockMinimoGlobal: number; // Umbral mínimo global para alertas de stock bajo
   stockMinimoPorTalla: StockMinimoPorTalla[]; // Umbrales mínimos opcionales por talla
   imagenes: string[]; // Array de URLs de imágenes del producto

@@ -140,6 +140,14 @@ router.get(
   queryController.getAdminProducts,
 );
 
+router.get(
+  "/admin/buscar/:termino",
+  authMiddleware,
+  requireAdmin,
+  validateParams(searchTermSchema),
+  queryController.searchAdmin,
+);
+
 /**
  * @swagger
  * /api/productos/{id}/stock:
