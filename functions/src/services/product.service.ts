@@ -787,13 +787,13 @@ export class ProductService {
       case "precio_desc":
         return { field: "precioPublico", direction: "desc" };
       case "recientes":
-        return { field: "createdAt", direction: "desc" };
+        return { field: "updatedAt", direction: "desc" };
       case "nombre_asc":
         return { field: "descripcion", direction: "asc" };
       case "destacados":
         return { field: "destacado", direction: "desc" };
       default:
-        return { field: "createdAt", direction: "desc" };
+        return { field: "updatedAt", direction: "desc" };
     }
   }
 
@@ -825,12 +825,21 @@ export class ProductService {
     }
   }
 
+  private getProductStockTotal(product: Producto): number {
+    return Math.max(0, Math.floor(Number(product.existencias || 0)));
+  }
+
+  private isProductAvailableForCatalog(product: Producto): boolean {
+    return this.getProductStockTotal(product) > 0;
+  }
+
   private toCatalogOrderValue(
     product: Producto,
     sortField: string,
   ): string | number | boolean | null {
-    if (sortField === "createdAt") {
-      const value = product.createdAt;
+    if (sortField === "createdAt" || sortField === "updatedAt") {
+      const value =
+        sortField === "createdAt" ? product.createdAt : product.updatedAt;
       return typeof value?.toMillis === "function" ? value.toMillis() : null;
     }
 
@@ -856,7 +865,7 @@ export class ProductService {
     value: CatalogCursor["last"]["value"],
     sortField: string,
   ): string | number | boolean | FirebaseFirestore.Timestamp | null {
-    if (sortField === "createdAt") {
+    if (sortField === "createdAt" || sortField === "updatedAt") {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new CatalogQueryError("cursor invalido para ordenamiento");
       }
@@ -900,7 +909,8 @@ export class ProductService {
     labels: { categorias: Map<string, string>; lineas: Map<string, string> },
   ): CatalogProductCardDTO {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
-    const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
+    const stockTotal = this.getProductStockTotal(product);
+    const disponible = this.isProductAvailableForCatalog(product);
 
     return {
       id: product.id || "",
@@ -925,10 +935,7 @@ export class ProductService {
         ? product.imagenes.filter(Boolean)
         : [],
       stockTotal,
-      disponible:
-        typeof product.disponible === "boolean"
-          ? product.disponible
-          : stockTotal > 0,
+      disponible,
       destacado: product.destacado === true,
     };
   }
@@ -966,19 +973,171 @@ export class ProductService {
       return false;
     }
 
-    if (filters.onlyAvailable) {
-      const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
-      const disponible =
-        typeof product.disponible === "boolean"
-          ? product.disponible
-          : stockTotal > 0;
-
-      if (!disponible) {
-        return false;
-      }
+    if (filters.onlyAvailable && !this.isProductAvailableForCatalog(product)) {
+      return false;
     }
 
     return true;
+  }
+
+  private buildCatalogFirestoreQuery(
+    filters: CatalogCursor["filters"],
+    sortConfig: { field: string; direction: FirebaseFirestore.OrderByDirection },
+  ): FirebaseFirestore.Query {
+    let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true);
+
+    if (filters.category) {
+      firestoreQuery = firestoreQuery.where("categoriaId", "==", filters.category);
+    }
+
+    if (filters.line) {
+      firestoreQuery = firestoreQuery.where("lineaId", "==", filters.line);
+    }
+
+    if (filters.talla) {
+      firestoreQuery = firestoreQuery.where(
+        "tallaIds",
+        "array-contains",
+        filters.talla,
+      );
+    }
+
+    if (filters.minPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        ">=",
+        filters.minPrice,
+      );
+    }
+
+    if (filters.maxPrice !== undefined) {
+      firestoreQuery = firestoreQuery.where(
+        "precioPublico",
+        "<=",
+        filters.maxPrice,
+      );
+    }
+
+    if (filters.q) {
+      firestoreQuery = firestoreQuery
+        .where("searchText", ">=", filters.q)
+        .where("searchText", "<=", `${filters.q}\uf8ff`);
+    }
+
+    return firestoreQuery
+      .orderBy(sortConfig.field, sortConfig.direction)
+      .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
+  }
+
+  private async listCatalogProductsFromFirestore(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+    effectiveSort: CatalogSort,
+    sortConfig: { field: string; direction: FirebaseFirestore.OrderByDirection },
+  ): Promise<CatalogResponse> {
+    const pageLimit = query.limit;
+    const batchSize = Math.max(pageLimit * 3, 48);
+    const maxScanDocs = 1000;
+    const labels = await this.loadCatalogLabels();
+    const baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
+
+    let startAfterValue:
+      | string
+      | number
+      | boolean
+      | FirebaseFirestore.Timestamp
+      | null = null;
+    let startAfterId: string | null = null;
+
+    if (query.cursor) {
+      const cursor = this.decodeCatalogCursor(query.cursor);
+      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
+      startAfterValue = this.getCursorStartAfterValue(
+        cursor.last.value,
+        sortConfig.field,
+      );
+      startAfterId = cursor.last.id;
+    }
+
+    const matched: Producto[] = [];
+    let lastScannedProduct: Producto | null = null;
+    let scannedDocs = 0;
+    let firestoreExhausted = false;
+
+    while (
+      matched.length < pageLimit + 1 &&
+      !firestoreExhausted &&
+      scannedDocs < maxScanDocs
+    ) {
+      let firestoreQuery = baseQuery;
+
+      if (startAfterValue !== null && startAfterId) {
+        firestoreQuery = firestoreQuery.startAfter(
+          startAfterValue,
+          startAfterId,
+        );
+      }
+
+      const snapshot = await firestoreQuery.limit(batchSize).get();
+
+      if (snapshot.empty) {
+        firestoreExhausted = true;
+        break;
+      }
+
+      scannedDocs += snapshot.docs.length;
+
+      for (const doc of snapshot.docs) {
+        const product = this.normalizeProduct(doc.id, doc.data());
+        lastScannedProduct = product;
+
+        if (!this.matchesCatalogFilters(product, filters)) {
+          continue;
+        }
+
+        matched.push(product);
+
+        if (matched.length >= pageLimit + 1) {
+          break;
+        }
+      }
+
+      if (snapshot.docs.length < batchSize) {
+        firestoreExhausted = true;
+      } else if (matched.length < pageLimit + 1 && lastScannedProduct) {
+        startAfterValue = this.getCursorStartAfterValue(
+          this.toCatalogOrderValue(lastScannedProduct, sortConfig.field),
+          sortConfig.field,
+        );
+        startAfterId = lastScannedProduct.id || "";
+      }
+    }
+
+    const hasMore = matched.length > pageLimit;
+    const pageProducts = matched.slice(0, pageLimit);
+    const items = pageProducts.map((product) =>
+      this.toCatalogCard(product, labels),
+    );
+    const cursorProduct = pageProducts[pageProducts.length - 1];
+
+    return {
+      items,
+      hasMore,
+      nextCursor:
+        hasMore && cursorProduct
+          ? this.encodeCatalogCursor({
+              v: CURSOR_VERSION,
+              sort: effectiveSort,
+              filters,
+              last: {
+                value: this.toCatalogOrderValue(cursorProduct, sortConfig.field),
+                id: cursorProduct.id || "",
+              },
+            })
+          : null,
+    };
   }
 
   private async listCatalogProductsByAggregateRanking(
@@ -1152,23 +1311,11 @@ export class ProductService {
     );
   }
 
-  private isBroadCatalogListing(filters: CatalogCursor["filters"]): boolean {
-    return (
-      !filters.category &&
-      !filters.line &&
-      !filters.talla &&
-      !filters.q &&
-      filters.minPrice === undefined &&
-      filters.maxPrice === undefined &&
-      !filters.onlyOffers
-    );
-  }
-
   private shouldUseAggregateCatalogRanking(
     sort: CatalogSort,
     filters: CatalogCursor["filters"],
   ): boolean {
-    if (filters.q || this.isBroadCatalogListing(filters)) {
+    if (filters.q) {
       return false;
     }
 
@@ -1246,89 +1393,12 @@ export class ProductService {
       );
     }
 
-    let firestoreQuery: FirebaseFirestore.Query = firestoreTienda
-      .collection(PRODUCTOS_COLLECTION)
-      .where("activo", "==", true);
-
-    if (filters.category) {
-      firestoreQuery = firestoreQuery.where("categoriaId", "==", filters.category);
-    }
-
-    if (filters.line) {
-      firestoreQuery = firestoreQuery.where("lineaId", "==", filters.line);
-    }
-
-    if (filters.talla) {
-      firestoreQuery = firestoreQuery.where(
-        "tallaIds",
-        "array-contains",
-        filters.talla,
-      );
-    }
-
-    if (filters.onlyAvailable) {
-      firestoreQuery = firestoreQuery.where("disponible", "==", true);
-    }
-
-    if (filters.minPrice !== undefined) {
-      firestoreQuery = firestoreQuery.where(
-        "precioPublico",
-        ">=",
-        filters.minPrice,
-      );
-    }
-
-    if (filters.maxPrice !== undefined) {
-      firestoreQuery = firestoreQuery.where(
-        "precioPublico",
-        "<=",
-        filters.maxPrice,
-      );
-    }
-
-    if (filters.q) {
-      firestoreQuery = firestoreQuery
-        .where("searchText", ">=", filters.q)
-        .where("searchText", "<=", `${filters.q}\uf8ff`);
-    }
-
-    firestoreQuery = firestoreQuery
-      .orderBy(sortConfig.field, sortConfig.direction)
-      .orderBy(admin.firestore.FieldPath.documentId(), sortConfig.direction);
-
-    if (query.cursor) {
-      const cursor = this.decodeCatalogCursor(query.cursor);
-      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
-      firestoreQuery = firestoreQuery.startAfter(
-        this.getCursorStartAfterValue(cursor.last.value, sortConfig.field),
-        cursor.last.id,
-      );
-    }
-
-    const snapshot = await firestoreQuery.limit(query.limit + 1).get();
-    const docs = snapshot.docs.slice(0, query.limit);
-    const hasMore = snapshot.docs.length > query.limit;
-    const labels = await this.loadCatalogLabels();
-    const products = docs.map((doc) => this.normalizeProduct(doc.id, doc.data()));
-    const items = products.map((product) => this.toCatalogCard(product, labels));
-    const lastProduct = products[products.length - 1];
-
-    return {
-      items,
-      hasMore,
-      nextCursor:
-        hasMore && lastProduct
-          ? this.encodeCatalogCursor({
-              v: CURSOR_VERSION,
-              sort: effectiveSort,
-              filters,
-              last: {
-                value: this.toCatalogOrderValue(lastProduct, sortConfig.field),
-                id: lastProduct.id || "",
-              },
-            })
-          : null,
-    };
+    return this.listCatalogProductsFromFirestore(
+      query,
+      filters,
+      effectiveSort,
+      sortConfig,
+    );
   }
 
   private toAdminProductListItem(product: Producto): AdminProductListItemDTO {
