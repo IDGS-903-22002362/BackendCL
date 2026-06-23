@@ -117,6 +117,8 @@ export interface ItemValidarCodigoPromocionDto {
 
   categoriaId?: string | null;
   lineaId?: string | null;
+  categoriaIds?: string[];
+  lineaIds?: string[];
   tallaId?: string | null;
 }
 

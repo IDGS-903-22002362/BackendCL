@@ -5,6 +5,7 @@ import { codigosPromocionQueryController } from "../controllers/codigos-promocio
 import {
   codigoPromocionParamsSchema,
   createCodigoPromocionSchema,
+  disponibilidadCodigosPromocionCarritoSchema,
   listCodigosPromocionQuerySchema,
   updateCodigoPromocionSchema,
   validarCodigoPromocionSchema,
@@ -109,6 +110,13 @@ router.post(
   couponRateLimit,
   validateBody(validarCodigoPromocionSchema),
   codigosPromocionQueryController.validar,
+);
+
+router.post(
+  "/disponibilidad-carrito",
+  couponRateLimit,
+  validateBody(disponibilidadCodigosPromocionCarritoSchema),
+  codigosPromocionQueryController.consultarDisponibilidadCarrito,
 );
 
 /**

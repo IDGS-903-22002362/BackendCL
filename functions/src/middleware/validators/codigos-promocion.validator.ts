@@ -243,29 +243,41 @@ export const listCodigosPromocionQuerySchema = z.object({
     .transform((value) => value === "true"),
 });
 
+const codigoPromocionCarritoItemSchema = z.object({
+  productoId: z.string().trim().min(1, "El productoId es obligatorio."),
+
+  cantidad: z
+    .number()
+    .int("La cantidad debe ser un número entero.")
+    .positive("La cantidad debe ser mayor a 0."),
+
+  precioUnitario: z
+    .number()
+    .min(0, "El precio unitario no puede ser negativo."),
+
+  // Se conservan los campos singulares por compatibilidad.
+  categoriaId: z.string().trim().min(1).nullable().optional(),
+  lineaId: z.string().trim().min(1).nullable().optional(),
+
+  // Estos son los campos que actualmente envía el frontend.
+  categoriaIds: z.array(z.string().trim().min(1)).optional().default([]),
+  lineaIds: z.array(z.string().trim().min(1)).optional().default([]),
+
+  tallaId: z.string().trim().min(1).nullable().optional(),
+});
+
+const codigoPromocionCarritoItemsSchema = z
+  .array(codigoPromocionCarritoItemSchema)
+  .min(1, "Debes enviar al menos un producto para validar el código.");
+
 export const validarCodigoPromocionSchema = z.object({
   codigo: codigoNormalizadoSchema,
 
   usuarioId: z.string().trim().min(1).nullable().optional(),
 
-  items: z
-    .array(
-      z.object({
-        productoId: z.string().trim().min(1, "El productoId es obligatorio."),
+  items: codigoPromocionCarritoItemsSchema,
+});
 
-        cantidad: z
-          .number()
-          .int("La cantidad debe ser un número entero.")
-          .positive("La cantidad debe ser mayor a 0."),
-
-        precioUnitario: z
-          .number()
-          .min(0, "El precio unitario no puede ser negativo."),
-
-        categoriaId: z.string().trim().min(1).nullable().optional(),
-        lineaId: z.string().trim().min(1).nullable().optional(),
-        tallaId: z.string().trim().min(1).nullable().optional(),
-      }),
-    )
-    .min(1, "Debes enviar al menos un producto para validar el código."),
+export const disponibilidadCodigosPromocionCarritoSchema = z.object({
+  items: codigoPromocionCarritoItemsSchema,
 });

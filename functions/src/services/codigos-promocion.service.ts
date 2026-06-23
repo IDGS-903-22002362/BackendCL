@@ -18,6 +18,7 @@ import {
 } from "../utils/codigos-promocion-pricing.util";
 
 const CODIGOS_PROMOCION_COLLECTION = "codigos_promocion";
+const PRODUCTOS_COLLECTION = "productos";
 
 type FirestoreData = FirebaseFirestore.DocumentData;
 
@@ -364,6 +365,73 @@ function codigoMatchesFilters(
   return true;
 }
 
+function collectStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim()];
+  }
+
+  return [];
+}
+
+async function enrichCartItemsForCodigoPromocion(
+  items: ValidarCodigoPromocionDto["items"],
+): Promise<ValidarCodigoPromocionDto["items"]> {
+  return Promise.all(
+    items.map(async (item) => {
+      const categoriaIds = new Set<string>([
+        ...collectStringArray(item.categoriaId),
+        ...collectStringArray(item.categoriaIds),
+      ]);
+      const lineaIds = new Set<string>([
+        ...collectStringArray(item.lineaId),
+        ...collectStringArray(item.lineaIds),
+      ]);
+
+      const productoDoc = await firestoreTienda
+        .collection(PRODUCTOS_COLLECTION)
+        .doc(item.productoId)
+        .get();
+
+      if (productoDoc.exists) {
+        const producto = productoDoc.data() ?? {};
+
+        for (const categoriaId of [
+          ...collectStringArray(producto.categoriaIds),
+          ...collectStringArray(producto.categoriasIds),
+          ...collectStringArray(producto.categoryIds),
+          ...collectStringArray(producto.categoriaId),
+        ]) {
+          categoriaIds.add(categoriaId);
+        }
+
+        for (const lineaId of [
+          ...collectStringArray(producto.lineaIds),
+          ...collectStringArray(producto.lineasIds),
+          ...collectStringArray(producto.lineIds),
+          ...collectStringArray(producto.lineaId),
+        ]) {
+          lineaIds.add(lineaId);
+        }
+      }
+
+      return {
+        ...item,
+        ...(categoriaIds.size > 0
+          ? { categoriaIds: [...categoriaIds] }
+          : {}),
+        ...(lineaIds.size > 0 ? { lineaIds: [...lineaIds] } : {}),
+      };
+    }),
+  );
+}
+
 async function assertCodigoDisponible(
   codigo: string,
   currentId?: string,
@@ -489,15 +557,103 @@ export const codigosPromocionService = {
     return true;
   },
 
+  async consultarDisponibilidadCarrito(
+  dto: Pick<ValidarCodigoPromocionDto, "items">,
+): Promise<{ disponible: boolean }> {
+  if (!Array.isArray(dto.items) || dto.items.length === 0) {
+    return {
+      disponible: false,
+    };
+  }
+
+  const items = await enrichCartItemsForCodigoPromocion(dto.items);
+  const subtotalOriginal = calcularSubtotalOriginalItems(items);
+
+  if (!Number.isFinite(subtotalOriginal) || subtotalOriginal <= 0) {
+    return {
+      disponible: false,
+    };
+  }
+
+  const ahora = new Date();
+
+  const snapshot = await collectionRef()
+    .where("estado", "==", true)
+    .get();
+
+  for (const doc of snapshot.docs) {
+    const codigoPromocion = mapCodigoPromocionDoc(doc);
+
+    if (codigoPromocion.deletedAt || !codigoPromocion.estado) {
+      continue;
+    }
+
+    if (
+      ahora < codigoPromocion.fechaInicio ||
+      ahora > codigoPromocion.fechaFin
+    ) {
+      continue;
+    }
+
+    if (
+      typeof codigoPromocion.usoMaximoTotal === "number" &&
+      codigoPromocion.usoMaximoTotal > 0 &&
+      codigoPromocion.usosActuales >= codigoPromocion.usoMaximoTotal
+    ) {
+      continue;
+    }
+
+    if (
+      !codigoPromocion.hastaAgotarExistencias &&
+      typeof codigoPromocion.stockLimiteCodigo === "number" &&
+      codigoPromocion.stockLimiteCodigo > 0 &&
+      codigoPromocion.stockUsadoCodigo >=
+        codigoPromocion.stockLimiteCodigo
+    ) {
+      continue;
+    }
+
+    if (
+      typeof codigoPromocion.montoMinimoCompra === "number" &&
+      codigoPromocion.montoMinimoCompra > 0 &&
+      subtotalOriginal < codigoPromocion.montoMinimoCompra
+    ) {
+      continue;
+    }
+
+    const resultado = calcularPreciosConCodigoPromocion(
+      codigoPromocion,
+      items,
+    );
+
+    const descuentoTotal = Number(resultado.descuentoTotal || 0);
+
+    if (
+      resultado.valido !== false &&
+      Number.isFinite(descuentoTotal) &&
+      descuentoTotal > 0
+    ) {
+      return {
+        disponible: true,
+      };
+    }
+  }
+
+  return {
+    disponible: false,
+  };
+},
+
   async validar(
     dto: ValidarCodigoPromocionDto,
   ): Promise<ResultadoValidacionCodigoPromocion> {
     const normalizedCode = normalizarCodigoPromocion(dto.codigo);
+    const items = await enrichCartItemsForCodigoPromocion(dto.items);
 
     const codigoPromocion = await this.obtenerPorCodigo(normalizedCode);
 
     if (!codigoPromocion) {
-      const subtotalOriginal = calcularSubtotalOriginalItems(dto.items);
+      const subtotalOriginal = calcularSubtotalOriginalItems(items);
 
       return {
         valido: false,
@@ -508,7 +664,7 @@ export const codigosPromocionService = {
         subtotalOriginal,
         subtotalFinal: subtotalOriginal,
         descuentoTotal: 0,
-        items: construirItemsSinDescuento(dto.items),
+        items: construirItemsSinDescuento(items),
       };
     }
 
@@ -516,7 +672,7 @@ export const codigosPromocionService = {
       typeof codigoPromocion.montoMinimoCompra === "number" &&
       codigoPromocion.montoMinimoCompra > 0
     ) {
-      const subtotalOriginal = calcularSubtotalOriginalItems(dto.items);
+      const subtotalOriginal = calcularSubtotalOriginalItems(items);
 
       if (subtotalOriginal < codigoPromocion.montoMinimoCompra) {
         return {
@@ -530,12 +686,12 @@ export const codigosPromocionService = {
           subtotalOriginal,
           subtotalFinal: subtotalOriginal,
           descuentoTotal: 0,
-          items: construirItemsSinDescuento(dto.items),
+          items: construirItemsSinDescuento(items),
         };
       }
     }
 
-    return calcularPreciosConCodigoPromocion(codigoPromocion, dto.items);
+    return calcularPreciosConCodigoPromocion(codigoPromocion, items);
   },
 
   async registrarUso(
