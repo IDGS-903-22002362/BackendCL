@@ -46,6 +46,7 @@ import ofertasRoutes from "./ofertas.routes";
 import codigofertasRoutes from "./codigos-promocion.routes";
 import recomendacionesRoutes from "./recomendaciones.routes";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
+import contactoRoutes from "./contacto.routes";
 
 const router = Router();
 
@@ -95,6 +96,7 @@ router.use("/shipping", shippingRoutes);
 router.use("/ofertas", ofertasRoutes);
 router.use("/codigos-promocion", codigofertasRoutes);
 router.use("/recomendaciones", recomendacionesRoutes);
+router.use("/contacto", contactoRoutes);
 
 // Futuros módulos:
 

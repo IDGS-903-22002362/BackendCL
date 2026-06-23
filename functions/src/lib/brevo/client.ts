@@ -1,5 +1,6 @@
 // src/lib/brevo/client.ts - Versión con axios
 import axios from 'axios';
+import { Contacto } from '../../models/contacto.model';
 
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const senderEmail = process.env.BREVO_SENDER_EMAIL || 'no-reply@clubleon.com';
@@ -187,6 +188,123 @@ export async function sendVerificationEmail(to: string, code: string, nombre?: s
     return true;
   } catch (error) {
     console.error(' Error al enviar email:', error);
+    return false;
+  }
+}
+
+export async function sendContactConfirmationEmail(
+  to: string,
+  nombre: string
+): Promise<boolean> {
+
+  if (!BREVO_API_KEY) {
+    console.error("Brevo no configurado");
+    return false;
+  }
+
+  try {
+
+    await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          email: senderEmail,
+          name: senderName
+        },
+        to: [
+          {
+            email: to,
+            name: nombre
+          }
+        ],
+        subject: "Hemos recibido tu mensaje - Club León",
+        htmlContent: `
+                    <h2>Hola ${nombre}</h2>
+
+                    <p>
+                        Hemos recibido correctamente tu solicitud de contacto.
+                    </p>
+
+                    <p>
+                        Nuestro equipo revisará tu mensaje y te responderá lo antes posible.
+                    </p>
+
+                    <br>
+
+                    <strong>Club León</strong>
+                `
+      },
+      {
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    return true;
+
+  } catch (error) {
+
+    console.error(error);
+
+    return false;
+  }
+}
+export async function sendContactNotificationEmail(
+  contacto: Contacto
+): Promise<boolean> {
+
+  if (!BREVO_API_KEY) {
+    console.error("Brevo no configurado");
+    return false;
+  }
+
+  try {
+
+    await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          email: senderEmail,
+          name: senderName
+        },
+        to: [
+          {
+            email: process.env.CONTACT_EMAIL
+          }
+        ],
+        subject: `Nuevo mensaje de contacto: ${contacto.asunto}`,
+        htmlContent: `
+                    <h2>Nuevo mensaje recibido</h2>
+
+                    <p><strong>Nombre:</strong> ${contacto.nombre}</p>
+                    <p><strong>Email:</strong> ${contacto.email}</p>
+                    <p><strong>Teléfono:</strong> ${contacto.telefono || "No proporcionado"}</p>
+
+                    <hr>
+
+                    <p><strong>Asunto:</strong></p>
+                    <p>${contacto.asunto}</p>
+
+                    <p><strong>Mensaje:</strong></p>
+                    <p>${contacto.mensaje}</p>
+                `
+      },
+      {
+        headers: {
+          "api-key": BREVO_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    return true;
+
+  } catch (error) {
+
+    console.error(error);
+
     return false;
   }
 }
