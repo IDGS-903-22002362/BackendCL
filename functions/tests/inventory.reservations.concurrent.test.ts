@@ -292,4 +292,62 @@ describe("Reservas concurrentes de inventario", () => {
       .reserva_1;
     expect(reserva.estado).toBe(EstadoReservaInventario.CONFIRMADA);
   });
+
+  it("libera reservas activas sin registrar venta cuando el pago no procede", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_release: {
+          usuarioId: "user_release",
+          items: [{ productoId: "prod_last", cantidad: 1 }],
+        },
+      },
+      productos: {
+        prod_last: {
+          existencias: 4,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 5,
+            reservada: 1,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 4,
+          },
+        },
+      },
+      reservasInventario: {
+        reserva_release: {
+          ordenId: "orden_release",
+          productoId: "prod_last",
+          tallaId: null,
+          cantidad: 1,
+          estado: EstadoReservaInventario.ACTIVA,
+        },
+      },
+      movimientosInventario: {},
+    });
+
+    await inventoryReservationService.releaseOrderReservations({
+      ordenId: "orden_release",
+      motivo: "Pago fallido o cancelado",
+    });
+
+    const producto = fakeFirestore.getCollectionData("productos").prod_last as {
+      inventarioGlobal: { fisica: number; reservada: number; disponible: number };
+    };
+    expect(producto.inventarioGlobal).toMatchObject({
+      fisica: 5,
+      reservada: 0,
+      disponible: 5,
+    });
+
+    const ventas = Object.values(
+      fakeFirestore.getCollectionData("movimientosInventario"),
+    ).filter((item) => item.tipo === "venta");
+    expect(ventas).toHaveLength(0);
+
+    const reserva = fakeFirestore.getCollectionData("reservasInventario")
+      .reserva_release;
+    expect(reserva.estado).toBe(EstadoReservaInventario.LIBERADA);
+  });
 });

@@ -531,7 +531,7 @@ class InventoryReservationService {
   async reconcilePaidOrdersWithoutSale(limit = 50): Promise<number> {
     const snapshot = await firestoreTienda
       .collection(ORDENES_COLLECTION)
-      .where("estado", "in", ["PAGADA", "CONFIRMADA", "EN_PREPARACION"])
+      .where("estado", "in", ["CONFIRMADA", "EN_PROCESO"])
       .limit(limit)
       .get();
 

@@ -2103,6 +2103,14 @@ async createStripeCheckoutSession(
         const session = event.data.object as Stripe.Checkout.Session;
         return this.handleCheckoutFailed(event, session);
       }
+      case "checkout.session.expired": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        return this.handleCheckoutExpired(event, session);
+      }
+      case "payment_intent.canceled": {
+        const paymentIntent = event.data.object as Stripe.PaymentIntent;
+        return this.handlePaymentIntentCanceled(event, paymentIntent);
+      }
       case "charge.refunded": {
         const charge = event.data.object as Stripe.Charge;
         return this.handleChargeRefunded(event, charge);
@@ -2314,24 +2322,67 @@ async createStripeCheckoutSession(
       };
     }
 
-    if (session.payment_status === "paid") {
-      const ordenSnapshot = await pagoMatch.ordenRef.get();
-      const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
-      if (!ordenDataForValidation) {
-        throw new ApiError(404, "Orden no encontrada al procesar webhook");
-      }
+    if (session.payment_status !== "paid") {
+      const now = admin.firestore.Timestamp.now();
 
-      this.assertStripeAmountMatchesOrder(
-        session.amount_total,
-        ordenDataForValidation,
-        {
-          eventId: event.id,
-          pagoId: pagoMatch.pagoId,
-          ordenId: pagoMatch.ordenId,
-          source: event.type,
-        },
-      );
+      await firestoreTienda.runTransaction(async (tx) => {
+        const pagoSnapshot = await tx.get(pagoMatch.pagoRef);
+        if (!pagoSnapshot.exists) {
+          throw new ApiError(404, "Pago no encontrado al procesar webhook");
+        }
+
+        const pagoData = pagoSnapshot.data() as Pago;
+        if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
+          return;
+        }
+
+        tx.update(pagoMatch.pagoRef, {
+          estado: EstadoPago.PROCESANDO,
+          status: PaymentStatus.PENDING_CUSTOMER,
+          providerStatus: session.payment_status || "unpaid",
+          checkoutSessionId: session.id,
+          paymentIntentId:
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : pagoData.paymentIntentId,
+          stripeCustomerId:
+            typeof session.customer === "string"
+              ? session.customer
+              : pagoData.stripeCustomerId,
+          rawEventId: event.id,
+          webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+            event.id,
+          ),
+          updatedAt: now,
+        });
+      });
+
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        ordenId: pagoMatch.ordenId,
+        reason: "checkout_completed_payment_pending",
+      };
     }
+
+    const ordenSnapshot = await pagoMatch.ordenRef.get();
+    const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
+    if (!ordenDataForValidation) {
+      throw new ApiError(404, "Orden no encontrada al procesar webhook");
+    }
+
+    this.assertStripeAmountMatchesOrder(
+      session.amount_total,
+      ordenDataForValidation,
+      {
+        eventId: event.id,
+        pagoId: pagoMatch.pagoId,
+        ordenId: pagoMatch.ordenId,
+        source: event.type,
+      },
+    );
 
     const now = admin.firestore.Timestamp.now();
 
@@ -2491,6 +2542,130 @@ async createStripeCheckoutSession(
       eventType: event.type,
       pagoId: pagoMatch.pagoId,
       ordenId: pagoMatch.ordenId,
+    };
+  }
+
+  private async handleCheckoutExpired(
+    event: Stripe.Event,
+    session: Stripe.Checkout.Session,
+  ): Promise<StripeWebhookProcessResult> {
+    const pagoMatch = await this.resolvePagoFromCheckoutSession(session);
+
+    if (!pagoMatch) {
+      return {
+        outcome: "unmatched",
+        eventId: event.id,
+        eventType: event.type,
+        reason: "pago_not_found_by_checkout_session",
+      };
+    }
+
+    const now = admin.firestore.Timestamp.now();
+
+    await firestoreTienda.runTransaction(async (tx) => {
+      const pagoSnapshot = await tx.get(pagoMatch.pagoRef);
+      if (!pagoSnapshot.exists) {
+        throw new ApiError(404, "Pago no encontrado al procesar webhook");
+      }
+
+      const pagoData = pagoSnapshot.data() as Pago;
+      if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
+        return;
+      }
+
+      tx.update(pagoMatch.pagoRef, {
+        estado: EstadoPago.FALLIDO,
+        status: PaymentStatus.EXPIRED,
+        providerStatus: session.status || "expired",
+        checkoutSessionId: session.id,
+        failureCode: "checkout_session_expired",
+        failureMessage: "La sesión de Stripe Checkout expiró sin completar el pago",
+        rawEventId: event.id,
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
+        updatedAt: now,
+      });
+
+      tx.update(pagoMatch.ordenRef, {
+        estado: EstadoOrden.PENDIENTE,
+        paymentStatus: PaymentState.PENDIENTE,
+        stripeCheckoutSessionId: session.id,
+        updatedAt: now,
+      });
+    });
+
+    await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+
+    return {
+      outcome: "processed",
+      eventId: event.id,
+      eventType: event.type,
+      pagoId: pagoMatch.pagoId,
+      ordenId: pagoMatch.ordenId,
+      reason: "checkout_session_expired",
+    };
+  }
+
+  private async handlePaymentIntentCanceled(
+    event: Stripe.Event,
+    paymentIntent: Stripe.PaymentIntent,
+  ): Promise<StripeWebhookProcessResult> {
+    const pagoMatch = await this.resolvePagoFromPaymentIntent(paymentIntent);
+
+    if (!pagoMatch) {
+      return {
+        outcome: "unmatched",
+        eventId: event.id,
+        eventType: event.type,
+        reason: "pago_not_found_by_payment_intent",
+      };
+    }
+
+    const now = admin.firestore.Timestamp.now();
+
+    await firestoreTienda.runTransaction(async (tx) => {
+      const pagoSnapshot = await tx.get(pagoMatch.pagoRef);
+      if (!pagoSnapshot.exists) {
+        throw new ApiError(404, "Pago no encontrado al procesar webhook");
+      }
+
+      const pagoData = pagoSnapshot.data() as Pago;
+      if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
+        return;
+      }
+
+      tx.update(pagoMatch.pagoRef, {
+        estado: EstadoPago.FALLIDO,
+        status: PaymentStatus.CANCELED,
+        providerStatus: paymentIntent.status,
+        paymentIntentId: paymentIntent.id,
+        failureCode: "payment_intent_canceled",
+        failureMessage: "El intento de pago fue cancelado en Stripe",
+        rawEventId: event.id,
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
+        updatedAt: now,
+      });
+
+      tx.update(pagoMatch.ordenRef, {
+        estado: EstadoOrden.PENDIENTE,
+        paymentStatus: PaymentState.PENDIENTE,
+        stripePaymentIntentId: paymentIntent.id,
+        updatedAt: now,
+      });
+    });
+
+    await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+
+    return {
+      outcome: "processed",
+      eventId: event.id,
+      eventType: event.type,
+      pagoId: pagoMatch.pagoId,
+      ordenId: pagoMatch.ordenId,
+      reason: "payment_intent_canceled",
     };
   }
 

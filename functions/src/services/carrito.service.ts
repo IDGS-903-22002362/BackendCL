@@ -996,7 +996,7 @@ const crearOrdenDTO: CrearOrdenDTO = {
       notas: checkoutData.notas,
     };
 
-    // PASO 5: Crear orden (valida stock, recalcula precios, decrementa stock)
+    // PASO 5: Crear orden (valida stock disponible, recalcula precios; sin descontar físico)
     // Si falla aquí, el carrito queda intacto (rollback natural)
     const orden = await ordenService.createOrden(crearOrdenDTO);
 

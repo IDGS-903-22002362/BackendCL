@@ -20,7 +20,7 @@ import { RolUsuario } from "../../models/usuario.model";
  * - Valida que todos los productos existan y tengan stock
  * - Recalcula totales en servidor (ignora valores del cliente)
  * - Establece estado PENDIENTE automáticamente
- * - Reduce stock automáticamente al crear la orden
+ * - No descuenta stock al crear la orden (reserva al iniciar pago, venta al confirmar)
  * - Requiere autenticación y usa req.user.uid como fuente de verdad para usuarioId
  *
  * @param req.body - CrearOrdenDTO ya validado por Zod middleware

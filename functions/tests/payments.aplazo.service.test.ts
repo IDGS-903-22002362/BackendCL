@@ -315,6 +315,34 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
   };
 }
 
+const DEFAULT_INVENTORY_SEED: Record<string, Record<string, DocData>> = {
+  productos: {
+    prod_1: {
+      existencias: 50,
+      tallaIds: [],
+    },
+  },
+  reservasInventario: {},
+  movimientosInventario: {},
+};
+
+function seedFirestore(
+  initial: Record<string, Record<string, DocData>> = {},
+): ReturnType<typeof createFakeFirestore> {
+  const merged: Record<string, Record<string, DocData>> = {
+    ...DEFAULT_INVENTORY_SEED,
+  };
+
+  for (const [collectionName, docs] of Object.entries(initial)) {
+    merged[collectionName] = {
+      ...(DEFAULT_INVENTORY_SEED[collectionName] || {}),
+      ...docs,
+    };
+  }
+
+  return createFakeFirestore(merged);
+}
+
 describe("Aplazo payments service", () => {
   const buildReconciliationService = () => {
     const paymentRepo = new PaymentAttemptRepository();
@@ -358,7 +386,7 @@ describe("Aplazo payments service", () => {
   };
 
   beforeEach(() => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {},
       usuariosApp: {},
@@ -385,7 +413,7 @@ describe("Aplazo payments service", () => {
 
   it("cancels expired Aplazo attempts in provider before closing them locally", async () => {
     const expiredAt = Timestamp.fromDate(new Date(Date.now() - 60_000));
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_expired_cancel: {
           usuarioId: "user_1",
@@ -462,7 +490,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("does not cancel an expired attempt when Aplazo already reports it as active", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_expired_paid: {
           usuarioId: "user_1",
@@ -518,7 +546,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("blocks manual Aplazo cancellation when provider reports the payment as paid", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_manual_paid: {
           usuarioId: "user_1",
@@ -580,7 +608,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("returns canceled Aplazo attempts idempotently without calling provider cancel again", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_manual_canceled: {
@@ -621,7 +649,7 @@ describe("Aplazo payments service", () => {
     overrides: Record<string, unknown> = {},
     orderOverrides: Record<string, unknown> = {},
   ) => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_refund: {
           usuarioId: "user_1",
@@ -1108,7 +1136,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("returns the same online payment attempt on safe retries without a client key", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_1: {
           usuarioId: "user_1",
@@ -1219,7 +1247,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("reuses the same online attempt for the same order even with a different idempotency key", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_dup: {
           usuarioId: "user_1",
@@ -1306,7 +1334,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("blocks provider sync for legacy Aplazo in-store attempts", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_instore_legacy: {
@@ -1355,7 +1383,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("rejects orders with total <= 0 as PAYMENT_ORDER_INVALID", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_invalid: {
           usuarioId: "user_1",
@@ -1408,7 +1436,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("fails before calling aplazo when customer phone is invalid", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_phone: {
           usuarioId: "user_1",
@@ -1481,7 +1509,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("fails before calling aplazo when pricing snapshot cannot build valid products", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_items: {
           usuarioId: "user_1",
@@ -1560,7 +1588,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("normalizes customer fields before sending the createOnline request", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {
         orden_aplazo_normalize: {
           usuarioId: "user_1",
@@ -1636,7 +1664,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("deduplicates an aplazo webhook by event id or payload hash", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_1: {
@@ -1696,7 +1724,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("queues and processes the Aplazo confirmation webhook as a paid payment", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_confirmed: {
@@ -1802,7 +1830,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("syncs aplazo refund status and recalculates the confirmed refunded amount", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_refund_1: {
@@ -1890,7 +1918,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("rejects aplazo refund status queries from non-privileged actors", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_refund_2: {
@@ -1937,7 +1965,7 @@ describe("Aplazo payments service", () => {
   });
 
   it("runs reconcile and finalizes paid status through the finalizer", async () => {
-    fakeFirestore = createFakeFirestore({
+    fakeFirestore = seedFirestore({
       ordenes: {},
       pagos: {
         pago_aplazo_1: {

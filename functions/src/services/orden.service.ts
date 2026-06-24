@@ -1646,9 +1646,20 @@ subtotalFinal: subtotalCalculado,
           );
         }
       } else {
-        console.log(
-          `ℹ️ Orden ${ordenId} sin movimiento de venta; no se restaura inventario`,
-        );
+        const hasActiveReservations =
+          await inventoryReservationService.orderHasActiveReservations(ordenId);
+        if (hasActiveReservations) {
+          await inventoryReservationService.releaseOrderReservations({
+            ordenId,
+            motivo: "Liberación por cancelación de orden sin venta confirmada",
+            usuarioId: orden.usuarioId,
+          });
+          console.log(`✅ Reservas de inventario liberadas para orden ${ordenId}`);
+        } else {
+          console.log(
+            `ℹ️ Orden ${ordenId} sin movimiento de venta ni reservas activas`,
+          );
+        }
       }
 
       // PASO 6: Actualizar estado a CANCELADA en Firestore
@@ -1955,7 +1966,7 @@ subtotalFinal: subtotalCalculado,
   }
 
   /**
-   * Cancela una orden impaga y libera inventario solo si ya se había descontado.
+   * Libera reservas pendientes y cancela una orden cuyo pago no se completó.
    */
   async releaseUnpaidOrder(ordenId: string): Promise<void> {
     if (!ordenId) {
