@@ -29,6 +29,7 @@ jobs:
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          create_credentials_file: true
           export_environment_variables: true
 
       - name: Setup gcloud
@@ -145,15 +146,19 @@ jobs:
 
       - name: Deploy to Firebase in staggered batches
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           set -euo pipefail
 
-          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
-          firebase use e-comerce-leon --non-interactive
+          # Firebase CLI uses ADC (not gcloud user creds). Use the verified key file
+          # created earlier in this job; .firebaserc already sets default project.
+          export GOOGLE_APPLICATION_CREDENTIALS="${GITHUB_WORKSPACE}/serviceAccountKey.json"
+          if [ ! -s "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+            echo "Error: ${GOOGLE_APPLICATION_CREDENTIALS} is missing or empty"
+            exit 1
+          fi
 
           batches=(
             "functions:api,functions:processTryOnJob,functions:processNotificationEvent"
