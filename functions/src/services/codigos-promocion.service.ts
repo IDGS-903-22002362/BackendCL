@@ -14,6 +14,7 @@ import {
   calcularSubtotalOriginalItems,
   construirItemsSinDescuento,
   normalizarCodigoPromocion,
+  puedeEliminarCodigoPromocion,
   toDateValue,
 } from "../utils/codigos-promocion-pricing.util";
 
@@ -541,18 +542,21 @@ export const codigosPromocionService = {
     return mapCodigoPromocionDoc(updatedDoc);
   },
 
-  async eliminar(id: string, userId?: string | null): Promise<boolean> {
+  async eliminar(id: string, _userId?: string | null): Promise<boolean> {
     const docRef = collectionRef().doc(id);
     const doc = await docRef.get();
 
     if (!doc.exists) return false;
 
-    await docRef.update({
-      estado: false,
-      deletedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: userId ?? null,
-    });
+    const codigoPromocion = mapCodigoPromocionDoc(doc);
+
+    if (!puedeEliminarCodigoPromocion(codigoPromocion)) {
+      throw new Error(
+        "No se puede eliminar un código promocional activo o programado. Desactívalo o espera a que venza.",
+      );
+    }
+
+    await docRef.delete();
 
     return true;
   },
