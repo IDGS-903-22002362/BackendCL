@@ -28,6 +28,7 @@ import {
   ProductoOfertaBase,
   seleccionarMejorOferta,
   esOfertaVigente,
+  puedeEliminarOferta,
 } from "../utils/ofertas-pricing.util";
 import { productOfferSnapshotService } from "./product-offer-snapshot.service";
 
@@ -99,6 +100,23 @@ function stringArrayOrUndefined(value: unknown): string[] | undefined {
   return value.filter((item): item is string => typeof item === "string");
 }
 
+function normalizeProductoIds(
+  productoIds: unknown,
+  legacyProductoId?: unknown
+): string[] | undefined {
+  const ids = stringArrayOrUndefined(productoIds) ?? [];
+
+  if (typeof legacyProductoId === "string" && legacyProductoId.trim()) {
+    ids.push(legacyProductoId.trim());
+  }
+
+  const uniqueIds = Array.from(
+    new Set(ids.map((id) => id.trim()).filter(Boolean))
+  );
+
+  return uniqueIds.length > 0 ? uniqueIds : undefined;
+}
+
 interface OfertaFirestoreData {
   titulo: string;
   descripcion?: string | null;
@@ -111,6 +129,7 @@ interface OfertaFirestoreData {
 
   aplicaA: Oferta["aplicaA"];
 
+  productoId?: string | null;
   productoIds?: string[];
   categoriaIds?: string[];
   lineaIds?: string[];
@@ -241,10 +260,12 @@ export class OfertasService {
 
   await this.validarProductosActivosParaOferta(
     data.aplicaA,
-    data.productoIds
+    normalizeProductoIds(data.productoIds)
   );
 
   validarRangoFechasOferta(data.fechaInicio, data.fechaFin);
+
+  const productoIds = normalizeProductoIds(data.productoIds) ?? [];
 
   const docRef = await this.ofertasCollection.add({
       titulo: data.titulo,
@@ -258,7 +279,7 @@ export class OfertasService {
 
       aplicaA: data.aplicaA,
 
-      productoIds: data.productoIds ?? [],
+      productoIds,
       categoriaIds: data.categoriaIds ?? [],
       lineaIds: data.lineaIds ?? [],
 
@@ -315,7 +336,9 @@ export class OfertasService {
 
 await this.validarProductosActivosParaOferta(
   data.aplicaA ?? ofertaActual.aplicaA,
-  data.productoIds ?? ofertaActual.productoIds
+  normalizeProductoIds(
+    data.productoIds ?? ofertaActual.productoIds
+  )
 );
 
 const fechaInicioParaValidar = data.fechaInicio ?? ofertaActual.fechaInicio;
@@ -328,6 +351,10 @@ const payload: Record<string, unknown> = {
   updatedAt: FieldValue.serverTimestamp(),
   updatedBy: userId ?? null,
 };
+
+if (data.productoIds !== undefined) {
+  payload.productoIds = normalizeProductoIds(data.productoIds) ?? [];
+}
 
     if (data.fechaInicio) {
   payload.fechaInicio = toTimestamp(data.fechaInicio, "fechaInicio");
@@ -357,19 +384,20 @@ if (data.fechaFin) {
     return ofertaActualizada;
   }
 
-  async eliminarOferta(id: string, userId?: string): Promise<void> {
+  async eliminarOferta(id: string, _userId?: string): Promise<void> {
     const oferta = await this.obtenerOfertaPorId(id);
 
     if (!oferta) {
       throw new Error("Oferta no encontrada");
     }
 
-    await this.ofertasCollection.doc(id).update({
-      estado: false,
-      deletedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: userId ?? null,
-    });
+    if (!puedeEliminarOferta(oferta)) {
+      throw new Error(
+        "No se puede eliminar una oferta activa o programada. Desactívala o espera a que venza.",
+      );
+    }
+
+    await this.ofertasCollection.doc(id).delete();
 
     await productOfferSnapshotService
       .syncProductsAffectedByOffer(oferta)
@@ -575,7 +603,10 @@ if (typeof data.precioPublico !== "number") {
 
       aplicaA: data.aplicaA,
 
-      productoIds: stringArrayOrUndefined(data.productoIds),
+      productoIds: normalizeProductoIds(
+        data.productoIds,
+        data.productoId
+      ),
       categoriaIds: stringArrayOrUndefined(data.categoriaIds),
       lineaIds: stringArrayOrUndefined(data.lineaIds),
 

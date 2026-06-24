@@ -108,6 +108,11 @@ import {
   updatePickupLocationSchema,
   verifyPickupCodeSchema,
 } from "../middleware/validators/pickup-location.validator";
+import {
+  calcularPreciosOfertaSchema,
+  createOfertaSchema,
+  updateOfertaSchema,
+} from "../middleware/validators/ofertas.validator";
 
 /**
  * Configuración de Swagger/OpenAPI 3.0.3
@@ -658,6 +663,84 @@ const swaggerDefinition = {
         listInventoryMovementsQuerySchema,
       ),
       ListLowStockAlertsQuery: zodToJsonSchema(listLowStockAlertsQuerySchema),
+      CreateOferta: zodToJsonSchema(createOfertaSchema),
+      UpdateOferta: zodToJsonSchema(updateOfertaSchema),
+      CalcularPreciosOferta: zodToJsonSchema(calcularPreciosOfertaSchema),
+      Oferta: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "oferta_abc123" },
+          titulo: { type: "string", example: "Rebaja jerseys" },
+          descripcion: { type: "string", example: "Descuento en jerseys seleccionados" },
+          estado: { type: "boolean", example: true },
+          tallaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["m", "l"],
+          },
+          tipoDescuento: {
+            type: "string",
+            enum: ["precio_fijo", "porcentaje", "monto"],
+            example: "porcentaje",
+          },
+          valorDescuento: { type: "number", example: 20 },
+          aplicaA: {
+            type: "string",
+            enum: ["productos", "categorias", "lineas", "todo"],
+            example: "productos",
+          },
+          productoIds: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "IDs de productos incluidos cuando aplicaA es productos. Permite múltiples productos por oferta.",
+            example: ["prod_123", "prod_456", "prod_789"],
+          },
+          categoriaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["cat_123"],
+          },
+          lineaIds: {
+            type: "array",
+            items: { type: "string" },
+            example: ["linea_123"],
+          },
+          fechaInicio: { type: "string", format: "date-time" },
+          fechaFin: { type: "string", format: "date-time" },
+          hastaAgotarExistencias: { type: "boolean", example: true },
+          stockLimiteOferta: { type: "integer", nullable: true, example: null },
+          stockVendidoOferta: { type: "integer", example: 0 },
+          prioridad: { type: "integer", example: 1 },
+          combinable: { type: "boolean", example: false },
+          badgeTexto: { type: "string", example: "Oferta" },
+          mostrarBadge: { type: "boolean", example: true },
+        },
+      },
+      ResultadoCalculoOfertas: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                productoId: { type: "string" },
+                cantidad: { type: "integer" },
+                precioOriginal: { type: "number" },
+                precioFinal: { type: "number" },
+                subtotalOriginal: { type: "number" },
+                subtotalFinal: { type: "number" },
+                ofertaAplicadaId: { type: "string", nullable: true },
+                ofertaTitulo: { type: "string", nullable: true },
+              },
+            },
+          },
+          subtotalOriginal: { type: "number" },
+          subtotalFinal: { type: "number" },
+          ahorroTotal: { type: "number" },
+        },
+      },
 
       // Modelos completos de entidades
       InventoryBySizeItem: {

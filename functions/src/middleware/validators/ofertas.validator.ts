@@ -23,6 +23,7 @@ const fechaOfertaSchema = z
 
 const idsArraySchema = z
   .array(z.string().trim().min(1, "El ID no puede estar vacío"))
+  .max(100, "No se pueden seleccionar más de 100 elementos")
   .optional();
 
 const tallaIdsArraySchema = z
