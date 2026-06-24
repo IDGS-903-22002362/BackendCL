@@ -206,7 +206,7 @@ router.get("/", authMiddleware, requireAdmin, queryController.getAll);
  *                     nextCursor: "orden_002"
  *                     hasNextPage: true
  *               ultimaPagina:
- *                 summary: ÿÿltima p?gina (sin m?s resultados)
+ *                 summary: ï¿½ï¿½ltima p?gina (sin m?s resultados)
  *                 value:
  *                   success: true
  *                   count: 3
@@ -820,7 +820,7 @@ router.get(
  *     summary: Asignar puntos autom?ticamente seg?n monto de venta
  *     description: |
  *       Calcula los puntos a partir del monto de venta: **puntos = round(monto * 0.10)**
- *       (redondeo tradicional: 0.5 hacia arriba, ÿÿÿ0.4 hacia abajo).
+ *       (redondeo tradicional: 0.5 hacia arriba, ï¿½ï¿½ï¿½0.4 hacia abajo).
  *
  *       Los puntos se asignan al usuario indicado por su ID.
  *
@@ -906,7 +906,7 @@ router.get(
  *                     descripcion: "Venta promocional"
  *                     origenId: "admin_xyz"
  *               redondeoAbajo:
- *                 summary: Redondeo hacia abajo (ÿÿÿ0.4)
+ *                 summary: Redondeo hacia abajo (ï¿½ï¿½ï¿½0.4)
  *                 value:
  *                   success: true
  *                   message: "Puntos asignados exitosamente por monto de venta"

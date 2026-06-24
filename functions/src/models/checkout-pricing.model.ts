@@ -83,6 +83,7 @@ export type CheckoutShippingSnapshot = {
   trackingNumber?: string;
   trackingUrl?: string;
   createdManually?: boolean;
+  shippingZone?: "LEON" | "OUTSIDE_LEON";
   manualEvidence?: {
     receiptUrl?: string;
     guidePdfUrl?: string;
