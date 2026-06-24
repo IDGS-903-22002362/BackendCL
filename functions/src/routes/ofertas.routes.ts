@@ -270,6 +270,8 @@ router.get(
  */
 router.post(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateBody(createOfertaSchema),
   ofertasCommandController.crear
 );
@@ -315,6 +317,8 @@ router.post(
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(ofertaIdParamSchema),
   validateBody(updateOfertaSchema),
   ofertasCommandController.actualizar
@@ -356,6 +360,8 @@ router.put(
  */
 router.delete(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(ofertaIdParamSchema),
   ofertasCommandController.eliminar
 );

@@ -1,4 +1,9 @@
+import { createHash } from "crypto";
 import { NextFunction, Request, Response } from "express";
+import {
+  consumeDistributedRateLimit,
+  isDistributedRateLimitEnabled,
+} from "../services/rate-limit-store.service";
 
 type RateLimitOptions = {
   windowMs: number;
@@ -22,38 +27,123 @@ const cleanupExpired = (now: number): void => {
   }
 };
 
+function resolveClientIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0]?.trim() || "unknown";
+  }
+
+  return req.ip || "unknown";
+}
+
+function buildRateLimitKey(req: Request, options: RateLimitOptions): string {
+  if (options.resolveKey) {
+    return options.resolveKey(req);
+  }
+
+  const ip = resolveClientIp(req);
+  const uid = req.user?.uid;
+  const appCheck = req.header("X-Firebase-AppCheck");
+  const appCheckFingerprint = appCheck
+    ? createHash("sha256").update(appCheck).digest("hex").slice(0, 16)
+    : "no-app-check";
+
+  const identity = uid ? `uid:${uid}` : `ip:${ip}`;
+  return `${options.keyPrefix}:${identity}:${appCheckFingerprint}`;
+}
+
+function consumeInMemoryRateLimit(
+  key: string,
+  windowMs: number,
+  maxRequests: number,
+  now: number,
+): RateLimitDecision {
+  cleanupExpired(now);
+  const current = store.get(key);
+
+  if (!current || current.expiresAt <= now) {
+    store.set(key, {
+      count: 1,
+      expiresAt: now + windowMs,
+    });
+    return { allowed: true };
+  }
+
+  if (current.count >= maxRequests) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((current.expiresAt - now) / 1000)),
+    };
+  }
+
+  current.count += 1;
+  store.set(key, current);
+  return { allowed: true };
+}
+
+type RateLimitDecision = {
+  allowed: boolean;
+  retryAfterSeconds?: number;
+};
+
+function rejectRateLimited(
+  res: Response,
+  retryAfterSeconds?: number,
+): void {
+  if (retryAfterSeconds) {
+    res.setHeader("Retry-After", String(retryAfterSeconds));
+  }
+
+  res.status(429).json({
+    success: false,
+    message: "Demasiadas solicitudes. Intenta nuevamente en unos segundos",
+  });
+}
+
 export const createSimpleRateLimiter = (options: RateLimitOptions) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> => {
     const now = Date.now();
-    cleanupExpired(now);
+    const key = buildRateLimitKey(req, options);
 
-    const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
-    const key = options.resolveKey
-      ? options.resolveKey(req)
-      : `${options.keyPrefix}:${String(ip)}`;
-    const current = store.get(key);
+    if (isDistributedRateLimitEnabled()) {
+      try {
+        const decision = await consumeDistributedRateLimit(
+          key,
+          options.windowMs,
+          options.maxRequests,
+        );
 
-    if (!current || current.expiresAt <= now) {
-      store.set(key, {
-        count: 1,
-        expiresAt: now + options.windowMs,
-      });
-      next();
+        if (!decision.allowed) {
+          rejectRateLimited(res, decision.retryAfterSeconds);
+          return;
+        }
+
+        next();
+        return;
+      } catch (error) {
+        console.warn("rate_limit_distributed_fallback", {
+          prefix: options.keyPrefix,
+          reason: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
+
+    const decision = consumeInMemoryRateLimit(
+      key,
+      options.windowMs,
+      options.maxRequests,
+      now,
+    );
+
+    if (!decision.allowed) {
+      rejectRateLimited(res, decision.retryAfterSeconds);
       return;
     }
 
-    if (current.count >= options.maxRequests) {
-      const retryAfterSeconds = Math.ceil((current.expiresAt - now) / 1000);
-      res.setHeader("Retry-After", String(Math.max(1, retryAfterSeconds)));
-      res.status(429).json({
-        success: false,
-        message: "Demasiadas solicitudes. Intenta nuevamente en unos segundos",
-      });
-      return;
-    }
-
-    current.count += 1;
-    store.set(key, current);
     next();
   };
 };

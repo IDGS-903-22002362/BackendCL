@@ -28,6 +28,26 @@ export const getStripeCurrency = (): string => {
   return configured && configured.length > 0 ? configured : "mxn";
 };
 
+/**
+ * Opciones de tarjeta para PaymentIntent legacy (automatic_payment_methods).
+ * MSI solo aplica con MXN y cuenta Stripe México.
+ */
+export const buildStripePaymentIntentCardOptions = (
+  currency: string,
+): Stripe.PaymentIntentCreateParams.PaymentMethodOptions | undefined => {
+  if (currency.trim().toLowerCase() !== "mxn") {
+    return undefined;
+  }
+
+  return {
+    card: {
+      installments: {
+        enabled: true,
+      },
+    },
+  };
+};
+
 /** Montos mínimos en unidad menor (centavos). Fuente: Stripe docs /currencies */
 const STRIPE_MIN_AMOUNT_MINOR_BY_CURRENCY: Record<string, number> = {
   mxn: 1000, // 10.00 MXN
@@ -105,6 +125,38 @@ export type StripeIdempotencyInput = {
   amount: number;
   currency: string;
   extra?: string;
+};
+
+/**
+ * Opciones compartidas para Embedded Checkout con métodos dinámicos de Stripe.
+ * No fija payment_method_types: Apple Pay, Google Pay, Link y tarjetas los
+ * controla el Dashboard + contexto del cliente (MXN, monto, navegador).
+ */
+export const buildEmbeddedCheckoutSessionBaseParams = (
+  currency: string,
+): Pick<
+  Stripe.Checkout.SessionCreateParams,
+  "locale" | "payment_method_options"
+> => {
+  const normalizedCurrency = currency.trim().toLowerCase();
+  const params: Pick<
+    Stripe.Checkout.SessionCreateParams,
+    "locale" | "payment_method_options"
+  > = {
+    locale: "es",
+  };
+
+  if (normalizedCurrency === "mxn") {
+    params.payment_method_options = {
+      card: {
+        installments: {
+          enabled: true,
+        },
+      },
+    };
+  }
+
+  return params;
 };
 
 export const buildStripeIdempotencyKey = (

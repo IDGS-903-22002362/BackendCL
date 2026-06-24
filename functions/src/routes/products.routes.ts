@@ -526,7 +526,13 @@ router.get(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/", validateBody(createProductSchema), commandController.create);
+router.post(
+  "/",
+  authMiddleware,
+  requireAdmin,
+  validateBody(createProductSchema),
+  commandController.create,
+);
 
 /**
  * @swagger
@@ -577,6 +583,8 @@ router.post("/", validateBody(createProductSchema), commandController.create);
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   validateBody(updateProductSchema),
   commandController.update,
@@ -769,7 +777,13 @@ router.put(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.delete("/:id", validateParams(idParamSchema), commandController.remove);
+router.delete(
+  "/:id",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  commandController.remove,
+);
 
 /**
  * @swagger
@@ -838,6 +852,8 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
  */
 router.post(
   "/:id/imagenes",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   parseMultipartImages({
     fieldName: "imagenes",
@@ -903,6 +919,8 @@ router.post(
  */
 router.delete(
   "/:id/imagenes",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   validateBody(deleteImageSchema),
   commandController.deleteImage,

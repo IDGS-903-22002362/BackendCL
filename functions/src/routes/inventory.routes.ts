@@ -282,6 +282,7 @@ router.post(
 router.get(
   "/movimientos",
   authMiddleware,
+  requireAdmin,
   validateQuery(listInventoryMovementsQuerySchema),
   queryController.getMovements,
 );

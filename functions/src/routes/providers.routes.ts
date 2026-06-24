@@ -14,6 +14,7 @@ import {
   idParamSchema,
   searchTermSchema,
 } from "../middleware/validators/common.validator";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -181,7 +182,13 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/", validateBody(createProviderSchema), commandController.create);
+router.post(
+  "/",
+  authMiddleware,
+  requireAdmin,
+  validateBody(createProviderSchema),
+  commandController.create,
+);
 
 /**
  * @swagger
@@ -214,6 +221,8 @@ router.post("/", validateBody(createProviderSchema), commandController.create);
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   validateBody(updateProviderSchema),
   commandController.update,
@@ -240,6 +249,12 @@ router.put(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.delete("/:id", validateParams(idParamSchema), commandController.remove);
+router.delete(
+  "/:id",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  commandController.remove,
+);
 
 export default router;

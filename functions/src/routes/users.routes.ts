@@ -1,7 +1,7 @@
 /**
- * Rutas para el módulo de Usuarios
- * Define los endpoints REST para gestión de usuarios
- * Implementa patrón CQRS (Command Query Responsibility Segregation)
+ * Rutas para el m?dulo de Usuarios
+ * Define los endpoints REST para gesti?n de usuarios
+ * Implementa patr?n CQRS (Command Query Responsibility Segregation)
  */
 
 import { Router } from "express";
@@ -9,7 +9,7 @@ import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
 import * as pointsController from "../controllers/users/users.points.controller";
-import { authMiddleware } from "../utils/middlewares";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 import {
   validateBody,
   validateParams,
@@ -32,15 +32,15 @@ const router = Router();
  * @swagger
  * /api/usuarios/debug:
  *   get:
- *     summary: Diagnóstico de Firestore para usuarios
- *     description: Endpoint de diagnóstico protegido para verificar conexión a Firestore
+ *     summary: Diagn?stico de Firestore para usuarios
+ *     description: Endpoint de diagn?stico protegido para verificar conexi?n a Firestore
  *     tags: [Debug]
  *     deprecated: true
  *     security:
  *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Diagnóstico completado
+ *         description: Diagn?stico completado
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  *       500:
@@ -57,7 +57,7 @@ router.get("/debug", authMiddleware, debugController.debugFirestore);
  * /api/usuarios:
  *   get:
  *     summary: Listar todos los usuarios activos
- *     description: Obtiene la lista de usuarios activos. Requiere autenticación.
+ *     description: Obtiene la lista de usuarios activos. Requiere autenticaci?n.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -82,24 +82,24 @@ router.get("/debug", authMiddleware, debugController.debugFirestore);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/", queryController.getAll);
+router.get("/", authMiddleware, requireAdmin, queryController.getAll);
 
 /**
  * @swagger
  * /api/usuarios/{id}/ordenes:
  *   get:
- *     summary: Historial de órdenes por usuario
+ *     summary: Historial de ?rdenes por usuario
  *     description: |
- *       Obtiene el historial de órdenes de un usuario específico con paginación cursor-based.
+ *       Obtiene el historial de ?rdenes de un usuario espec?fico con paginaci?n cursor-based.
  *
- *       **Autorización (BOLA Prevention):**
+ *       **Autorizaci?n (BOLA Prevention):**
  *       - Clientes solo pueden ver su propio historial
  *       - Administradores/Empleados pueden ver historial de cualquier usuario
  *
- *       **Paginación:**
+ *       **Paginaci?n:**
  *       - Usa cursor-based pagination (Firestore startAfter)
- *       - El campo `nextCursor` en la respuesta contiene el cursor para la siguiente página
- *       - Si `nextCursor` es null, no hay más páginas
+ *       - El campo `nextCursor` en la respuesta contiene el cursor para la siguiente p?gina
+ *       - Si `nextCursor` es null, no hay m?s p?ginas
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -137,7 +137,7 @@ router.get("/", queryController.getAll);
  *       - in: query
  *         name: limit
  *         required: false
- *         description: "Cantidad de resultados por página (default: 10, max: 50)"
+ *         description: "Cantidad de resultados por p?gina (default: 10, max: 50)"
  *         schema:
  *           type: integer
  *           minimum: 1
@@ -147,13 +147,13 @@ router.get("/", queryController.getAll);
  *       - in: query
  *         name: cursor
  *         required: false
- *         description: "ID de la última orden de la página anterior (para siguiente página)"
+ *         description: "ID de la ?ltima orden de la p?gina anterior (para siguiente p?gina)"
  *         schema:
  *           type: string
  *           example: "orden_abc123"
  *     responses:
  *       200:
- *         description: Historial de órdenes obtenido exitosamente
+ *         description: Historial de ?rdenes obtenido exitosamente
  *         content:
  *           application/json:
  *             schema:
@@ -164,7 +164,7 @@ router.get("/", queryController.getAll);
  *                   example: true
  *                 count:
  *                   type: integer
- *                   description: Cantidad de órdenes en esta página
+ *                   description: Cantidad de ?rdenes en esta p?gina
  *                   example: 5
  *                 data:
  *                   type: array
@@ -179,14 +179,14 @@ router.get("/", queryController.getAll);
  *                     nextCursor:
  *                       type: string
  *                       nullable: true
- *                       description: "Cursor para la siguiente página. null si no hay más páginas."
+ *                       description: "Cursor para la siguiente p?gina. null si no hay m?s p?ginas."
  *                       example: "orden_xyz789"
  *                     hasNextPage:
  *                       type: boolean
  *                       example: true
  *             examples:
  *               primeraPageConMas:
- *                 summary: Primera página con más resultados
+ *                 summary: Primera p?gina con m?s resultados
  *                 value:
  *                   success: true
  *                   count: 10
@@ -206,7 +206,7 @@ router.get("/", queryController.getAll);
  *                     nextCursor: "orden_002"
  *                     hasNextPage: true
  *               ultimaPagina:
- *                 summary: Última página (sin más resultados)
+ *                 summary: ��ltima p?gina (sin m?s resultados)
  *                 value:
  *                   success: true
  *                   count: 3
@@ -221,7 +221,7 @@ router.get("/", queryController.getAll);
  *                     nextCursor: null
  *                     hasNextPage: false
  *               historialVacio:
- *                 summary: Usuario sin órdenes
+ *                 summary: Usuario sin ?rdenes
  *                 value:
  *                   success: true
  *                   count: 0
@@ -244,7 +244,7 @@ router.get("/", queryController.getAll);
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Acceso denegado. Solo puedes ver tu propio historial de órdenes."
+ *                   example: "Acceso denegado. Solo puedes ver tu propio historial de ?rdenes."
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
@@ -261,7 +261,7 @@ router.get(
  * /api/usuarios/{id}:
  *   get:
  *     summary: Obtener usuario por ID
- *     description: Retorna un usuario específico. Requiere autenticación.
+ *     description: Retorna un usuario espec?fico. Requiere autenticaci?n.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -294,7 +294,7 @@ router.get("/:id", authMiddleware, queryController.getById);
 
 /**
  * GET /api/usuarios/categoria/:categoriaId
- * Obtiene usuarios por categoría
+ * Obtiene usuarios por categor?a
 
 router.get("/categoria/:categoriaId", queryController.getByCategory);
 
@@ -302,7 +302,7 @@ router.get("/categoria/:categoriaId", queryController.getByCategory);
 
 /**
  * GET /api/usuarios/linea/:lineaId
- * Obtiene usuarios por línea
+ * Obtiene usuarios por l?nea
  
 router.get("/linea/:lineaId", queryController.getByLine);
 */
@@ -310,8 +310,8 @@ router.get("/linea/:lineaId", queryController.getByLine);
  * @swagger
  * /api/usuarios/buscar/{termino}:
  *   get:
- *     summary: Buscar usuarios por término
- *     description: Busca usuarios por nombre o email. Requiere autenticación.
+ *     summary: Buscar usuarios por t?rmino
+ *     description: Busca usuarios por nombre o email. Requiere autenticaci?n.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -325,7 +325,7 @@ router.get("/linea/:lineaId", queryController.getByLine);
  *           maxLength: 100
  *     responses:
  *       200:
- *         description: Resultados de búsqueda
+ *         description: Resultados de b?squeda
  *         content:
  *           application/json:
  *             schema:
@@ -344,7 +344,7 @@ router.get("/linea/:lineaId", queryController.getByLine);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/buscar/:termino", queryController.search);
+router.get("/buscar/:termino", authMiddleware, requireAdmin, queryController.search);
 
 // ==========================================
 // COMMANDS (Escritura - Transactional & Secure)
@@ -355,7 +355,7 @@ router.get("/buscar/:termino", queryController.search);
  * /api/usuarios/exists/email:
  *   get:
  *     summary: Verificar si un email existe
- *     description: Verifica si un email ya está registrado en el sistema
+ *     description: Verifica si un email ya est? registrado en el sistema
  *     tags: [Users]
  *     parameters:
  *       - in: query
@@ -366,7 +366,7 @@ router.get("/buscar/:termino", queryController.search);
  *           format: email
  *     responses:
  *       200:
- *         description: Respuesta de verificación
+ *         description: Respuesta de verificaci?n
  *         content:
  *           application/json:
  *             schema:
@@ -418,14 +418,14 @@ router.get("/exists/email", commandController.checkEmail);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/", commandController.create);
+router.post("/", authMiddleware, requireAdmin, commandController.create);
 
 /**
  * @swagger
  * /api/usuarios/completar-perfil:
  *   put:
  *     summary: Completar perfil de usuario
- *     description: Permite al usuario completar su información de perfil. Requiere autenticación.
+ *     description: Permite al usuario completar su informaci?n de perfil. Requiere autenticaci?n.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -492,7 +492,7 @@ router.put(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.put("/:id", commandController.update);
+router.put("/:id", authMiddleware, requireAdmin, commandController.update);
 
 /**
  * @swagger
@@ -515,11 +515,11 @@ router.put("/:id", commandController.update);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.delete("/:id", commandController.remove);
+router.delete("/:id", authMiddleware, requireAdmin, commandController.remove);
 
 /**
  * POST /api/usuarios/:id/imagenes
- * Sube imágenes
+ * Sube im?genes
 
 router.post(
     "/:id/imagenes",
@@ -540,7 +540,7 @@ router.delete("/:id/imagenes", commandController.deleteImage);
  * /api/usuarios/me/racha/checkin:
  *   post:
  *     summary: Check-in diario de racha
- *     description: Incrementa la racha del usuario si es un nuevo día
+ *     description: Incrementa la racha del usuario si es un nuevo d?a
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -686,6 +686,8 @@ router.get(
  */
 router.post(
   "/:id/puntos/asignar",
+  authMiddleware,
+  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
   validateParams(idParamSchema),
   validateBody(assignUserPointsSchema),
   pointsController.assignPoints,
@@ -728,9 +730,9 @@ router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
  *       Obtiene el historial de asignaciones manuales de puntos.
  *
  *       - ADMIN: puede ver todas las asignaciones
- *       - EMPLEADO: solo puede ver las que él creó
+ *       - EMPLEADO: solo puede ver las que ?l cre?
  *
- *       Soporta paginación mediante cursor.
+ *       Soporta paginaci?n mediante cursor.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -746,7 +748,7 @@ router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
  *         required: false
  *         schema:
  *           type: string
- *         description: Filtrar por admin/empleado que asignó puntos (solo admin)
+ *         description: Filtrar por admin/empleado que asign? puntos (solo admin)
  *       - in: query
  *         name: limit
  *         required: false
@@ -758,7 +760,7 @@ router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
  *         required: false
  *         schema:
  *           type: string
- *         description: Cursor de paginación (Firestore doc path)
+ *         description: Cursor de paginaci?n (Firestore doc path)
  *     responses:
  *       200:
  *         description: Historial obtenido correctamente
@@ -815,14 +817,14 @@ router.get(
  * @swagger
  * /api/usuarios/{id}/puntos/asignar-por-venta:
  *   post:
- *     summary: Asignar puntos automáticamente según monto de venta
+ *     summary: Asignar puntos autom?ticamente seg?n monto de venta
  *     description: |
  *       Calcula los puntos a partir del monto de venta: **puntos = round(monto * 0.10)**
- *       (redondeo tradicional: 0.5 hacia arriba, ≤0.4 hacia abajo).
+ *       (redondeo tradicional: 0.5 hacia arriba, ���0.4 hacia abajo).
  *
  *       Los puntos se asignan al usuario indicado por su ID.
  *
- *       **Autorización:** Requiere autenticación (Bearer token) con rol ADMIN o EMPLEADO.
+ *       **Autorizaci?n:** Requiere autenticaci?n (Bearer token) con rol ADMIN o EMPLEADO.
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -830,7 +832,7 @@ router.get(
  *       - in: path
  *         name: id
  *         required: true
- *         description: ID del usuario en la colección `usuariosApp` (Firebase UID)
+ *         description: ID del usuario en la colecci?n `usuariosApp` (Firebase UID)
  *         schema:
  *           type: string
  *           example: "abc123xyz"
@@ -842,10 +844,10 @@ router.get(
  *             $ref: '#/components/schemas/AssignPointsBySale'
  *           examples:
  *             ventaTienda:
- *               summary: Venta en tienda física
+ *               summary: Venta en tienda f?sica
  *               value:
  *                 dinero: 350.75
- *                 descripcion: "Venta de productos en tienda física"
+ *                 descripcion: "Venta de productos en tienda f?sica"
  *                 origenId: "caja_01"
  *             ventaOnline:
  *               summary: Venta por e-commerce
@@ -882,11 +884,11 @@ router.get(
  *                       example: 35
  *                     puntosActuales:
  *                       type: integer
- *                       description: Saldo de puntos del usuario después de la asignación
+ *                       description: Saldo de puntos del usuario despu?s de la asignaci?n
  *                       example: 1250
  *                     descripcion:
  *                       type: string
- *                       example: "Venta de productos en tienda física"
+ *                       example: "Venta de productos en tienda f?sica"
  *                     origenId:
  *                       type: string
  *                       example: "caja_01"
@@ -904,7 +906,7 @@ router.get(
  *                     descripcion: "Venta promocional"
  *                     origenId: "admin_xyz"
  *               redondeoAbajo:
- *                 summary: Redondeo hacia abajo (≤0.4)
+ *                 summary: Redondeo hacia abajo (���0.4)
  *                 value:
  *                   success: true
  *                   message: "Puntos asignados exitosamente por monto de venta"
@@ -940,7 +942,7 @@ router.post(
  * @swagger
  * /api/usuarios/me/solicitar-eliminacion:
  *   post:
- *     summary: Solicita la eliminación definitiva de la cuenta después de 30 días
+ *     summary: Solicita la eliminaci?n definitiva de la cuenta despu?s de 30 d?as
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -960,7 +962,7 @@ router.post("/me/solicitar-eliminacion", authMiddleware, commandController.solic
  * @swagger
  * /api/usuarios/me/cancelar-eliminacion:
  *   post:
- *     summary: Cancela una solicitud de eliminación pendiente
+ *     summary: Cancela una solicitud de eliminaci?n pendiente
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -976,7 +978,7 @@ router.post("/me/cancelar-eliminacion", authMiddleware, commandController.cancel
  * @swagger
  * /api/usuarios/me/estado-eliminacion:
  *   get:
- *     summary: Obtiene el estado de la solicitud de eliminación
+ *     summary: Obtiene el estado de la solicitud de eliminaci?n
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []

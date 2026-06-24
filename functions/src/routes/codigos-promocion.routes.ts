@@ -16,6 +16,7 @@ import {
   validateQuery,
 } from "../middleware/validation.middleware";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -71,6 +72,8 @@ const couponRateLimit = createSimpleRateLimiter({
  */
 router.get(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateQuery(listCodigosPromocionQuerySchema),
   codigosPromocionQueryController.listar,
 );
@@ -190,6 +193,8 @@ router.get(
  */
 router.post(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateBody(createCodigoPromocionSchema),
   codigosPromocionCommandController.crear,
 );
@@ -235,6 +240,8 @@ router.post(
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(codigoPromocionParamsSchema),
   validateBody(updateCodigoPromocionSchema),
   codigosPromocionCommandController.actualizar,
@@ -265,6 +272,8 @@ router.put(
  */
 router.delete(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(codigoPromocionParamsSchema),
   codigosPromocionCommandController.eliminar,
 );
