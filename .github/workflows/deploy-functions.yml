@@ -25,9 +25,11 @@ jobs:
           node-version: "22"
 
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          export_environment_variables: true
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -41,9 +43,12 @@ jobs:
           npm ci
 
       - name: Create Service Account Files
+        env:
+          SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
-          echo '${{ secrets.SERVICE_ACCOUNT_KEY }}' > serviceAccountKey.json
-          echo '${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}' > serviceAccountAppOficial.json
+          printf '%s\n' "$SERVICE_ACCOUNT_KEY" > serviceAccountKey.json
+          printf '%s\n' "$SERVICE_ACCOUNT_APP_OFICIAL" > serviceAccountAppOficial.json
 
       - name: Verify Service Account Files
         run: |
@@ -140,12 +145,15 @@ jobs:
 
       - name: Deploy to Firebase in staggered batches
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
           JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           set -euo pipefail
+
+          gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}"
+          firebase use e-comerce-leon --non-interactive
 
           batches=(
             "functions:api,functions:processTryOnJob,functions:processNotificationEvent"
@@ -158,7 +166,7 @@ jobs:
           for batch in "${batches[@]}"; do
             echo "Deploying batch: ${batch}"
             for attempt in 1 2 3; do
-              if firebase deploy --only "${batch}" --project e-comerce-leon; then
+              if firebase deploy --only "${batch}" --project e-comerce-leon --non-interactive; then
                 break
               fi
 
