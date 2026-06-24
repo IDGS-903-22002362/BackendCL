@@ -53,6 +53,23 @@ export function esCodigoPromocionVigente(
   return fechaInicio <= now && fechaFin >= now;
 }
 
+export function puedeEliminarCodigoPromocion(
+  codigoPromocion: Pick<CodigoPromocion, "estado" | "fechaInicio" | "fechaFin">,
+  now = new Date(),
+): boolean {
+  if (!codigoPromocion.estado) {
+    return true;
+  }
+
+  const fechaFin = toDateValue(codigoPromocion.fechaFin);
+
+  if (fechaFin && now.getTime() > fechaFin.getTime()) {
+    return true;
+  }
+
+  return false;
+}
+
 export function tieneStockCodigoPromocion(
   codigoPromocion: CodigoPromocion,
 ): boolean {

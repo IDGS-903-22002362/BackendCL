@@ -113,6 +113,23 @@ export function esOfertaVigente(
   return ahora >= fechaInicio.getTime() && ahora <= fechaFin.getTime();
 }
 
+export function puedeEliminarOferta(
+  oferta: Pick<Oferta, "estado" | "fechaInicio" | "fechaFin">,
+  fechaReferencia: Date = new Date(),
+): boolean {
+  if (!oferta.estado) {
+    return true;
+  }
+
+  const fechaFin = convertirADate(oferta.fechaFin);
+
+  if (fechaFin && fechaReferencia.getTime() > fechaFin.getTime()) {
+    return true;
+  }
+
+  return false;
+}
+
 function contieneId(
   lista: string[] | undefined,
   id: string | null | undefined

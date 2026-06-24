@@ -37,6 +37,24 @@ function getErrorMessage(error: unknown): string {
   return "Ocurrió un error inesperado.";
 }
 
+function getErrorStatusCode(message: string): number {
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("no encontrado")) {
+    return 404;
+  }
+
+  if (
+    normalized.includes("no se puede eliminar") ||
+    normalized.includes("inválid") ||
+    normalized.includes("invalid")
+  ) {
+    return 400;
+  }
+
+  return 500;
+}
+
 export const codigosPromocionCommandController = {
   async crear(req: Request, res: Response): Promise<void> {
     try {
@@ -118,9 +136,11 @@ export const codigosPromocionCommandController = {
     } catch (error) {
       console.error("Error al eliminar código promocional:", error);
 
-      res.status(500).json({
+      const message = getErrorMessage(error);
+
+      res.status(getErrorStatusCode(message)).json({
         success: false,
-        message: "Error al eliminar código promocional.",
+        message,
       });
     }
   },
