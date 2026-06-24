@@ -14,8 +14,10 @@ import {
   createOfertaSchema,
   listarOfertasQuerySchema,
   ofertaIdParamSchema,
+  syncOfferSnapshotsSchema,
   updateOfertaSchema,
 } from "../middleware/validators/ofertas.validator";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -164,6 +166,37 @@ router.post(
   "/calcular-precios",
   validateBody(calcularPreciosOfertaSchema),
   ofertasQueryController.calcularPrecios
+);
+
+/**
+ * @swagger
+ * /api/ofertas/admin/sync-snapshots:
+ *   post:
+ *     summary: Sincronizar snapshots de ofertas en productos
+ *     description: Recalcula campos denormalizados de oferta en productos activos. Requiere admin.
+ *     tags:
+ *       - Ofertas
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               limit:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 500
+ *     responses:
+ *       200:
+ *         description: Snapshots sincronizados correctamente.
+ */
+router.post(
+  "/admin/sync-snapshots",
+  authMiddleware,
+  requireAdmin,
+  validateBody(syncOfferSnapshotsSchema),
+  ofertasCommandController.sincronizarSnapshots
 );
 
 /**

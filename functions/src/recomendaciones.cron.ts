@@ -2,6 +2,7 @@ import * as functions from "firebase-functions/v1";
 import aggregatesService from "./services/recomendaciones/aggregates.service";
 import eventService from "./services/recomendaciones/event.service";
 import cacheService from "./services/recomendaciones/cache.service";
+import productOfferSnapshotService from "./services/product-offer-snapshot.service";
 import logger from "./utils/logger";
 
 const cronLogger = logger.child({ component: "recomendaciones-cron" });
@@ -17,6 +18,7 @@ export const recalculateRecommendationAggregates = functions.pubsub
       aggregatesService.recalculateDestacados(),
       aggregatesService.recalculatePopularity(),
       aggregatesService.recalculateFrequentlyBoughtTogether(),
+      productOfferSnapshotService.syncActiveOfferProductSnapshots(500),
     ]);
     cronLogger.info("recommendations_aggregates_done");
     return null;

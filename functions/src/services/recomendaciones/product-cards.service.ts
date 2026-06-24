@@ -3,6 +3,9 @@ import { CatalogProductCardDTO } from "../../models/product-catalog.model";
 import { Producto } from "../../models/producto.model";
 import { ofertasService } from "../ofertas.service";
 import { seleccionarMejorOferta } from "../../utils/ofertas-pricing.util";
+import {
+  readStoredOfferSnapshot,
+} from "../product-offer-snapshot.service";
 import { isProductoElegible } from "./utils/product-eligibility.util";
 
 const PRODUCTOS_COLLECTION = "productos";
@@ -63,6 +66,7 @@ class ProductCardsService {
       ofertaId: string;
       ofertaTitulo: string;
       descuentoTotal: number;
+      porcentajeDescuento: number;
     },
   ): CatalogProductCardDTO {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
@@ -83,6 +87,7 @@ class ProductCardsService {
       ofertaAplicadaId: offer?.ofertaId ?? null,
       ofertaTitulo: offer?.ofertaTitulo ?? null,
       descuentoTotal: offer?.descuentoTotal ?? 0,
+      porcentajeDescuento: offer?.porcentajeDescuento ?? 0,
       imagenPrincipal:
         Array.isArray(product.imagenes) && product.imagenes.length > 0
           ? product.imagenes[0]
@@ -151,10 +156,27 @@ class ProductCardsService {
             ofertaId: string;
             ofertaTitulo: string;
             descuentoTotal: number;
+            porcentajeDescuento: number;
           }
         | undefined;
 
-      if (withOffers && product) {
+      const storedOffer = readStoredOfferSnapshot(product!);
+      const precioOriginal = Math.max(0, Number(product!.precioPublico || 0));
+
+      if (
+        storedOffer?.tieneOfertaActiva === true &&
+        typeof storedOffer.precioOferta === "number" &&
+        storedOffer.precioOferta > 0 &&
+        storedOffer.precioOferta < precioOriginal
+      ) {
+        offer = {
+          precioFinal: storedOffer.precioOferta,
+          ofertaId: storedOffer.ofertaAplicadaId || "",
+          ofertaTitulo: storedOffer.ofertaTitulo || "Oferta",
+          descuentoTotal: Math.max(0, precioOriginal - storedOffer.precioOferta),
+          porcentajeDescuento: storedOffer.porcentajeDescuento,
+        };
+      } else if (withOffers && product) {
         const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
           id: product.id || productId,
           precioPublico: product.precioPublico,
@@ -163,14 +185,19 @@ class ProductCardsService {
         });
 
         if (mejorOferta) {
+          const descuentoTotal = Math.max(
+            0,
+            product.precioPublico - mejorOferta.precioFinal,
+          );
           offer = {
             precioFinal: mejorOferta.precioFinal,
             ofertaId: mejorOferta.oferta.id || "",
             ofertaTitulo: mejorOferta.oferta.titulo || "Oferta",
-            descuentoTotal: Math.max(
-              0,
-              product.precioPublico - mejorOferta.precioFinal,
-            ),
+            descuentoTotal,
+            porcentajeDescuento:
+              product.precioPublico > 0
+                ? Math.round((descuentoTotal / product.precioPublico) * 100)
+                : 0,
           };
         }
       }

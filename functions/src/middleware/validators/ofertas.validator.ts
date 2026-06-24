@@ -326,6 +326,18 @@ export const listarOfertasQuerySchema = z
   })
   .strict();
 
+export const syncOfferSnapshotsSchema = z
+  .object({
+    limit: z
+      .number()
+      .int("limit debe ser un entero")
+      .min(1, "limit debe ser mayor a 0")
+      .max(500, "limit no puede exceder 500")
+      .optional()
+      .default(500),
+  })
+  .strict();
+
 export type CreateOfertaInput = z.infer<typeof createOfertaSchema>;
 export type UpdateOfertaInput = z.infer<typeof updateOfertaSchema>;
 export type CalcularPreciosOfertaInput = z.infer<
