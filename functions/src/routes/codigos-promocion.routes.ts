@@ -15,7 +15,6 @@ import {
   validateParams,
   validateQuery,
 } from "../middleware/validation.middleware";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
