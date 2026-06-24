@@ -10,6 +10,7 @@ import {
   Orden,
   PaymentState,
   PreparationStatus,
+  CrearOrdenDTO,
 } from "../models/orden.model";
 import {
   COLECCION_PAGOS,
@@ -44,6 +45,7 @@ import {
   MANUAL_FEDEX_PROVIDER,
   MANUAL_FEDEX_STATUS,
 } from "../config/manual-shipping.config";
+import { CheckoutPricingSnapshot } from "../models/checkout-pricing.model";
 
 const ORDENES_COLLECTION = "ordenes";
 const USERS_APP_COLLECTION = "usuariosApp";
@@ -114,6 +116,17 @@ export type CreateStripePaymentIntentResult = {
   status: EstadoPago;
   stripeCustomerId?: string;
   created: boolean;
+};
+
+export type CreateStripeCheckoutSessionForAttemptInput = {
+  checkoutAttemptId: string;
+  userId: string;
+  cartId: string;
+  orderDraft: CrearOrdenDTO;
+  pricing: CheckoutPricingSnapshot;
+  successUrl: string;
+  cancelUrl: string;
+  idempotencyKey: string;
 };
 
 export type CreateStripeCheckoutSessionInput = {
@@ -1473,6 +1486,198 @@ async createStripeCheckoutSession(
   });
 }
 
+  async createStripeCheckoutSessionForAttempt(
+    input: CreateStripeCheckoutSessionForAttemptInput,
+  ): Promise<CreateStripeCheckoutSessionResult> {
+    const stripe = getStripeClient();
+    const currency = getStripeCurrency();
+    const amount = Math.round(input.pricing.total * 100);
+
+    if (amount <= 0) {
+      throw new ApiError(409, "El total del checkout es inválido para Stripe");
+    }
+
+    const stripeCustomerId = await this.getOrCreateStripeCustomerId(
+      stripe,
+      input.userId,
+    );
+
+    const idemSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("idempotencyKey", "==", input.idempotencyKey)
+      .limit(1)
+      .get();
+
+    if (!idemSnapshot.empty) {
+      const existingDoc = idemSnapshot.docs[0];
+      const existingPago = existingDoc.data() as Pago;
+      if (
+        existingPago.checkoutAttemptId === input.checkoutAttemptId &&
+        existingPago.checkoutSessionId &&
+        isEstadoReutilizable(existingPago.estado)
+      ) {
+        const existingSession = await stripe.checkout.sessions.retrieve(
+          existingPago.checkoutSessionId,
+        );
+        if (existingSession.client_secret) {
+          return {
+            sessionId: existingSession.id,
+            clientSecret: existingSession.client_secret,
+            url: existingSession.url,
+            pagoId: existingDoc.id,
+            stripeCustomerId:
+              existingPago.stripeCustomerId || stripeCustomerId,
+            created: false,
+          };
+        }
+      }
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const paymentMetadata = {
+      cartId: input.cartId,
+      checkoutAttemptId: input.checkoutAttemptId,
+      fulfillmentMethod: input.orderDraft.fulfillmentMethod || "DELIVERY",
+      shippingTotal: String(input.pricing.shippingTotal || 0),
+      discountTotal: String(input.pricing.discountTotal || 0),
+    };
+
+    const pagoRef = await firestoreTienda.collection(COLECCION_PAGOS).add({
+      ordenId: "",
+      checkoutAttemptId: input.checkoutAttemptId,
+      userId: input.userId,
+      provider: ProveedorPago.STRIPE,
+      metodoPago: MetodoPago.TARJETA,
+      monto: input.pricing.total,
+      amountMinor: amount,
+      currency,
+      estado: EstadoPago.PROCESANDO,
+      status: PaymentStatus.PENDING_CUSTOMER,
+      idempotencyKey: input.idempotencyKey,
+      stripeCustomerId,
+      metadata: paymentMetadata,
+      createdAt: now,
+      updatedAt: now,
+    } satisfies Omit<Pago, "id">);
+
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        ui_mode: "embedded",
+        customer: stripeCustomerId,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency,
+              unit_amount: amount,
+              product_data: {
+                name: "Compra Club León",
+                description: "Checkout seguro",
+                metadata: {
+                  checkoutAttemptId: input.checkoutAttemptId,
+                  cartId: input.cartId,
+                },
+              },
+            },
+          },
+        ],
+        return_url: input.successUrl,
+        metadata: {
+          checkoutAttemptId: input.checkoutAttemptId,
+          userId: input.userId,
+          pagoId: pagoRef.id,
+          cartId: input.cartId,
+        },
+        payment_intent_data: {
+          metadata: {
+            checkoutAttemptId: input.checkoutAttemptId,
+            userId: input.userId,
+            pagoId: pagoRef.id,
+            cartId: input.cartId,
+          },
+        },
+      },
+      { idempotencyKey: input.idempotencyKey },
+    );
+
+    if (!session.client_secret) {
+      throw new ApiError(
+        502,
+        "Stripe no devolvio client secret para Embedded Checkout",
+      );
+    }
+
+    const checkoutUpdate: Record<string, unknown> = {
+      checkoutSessionId: session.id,
+      providerStatus: session.payment_status || "open",
+      updatedAt: admin.firestore.Timestamp.now(),
+    };
+    if (typeof session.payment_intent === "string") {
+      checkoutUpdate.paymentIntentId = session.payment_intent;
+    }
+    await pagoRef.update(checkoutUpdate);
+
+    console.log("stripe_checkout_session_for_attempt", {
+      checkoutAttemptId: input.checkoutAttemptId,
+      pagoId: pagoRef.id,
+      stripeSessionId: session.id,
+    });
+
+    return {
+      sessionId: session.id,
+      clientSecret: session.client_secret,
+      url: session.url,
+      pagoId: pagoRef.id,
+      stripeCustomerId,
+      created: true,
+    };
+  }
+
+  async getStripeCheckoutSessionForAttempt(
+    sessionId: string,
+    userId: string,
+  ): Promise<{ sessionId: string; clientSecret: string }> {
+    const stripe = getStripeClient();
+    const pagoMatch = await this.findPagoByField("checkoutSessionId", sessionId);
+    if (!pagoMatch) {
+      throw new ApiError(404, "Sesión de pago no encontrada");
+    }
+    const pagoDoc = await pagoMatch.pagoRef.get();
+    const pagoData = pagoDoc.data() as Pago;
+    if (pagoData.userId !== userId) {
+      throw new ApiError(403, "No tienes permisos para esta sesión de pago");
+    }
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (!session.client_secret) {
+      throw new ApiError(409, "La sesión de Stripe no tiene client_secret");
+    }
+    return { sessionId: session.id, clientSecret: session.client_secret };
+  }
+
+  async getPaymentStatusSummary(
+    pagoId: string,
+  ): Promise<{ status?: string } | null> {
+    const doc = await firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId).get();
+    if (!doc.exists) {
+      return null;
+    }
+    const data = doc.data() as Pago;
+    return {
+      status: data.status || data.estado,
+    };
+  }
+
+  async linkPaymentToOrder(pagoId: string, ordenId: string): Promise<void> {
+    await firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId).set(
+      {
+        ordenId,
+        updatedAt: admin.firestore.Timestamp.now(),
+      },
+      { merge: true },
+    );
+  }
+
   private getPaymentIntentIdFromCheckoutSession(
     session: Stripe.Checkout.Session,
   ): string | undefined {
@@ -2140,7 +2345,15 @@ async createStripeCheckoutSession(
       };
     }
 
-    const ordenSnapshot = await pagoMatch.ordenRef.get();
+    if (!pagoMatch.ordenRef) {
+      throw new ApiError(
+        404,
+        "Orden no encontrada al procesar webhook de PaymentIntent",
+      );
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
+    const ordenSnapshot = await ordenRef.get();
     const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
     if (!ordenDataForValidation) {
       throw new ApiError(404, "Orden no encontrada al procesar webhook");
@@ -2169,7 +2382,7 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
-      const ordenSnapshot = await tx.get(pagoMatch.ordenRef);
+      const ordenSnapshot = await tx.get(ordenRef);
       const ordenData = ordenSnapshot.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
@@ -2191,7 +2404,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
         ...this.buildManualFedexPaidOrderPatch(ordenData),
         stripePaymentIntentId: paymentIntent.id,
@@ -2203,7 +2416,7 @@ async createStripeCheckoutSession(
       });
     });
 
-    const orderSnapshot = await pagoMatch.ordenRef.get();
+    const orderSnapshot = await ordenRef.get();
     const orderData = orderSnapshot.data() as Orden | undefined;
     await pickupOrderService.finalizePaidPickupOrder({
       orderId: pagoMatch.ordenId,
@@ -2255,6 +2468,28 @@ async createStripeCheckoutSession(
     const failureMessage =
       paymentIntent.last_payment_error?.message ||
       "Stripe reporto fallo al confirmar el pago";
+
+    if (!pagoMatch.ordenRef) {
+      if (pagoMatch.checkoutAttemptId) {
+        const { default: checkoutAttemptService } = await import(
+          "./checkout/checkout-attempt.service"
+        );
+        await checkoutAttemptService.releaseAttempt(
+          pagoMatch.checkoutAttemptId,
+          "PaymentIntent fallido",
+          { failureCode },
+        );
+      }
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_payment_failed",
+      };
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
     const now = admin.firestore.Timestamp.now();
 
     await firestoreTienda.runTransaction(async (tx) => {
@@ -2284,7 +2519,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.PENDIENTE,
         paymentStatus: PaymentState.FALLIDO,
         stripePaymentIntentId: paymentIntent.id,
@@ -2307,6 +2542,127 @@ async createStripeCheckoutSession(
     };
   }
 
+  private async handleCheckoutAttemptSessionEvent(
+    event: Stripe.Event,
+    session: Stripe.Checkout.Session,
+    pagoMatch: {
+      pagoId: string;
+      pagoRef: FirebaseFirestore.DocumentReference;
+    },
+    checkoutAttemptId: string,
+  ): Promise<StripeWebhookProcessResult> {
+    const now = admin.firestore.Timestamp.now();
+    const { default: checkoutAttemptService } = await import(
+      "./checkout/checkout-attempt.service"
+    );
+
+    if (
+      event.type === "checkout.session.expired" ||
+      event.type === "checkout.session.async_payment_failed"
+    ) {
+      await checkoutAttemptService.releaseAttempt(
+        checkoutAttemptId,
+        `Webhook Stripe: ${event.type}`,
+        {
+          status:
+            event.type === "checkout.session.expired"
+              ? undefined
+              : undefined,
+          failureCode: event.type,
+        },
+      );
+      await pagoMatch.pagoRef.set(
+        {
+          estado: EstadoPago.FALLIDO,
+          status:
+            event.type === "checkout.session.expired"
+              ? PaymentStatus.EXPIRED
+              : PaymentStatus.FAILED,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_released",
+      };
+    }
+
+    if (session.payment_status !== "paid") {
+      await firestoreTienda.runTransaction(async (tx) => {
+        const pagoSnapshot = await tx.get(pagoMatch.pagoRef);
+        if (!pagoSnapshot.exists) {
+          return;
+        }
+        const pagoData = pagoSnapshot.data() as Pago;
+        if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
+          return;
+        }
+        tx.update(pagoMatch.pagoRef, {
+          estado: EstadoPago.PROCESANDO,
+          status: PaymentStatus.PENDING_CUSTOMER,
+          providerStatus: session.payment_status || "unpaid",
+          rawEventId: event.id,
+          webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+            event.id,
+          ),
+          updatedAt: now,
+        });
+      });
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_payment_pending",
+      };
+    }
+
+    const orderId = await checkoutAttemptService.finalizePaidFromWebhook({
+      checkoutAttemptId,
+      pagoId: pagoMatch.pagoId,
+      eventId: event.id,
+    });
+
+    await pagoMatch.pagoRef.set(
+      {
+        estado: EstadoPago.COMPLETADO,
+        status: PaymentStatus.PAID,
+        providerStatus: session.payment_status || "paid",
+        checkoutSessionId: session.id,
+        paymentIntentId:
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : undefined,
+        fechaPago: now,
+        rawEventId: event.id,
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+
+    console.log("stripe_checkout_attempt_paid", {
+      checkoutAttemptId,
+      orderId,
+      pagoId: pagoMatch.pagoId,
+      eventId: event.id,
+    });
+
+    return {
+      outcome: "processed",
+      eventId: event.id,
+      eventType: event.type,
+      pagoId: pagoMatch.pagoId,
+      ordenId: orderId,
+    };
+  }
+
   private async handleCheckoutSuccess(
     event: Stripe.Event,
     session: Stripe.Checkout.Session,
@@ -2320,6 +2676,26 @@ async createStripeCheckoutSession(
         eventType: event.type,
         reason: "pago_not_found_by_checkout_session",
       };
+    }
+
+    const initialPagoDoc = await pagoMatch.pagoRef.get();
+    const initialPagoData = initialPagoDoc.data() as Pago;
+    const checkoutAttemptId =
+      pagoMatch.checkoutAttemptId ||
+      initialPagoData.checkoutAttemptId ||
+      getMetadataString(session.metadata, "checkoutAttemptId");
+
+    if (checkoutAttemptId && !pagoMatch.ordenId) {
+      return this.handleCheckoutAttemptSessionEvent(
+        event,
+        session,
+        pagoMatch,
+        checkoutAttemptId,
+      );
+    }
+
+    if (!pagoMatch.ordenRef) {
+      throw new ApiError(404, "Orden no encontrada al procesar webhook");
     }
 
     if (session.payment_status !== "paid") {
@@ -2367,7 +2743,15 @@ async createStripeCheckoutSession(
       };
     }
 
-    const ordenSnapshot = await pagoMatch.ordenRef.get();
+    if (!pagoMatch.ordenRef) {
+      throw new ApiError(
+        404,
+        "Orden no encontrada al procesar webhook de PaymentIntent",
+      );
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
+    const ordenSnapshot = await ordenRef.get();
     const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
     if (!ordenDataForValidation) {
       throw new ApiError(404, "Orden no encontrada al procesar webhook");
@@ -2396,7 +2780,7 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
-      const ordenSnapshot = await tx.get(pagoMatch.ordenRef);
+      const ordenSnapshot = await tx.get(ordenRef);
       const ordenData = ordenSnapshot.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
@@ -2422,7 +2806,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.CONFIRMADA,
         ...this.buildManualFedexPaidOrderPatch(ordenData),
         stripeCheckoutSessionId: session.id,
@@ -2436,7 +2820,7 @@ async createStripeCheckoutSession(
       });
     });
 
-    const orderSnapshot = await pagoMatch.ordenRef.get();
+    const orderSnapshot = await ordenRef.get();
     const orderData = orderSnapshot.data() as Orden | undefined;
     await pickupOrderService.finalizePaidPickupOrder({
       orderId: pagoMatch.ordenId,
@@ -2487,6 +2871,26 @@ async createStripeCheckoutSession(
       };
     }
 
+    const initialPagoDoc = await pagoMatch.pagoRef.get();
+    const checkoutAttemptId =
+      pagoMatch.checkoutAttemptId ||
+      (initialPagoDoc.data() as Pago).checkoutAttemptId ||
+      getMetadataString(session.metadata, "checkoutAttemptId");
+
+    if (checkoutAttemptId && !pagoMatch.ordenId) {
+      return this.handleCheckoutAttemptSessionEvent(
+        event,
+        session,
+        pagoMatch,
+        checkoutAttemptId,
+      );
+    }
+
+    if (!pagoMatch.ordenRef) {
+      throw new ApiError(404, "Orden no encontrada al procesar webhook");
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
     const now = admin.firestore.Timestamp.now();
 
     await firestoreTienda.runTransaction(async (tx) => {
@@ -2521,7 +2925,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.PENDIENTE,
         stripeCheckoutSessionId: session.id,
         stripePaymentIntentId:
@@ -2560,6 +2964,26 @@ async createStripeCheckoutSession(
       };
     }
 
+    const initialPagoDoc = await pagoMatch.pagoRef.get();
+    const checkoutAttemptId =
+      pagoMatch.checkoutAttemptId ||
+      (initialPagoDoc.data() as Pago).checkoutAttemptId ||
+      getMetadataString(session.metadata, "checkoutAttemptId");
+
+    if (checkoutAttemptId && !pagoMatch.ordenId) {
+      return this.handleCheckoutAttemptSessionEvent(
+        event,
+        session,
+        pagoMatch,
+        checkoutAttemptId,
+      );
+    }
+
+    if (!pagoMatch.ordenRef) {
+      throw new ApiError(404, "Orden no encontrada al procesar webhook");
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
     const now = admin.firestore.Timestamp.now();
 
     await firestoreTienda.runTransaction(async (tx) => {
@@ -2587,7 +3011,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.PENDIENTE,
         paymentStatus: PaymentState.PENDIENTE,
         stripeCheckoutSessionId: session.id,
@@ -2622,6 +3046,17 @@ async createStripeCheckoutSession(
       };
     }
 
+    if (!pagoMatch.ordenRef) {
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_payment_canceled",
+      };
+    }
+    const ordenRef = pagoMatch.ordenRef;
+
     const now = admin.firestore.Timestamp.now();
 
     await firestoreTienda.runTransaction(async (tx) => {
@@ -2649,7 +3084,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.PENDIENTE,
         paymentStatus: PaymentState.PENDIENTE,
         stripePaymentIntentId: paymentIntent.id,
@@ -2683,6 +3118,17 @@ async createStripeCheckoutSession(
         reason: "pago_not_found_by_refund_charge",
       };
     }
+
+    if (!pagoMatch.ordenRef) {
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_refund_without_order",
+      };
+    }
+    const ordenRef = pagoMatch.ordenRef;
 
     const refundData = charge.refunds?.data?.[0];
     const now = admin.firestore.Timestamp.now();
@@ -2724,7 +3170,7 @@ async createStripeCheckoutSession(
         updatedAt: now,
       });
 
-      tx.update(pagoMatch.ordenRef, {
+      tx.update(ordenRef, {
         estado: EstadoOrden.CANCELADA,
         paymentStatus: PaymentState.REEMBOLSADO,
         stripePaymentIntentId:
@@ -2751,8 +3197,9 @@ async createStripeCheckoutSession(
   ): Promise<{
     pagoId: string;
     ordenId: string;
+    checkoutAttemptId?: string;
     pagoRef: FirebaseFirestore.DocumentReference;
-    ordenRef: FirebaseFirestore.DocumentReference;
+    ordenRef: FirebaseFirestore.DocumentReference | null;
   } | null> {
     const byIntent = await this.findPagoByField(
       "paymentIntentId",
@@ -2778,8 +3225,9 @@ async createStripeCheckoutSession(
   ): Promise<{
     pagoId: string;
     ordenId: string;
+    checkoutAttemptId?: string;
     pagoRef: FirebaseFirestore.DocumentReference;
-    ordenRef: FirebaseFirestore.DocumentReference;
+    ordenRef: FirebaseFirestore.DocumentReference | null;
   } | null> {
     const byCheckoutSession = await this.findPagoByField(
       "checkoutSessionId",
@@ -2807,8 +3255,9 @@ async createStripeCheckoutSession(
   private async resolvePagoFromRefundCharge(charge: Stripe.Charge): Promise<{
     pagoId: string;
     ordenId: string;
+    checkoutAttemptId?: string;
     pagoRef: FirebaseFirestore.DocumentReference;
-    ordenRef: FirebaseFirestore.DocumentReference;
+    ordenRef: FirebaseFirestore.DocumentReference | null;
   } | null> {
     if (typeof charge.payment_intent === "string") {
       const byIntent = await this.findPagoByField(
@@ -2829,8 +3278,9 @@ async createStripeCheckoutSession(
   ): Promise<{
     pagoId: string;
     ordenId: string;
+    checkoutAttemptId?: string;
     pagoRef: FirebaseFirestore.DocumentReference;
-    ordenRef: FirebaseFirestore.DocumentReference;
+    ordenRef: FirebaseFirestore.DocumentReference | null;
   } | null> {
     const snapshot = await firestoreTienda
       .collection(COLECCION_PAGOS)
@@ -2845,25 +3295,27 @@ async createStripeCheckoutSession(
     const pagoDoc = snapshot.docs[0];
     const pagoData = pagoDoc.data() as Pago;
 
-    if (!pagoData.ordenId) {
+    if (!pagoData.ordenId && !pagoData.checkoutAttemptId) {
       return null;
     }
 
     return {
       pagoId: pagoDoc.id,
-      ordenId: pagoData.ordenId,
+      ordenId: pagoData.ordenId || "",
+      checkoutAttemptId: pagoData.checkoutAttemptId,
       pagoRef: pagoDoc.ref,
-      ordenRef: firestoreTienda
-        .collection(ORDENES_COLLECTION)
-        .doc(pagoData.ordenId),
+      ordenRef: pagoData.ordenId
+        ? firestoreTienda.collection(ORDENES_COLLECTION).doc(pagoData.ordenId)
+        : null,
     };
   }
 
   private async findPagoById(pagoId: string): Promise<{
     pagoId: string;
     ordenId: string;
+    checkoutAttemptId?: string;
     pagoRef: FirebaseFirestore.DocumentReference;
-    ordenRef: FirebaseFirestore.DocumentReference;
+    ordenRef: FirebaseFirestore.DocumentReference | null;
   } | null> {
     const pagoRef = firestoreTienda.collection(COLECCION_PAGOS).doc(pagoId);
     const pagoDoc = await pagoRef.get();
@@ -2873,17 +3325,18 @@ async createStripeCheckoutSession(
     }
 
     const pagoData = pagoDoc.data() as Pago;
-    if (!pagoData.ordenId) {
+    if (!pagoData.ordenId && !pagoData.checkoutAttemptId) {
       return null;
     }
 
     return {
       pagoId: pagoDoc.id,
-      ordenId: pagoData.ordenId,
+      ordenId: pagoData.ordenId || "",
+      checkoutAttemptId: pagoData.checkoutAttemptId,
       pagoRef,
-      ordenRef: firestoreTienda
-        .collection(ORDENES_COLLECTION)
-        .doc(pagoData.ordenId),
+      ordenRef: pagoData.ordenId
+        ? firestoreTienda.collection(ORDENES_COLLECTION).doc(pagoData.ordenId)
+        : null,
     };
   }
 }

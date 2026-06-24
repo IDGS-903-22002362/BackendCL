@@ -166,7 +166,8 @@ export interface Pago {
   id?: string; // ID del documento en Firestore (opcional al crear)
 
   // Relaciones
-  ordenId: string; // Referencia a la orden en colección 'ordenes'
+  ordenId: string; // Referencia a la orden en colección 'ordenes' (vacío hasta finalizar checkout)
+  checkoutAttemptId?: string; // Intento de checkout previo a crear la orden
   userId: string; // UID de Firebase Auth del usuario que paga
 
   // Datos del pago
