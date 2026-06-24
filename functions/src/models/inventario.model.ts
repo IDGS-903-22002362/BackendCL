@@ -109,7 +109,8 @@ export enum EstadoReservaInventario {
 
 export interface ReservaInventario {
   id?: string;
-  ordenId: string;
+  ordenId?: string;
+  checkoutAttemptId?: string;
   productoId: string;
   tallaId: string | null;
   cantidad: number;

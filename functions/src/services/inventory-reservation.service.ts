@@ -31,20 +31,377 @@ type ReserveItemInput = {
 };
 
 class InventoryReservationService {
-  private buildReservationDocId(ordenId: string, item: ReserveItemInput): string {
+  private buildReservationDocId(
+    ownerId: string,
+    item: ReserveItemInput,
+  ): string {
     const tallaKey = item.tallaId?.trim() || "_";
-    return Buffer.from(`${ordenId}:${item.productoId}:${tallaKey}`).toString(
+    return Buffer.from(`${ownerId}:${item.productoId}:${tallaKey}`).toString(
       "base64url",
     );
   }
 
   private buildReservationIdempotencyKey(
-    ordenId: string,
+    ownerId: string,
     item: ReserveItemInput,
     paymentRef: string,
   ): string {
     const tallaKey = item.tallaId?.trim() || "_";
-    return `reserve:${paymentRef}:${ordenId}:${item.productoId}:${tallaKey}`;
+    return `reserve:${paymentRef}:${ownerId}:${item.productoId}:${tallaKey}`;
+  }
+
+  async attemptHasActiveReservations(
+    checkoutAttemptId: string,
+  ): Promise<boolean> {
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("checkoutAttemptId", "==", checkoutAttemptId)
+      .where("estado", "==", EstadoReservaInventario.ACTIVA)
+      .limit(1)
+      .get();
+    return !snapshot.empty;
+  }
+
+  async reserveForCheckoutAttempt(input: {
+    checkoutAttemptId: string;
+    items: ReserveItemInput[];
+    usuarioId?: string;
+    pagoId?: string;
+    idempotencyPrefix: string;
+  }): Promise<ReservaInventario[]> {
+    const paymentRef = input.pagoId || input.checkoutAttemptId;
+    const expiraEn = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() + INVENTORY_RESERVATION_TTL_MINUTES * 60 * 1000),
+    );
+    const now = admin.firestore.Timestamp.now();
+    const reservas: ReservaInventario[] = [];
+
+    for (const item of input.items) {
+      const tallaId = item.tallaId?.trim() || null;
+      const reservationId = this.buildReservationDocId(
+        input.checkoutAttemptId,
+        {
+          productoId: item.productoId,
+          tallaId,
+          cantidad: item.cantidad,
+        },
+      );
+      const reservationRef = firestoreTienda
+        .collection(RESERVAS_INVENTARIO_COLLECTION)
+        .doc(reservationId);
+
+      const existing = await reservationRef.get();
+      if (existing.exists) {
+        const data = existing.data() as ReservaInventario;
+        if (data.estado === EstadoReservaInventario.ACTIVA) {
+          reservas.push({ ...data, id: reservationRef.id });
+          continue;
+        }
+        if (data.estado === EstadoReservaInventario.CONFIRMADA) {
+          continue;
+        }
+      }
+
+      await firestoreTienda.runTransaction(async (transaction) => {
+        const productRef = firestoreTienda
+          .collection(PRODUCTOS_COLLECTION)
+          .doc(item.productoId);
+        const [productSnap, reservationSnap] = await Promise.all([
+          transaction.get(productRef),
+          transaction.get(reservationRef),
+        ]);
+
+        if (!productSnap.exists) {
+          throw new Error(`Producto con ID ${item.productoId} no encontrado`);
+        }
+
+        if (reservationSnap.exists) {
+          const existingReservation = reservationSnap.data() as ReservaInventario;
+          if (
+            existingReservation.estado === EstadoReservaInventario.ACTIVA ||
+            existingReservation.estado === EstadoReservaInventario.CONFIRMADA
+          ) {
+            return;
+          }
+        }
+
+        const productData = productSnap.data() as Record<string, unknown>;
+        const available = getAvailableForVariant(productData, tallaId);
+        if (available < item.cantidad) {
+          throw new Error(
+            `Stock insuficiente para reservar "${item.productoId}"` +
+              `${tallaId ? ` talla ${tallaId}` : ""}. Disponible: ${available}, solicitado: ${item.cantidad}`,
+          );
+        }
+
+        const tallaIds = normalizeTallaIds(productData.tallaIds);
+        const projection = projectLegacyFromProductData(productData);
+
+        if (tallaIds.length === 0) {
+          const global = normalizeGlobalBuckets(
+            productData,
+            projection.existencias,
+          );
+          global.reservada += item.cantidad;
+          global.disponible = computeDisponible(
+            global.fisica,
+            global.reservada,
+            global.noDisponible,
+          );
+
+          transaction.update(
+            productRef,
+            buildFirestoreInventoryPatch({
+              tallaIds: [],
+              inventarioPorTalla: [],
+              inventarioGlobal: global,
+            }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+          );
+        } else {
+          const inventarioPorTalla = projection.inventarioPorTalla.map(
+            (row) => {
+              if (row.tallaId !== tallaId) {
+                return row;
+              }
+              const buckets = normalizeSizeBuckets(
+                row.tallaId,
+                row,
+                row.cantidad,
+              );
+              buckets.reservada += item.cantidad;
+              buckets.disponible = computeDisponible(
+                buckets.fisica,
+                buckets.reservada,
+                buckets.noDisponible,
+              );
+              return {
+                tallaId: row.tallaId,
+                cantidad: buckets.disponible,
+                fisica: buckets.fisica,
+                reservada: buckets.reservada,
+                noDisponible: buckets.noDisponible,
+                entrante: buckets.entrante,
+              } satisfies InventarioPorTallaExtended;
+            },
+          );
+
+          transaction.update(
+            productRef,
+            buildFirestoreInventoryPatch({
+              tallaIds,
+              inventarioPorTalla,
+            }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+          );
+        }
+
+        const movimientoRef = firestoreTienda
+          .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+          .doc();
+
+        transaction.set(movimientoRef, {
+          tipo: TipoMovimientoInventario.RESERVA,
+          productoId: item.productoId,
+          tallaId,
+          cantidadAnterior: available,
+          cantidadNueva: available - item.cantidad,
+          diferencia: -item.cantidad,
+          checkoutAttemptId: input.checkoutAttemptId,
+          usuarioId: input.usuarioId,
+          referencia: paymentRef,
+          motivo: "Reserva al iniciar checkout",
+          origen: "checkout",
+          createdAt: now,
+        });
+
+        transaction.set(reservationRef, {
+          checkoutAttemptId: input.checkoutAttemptId,
+          productoId: item.productoId,
+          tallaId,
+          cantidad: item.cantidad,
+          estado: EstadoReservaInventario.ACTIVA,
+          pagoId: input.pagoId,
+          usuarioId: input.usuarioId,
+          expiraEn,
+          idempotencyKey: this.buildReservationIdempotencyKey(
+            input.checkoutAttemptId,
+            { productoId: item.productoId, tallaId, cantidad: item.cantidad },
+            paymentRef,
+          ),
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
+
+      const saved = await reservationRef.get();
+      reservas.push({
+        ...(saved.data() as ReservaInventario),
+        id: saved.id,
+        expiraEn: saved.data()?.expiraEn?.toDate?.() ?? new Date(),
+        createdAt: saved.data()?.createdAt?.toDate?.() ?? new Date(),
+      });
+    }
+
+    return reservas;
+  }
+
+  async releaseCheckoutAttemptReservations(input: {
+    checkoutAttemptId: string;
+    motivo: string;
+    usuarioId?: string;
+    targetStatus?: EstadoReservaInventario;
+  }): Promise<void> {
+    const targetStatus = input.targetStatus ?? EstadoReservaInventario.LIBERADA;
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("checkoutAttemptId", "==", input.checkoutAttemptId)
+      .where("estado", "==", EstadoReservaInventario.ACTIVA)
+      .get();
+
+    if (snapshot.empty) {
+      return;
+    }
+
+    const now = admin.firestore.Timestamp.now();
+
+    for (const doc of snapshot.docs) {
+      const reserva = doc.data() as ReservaInventario;
+      await firestoreTienda.runTransaction(async (transaction) => {
+        const productRef = firestoreTienda
+          .collection(PRODUCTOS_COLLECTION)
+          .doc(reserva.productoId);
+        const [productSnap, reservationSnap] = await Promise.all([
+          transaction.get(productRef),
+          transaction.get(doc.ref),
+        ]);
+
+        if (!reservationSnap.exists) {
+          return;
+        }
+
+        const current = reservationSnap.data() as ReservaInventario;
+        if (current.estado !== EstadoReservaInventario.ACTIVA) {
+          return;
+        }
+
+        if (productSnap.exists) {
+          const productData = productSnap.data() as Record<string, unknown>;
+          const tallaIds = normalizeTallaIds(productData.tallaIds);
+          const projection = projectLegacyFromProductData(productData);
+          const availableBefore = getAvailableForVariant(
+            productData,
+            reserva.tallaId,
+          );
+
+          if (tallaIds.length === 0) {
+            const global = normalizeGlobalBuckets(
+              productData,
+              projection.existencias,
+            );
+            global.reservada = Math.max(0, global.reservada - reserva.cantidad);
+            global.disponible = computeDisponible(
+              global.fisica,
+              global.reservada,
+              global.noDisponible,
+            );
+            transaction.update(
+              productRef,
+              buildFirestoreInventoryPatch({
+                tallaIds: [],
+                inventarioPorTalla: [],
+                inventarioGlobal: global,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+            );
+          } else {
+            const inventarioPorTalla = projection.inventarioPorTalla.map(
+              (row) => {
+                if (row.tallaId !== reserva.tallaId) {
+                  return row;
+                }
+                const buckets = normalizeSizeBuckets(
+                  row.tallaId,
+                  row,
+                  row.cantidad,
+                );
+                buckets.reservada = Math.max(
+                  0,
+                  buckets.reservada - reserva.cantidad,
+                );
+                buckets.disponible = computeDisponible(
+                  buckets.fisica,
+                  buckets.reservada,
+                  buckets.noDisponible,
+                );
+                return {
+                  tallaId: row.tallaId,
+                  cantidad: buckets.disponible,
+                  fisica: buckets.fisica,
+                  reservada: buckets.reservada,
+                  noDisponible: buckets.noDisponible,
+                  entrante: buckets.entrante,
+                };
+              },
+            );
+
+            transaction.update(
+              productRef,
+              buildFirestoreInventoryPatch({
+                tallaIds,
+                inventarioPorTalla,
+              }) as FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+            );
+          }
+
+          const movimientoRef = firestoreTienda
+            .collection(MOVIMIENTOS_INVENTARIO_COLLECTION)
+            .doc();
+
+          transaction.set(movimientoRef, {
+            tipo: TipoMovimientoInventario.LIBERACION_RESERVA,
+            productoId: reserva.productoId,
+            tallaId: reserva.tallaId,
+            cantidadAnterior: availableBefore,
+            cantidadNueva: availableBefore + reserva.cantidad,
+            diferencia: reserva.cantidad,
+            checkoutAttemptId: input.checkoutAttemptId,
+            usuarioId: input.usuarioId,
+            referencia: input.checkoutAttemptId,
+            motivo: input.motivo,
+            origen: "checkout",
+            createdAt: now,
+          });
+        }
+
+        transaction.update(doc.ref, {
+          estado: targetStatus,
+          updatedAt: now,
+          motivo: input.motivo,
+        });
+      });
+    }
+  }
+
+  async migrateReservationsToOrder(
+    checkoutAttemptId: string,
+    ordenId: string,
+  ): Promise<void> {
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("checkoutAttemptId", "==", checkoutAttemptId)
+      .get();
+
+    if (snapshot.empty) {
+      return;
+    }
+
+    const now = admin.firestore.Timestamp.now();
+    const batch = firestoreTienda.batch();
+    for (const doc of snapshot.docs) {
+      batch.update(doc.ref, {
+        ordenId,
+        updatedAt: now,
+      });
+    }
+    await batch.commit();
   }
 
   async orderHasActiveReservations(ordenId: string): Promise<boolean> {

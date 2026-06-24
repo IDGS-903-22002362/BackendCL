@@ -25,9 +25,12 @@ jobs:
           node-version: "22"
 
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          create_credentials_file: true
+          export_environment_variables: true
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v2
@@ -41,9 +44,12 @@ jobs:
           npm ci
 
       - name: Create Service Account Files
+        env:
+          SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+          SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
-          echo '${{ secrets.SERVICE_ACCOUNT_KEY }}' > serviceAccountKey.json
-          echo '${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}' > serviceAccountAppOficial.json
+          printf '%s\n' "$SERVICE_ACCOUNT_KEY" > serviceAccountKey.json
+          printf '%s\n' "$SERVICE_ACCOUNT_APP_OFICIAL" > serviceAccountAppOficial.json
 
       - name: Verify Service Account Files
         run: |
@@ -140,12 +146,19 @@ jobs:
 
       - name: Deploy to Firebase in staggered batches
         env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/serviceAccountKey.json
           JWT_EXPIRES_IN: ${{ secrets.JWT_EXPIRES_IN }}
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
           SERVICE_ACCOUNT_APP_OFICIAL: ${{ secrets.SERVICE_ACCOUNT_APP_OFICIAL }}
         run: |
           set -euo pipefail
+
+          # Firebase CLI uses ADC (not gcloud user creds). Use the verified key file
+          # created earlier in this job; .firebaserc already sets default project.
+          export GOOGLE_APPLICATION_CREDENTIALS="${GITHUB_WORKSPACE}/serviceAccountKey.json"
+          if [ ! -s "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+            echo "Error: ${GOOGLE_APPLICATION_CREDENTIALS} is missing or empty"
+            exit 1
+          fi
 
           batches=(
             "functions:api,functions:processTryOnJob,functions:processNotificationEvent"
@@ -158,7 +171,7 @@ jobs:
           for batch in "${batches[@]}"; do
             echo "Deploying batch: ${batch}"
             for attempt in 1 2 3; do
-              if firebase deploy --only "${batch}" --project e-comerce-leon; then
+              if firebase deploy --only "${batch}" --project e-comerce-leon --non-interactive; then
                 break
               fi
 

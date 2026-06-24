@@ -4,6 +4,10 @@ import { logout } from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
 import { refreshToken } from "../controllers/users/auth.refresh.controller";
 import { requestVerificationCode, verifyAndLogin } from "../controllers/users/auth.otp.controller";
+import {
+  requestRegistrationCode,
+  verifyRegistration,
+} from "../controllers/users/auth.registration.controller";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
@@ -249,5 +253,8 @@ router.post("/request-verification-code", otpRateLimit, requestVerificationCode)
  *         $ref: '#/components/responses/500ServerError'
  */
 router.post("/verify-and-login", authRateLimit, verifyAndLogin);
+
+router.post("/request-registration-code", otpRateLimit, requestRegistrationCode);
+router.post("/verify-registration", authRateLimit, verifyRegistration);
 
 export default router;

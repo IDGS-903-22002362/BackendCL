@@ -889,42 +889,37 @@ export class CarritoService {
    * @throws Error si algún producto no tiene stock (propagado desde OrdenService)
    * @throws Error si falla la creación de la orden
    */
-  async checkout(
+  async buildCheckoutOrderDraft(
     usuarioId: string,
     checkoutData: {
-  fulfillmentMethod?: FulfillmentMethod | string;
-  direccionEnvio?: DireccionEnvio;
-  pickupLocationId?: string;
-  pickupContact?: PickupContact;
-  metodoPago: MetodoPago;
-  codigoPromocion?: string;
-  costoEnvio?: number;
-  shippingQuoteId?: string;
-  selectedShippingOptionId?: string;
-  selectedServiceType?: string;
-  shippingSelection?: Partial<CheckoutShippingSelection>;
-  notas?: string;
-},
-  ): Promise<Orden> {
-    console.log(`🛒 Iniciando checkout para usuario: ${usuarioId}`);
-
-    // PASO 1: Obtener carrito del usuario
+      fulfillmentMethod?: FulfillmentMethod | string;
+      direccionEnvio?: DireccionEnvio;
+      pickupLocationId?: string;
+      pickupContact?: PickupContact;
+      metodoPago: MetodoPago;
+      codigoPromocion?: string;
+      costoEnvio?: number;
+      shippingQuoteId?: string;
+      selectedShippingOptionId?: string;
+      selectedServiceType?: string;
+      shippingSelection?: Partial<CheckoutShippingSelection>;
+      notas?: string;
+    },
+  ): Promise<{
+    cartId: string;
+    orderDraft: CrearOrdenDTO;
+    pricing: Awaited<
+      ReturnType<typeof checkoutPricingService.calculateCheckoutPricing>
+    >;
+  }> {
     const carrito = await this.getOrCreateCart(usuarioId);
 
-    // PASO 2: Validar que el carrito tenga items
     if (!carrito.items || carrito.items.length === 0) {
       throw new Error(
         "El carrito está vacío. Agrega productos antes de hacer checkout",
       );
     }
 
-    console.log(
-      `📦 Carrito tiene ${carrito.items.length} items. Preparando orden...`,
-    );
-
-    // PASO 3: Mapear ItemCarrito[] → ItemOrden[]
-    // Se agregan campos requeridos por la orden (subtotal por item)
-    // Los precios se recalcularán en OrdenService.createOrden() desde Firestore
     const fulfillmentMethod = this.normalizeFulfillmentMethod(
       checkoutData.fulfillmentMethod,
     );
@@ -949,31 +944,29 @@ export class CarritoService {
       selectedServiceType: checkoutData.selectedServiceType,
     });
 
-    // PASO 4: Construir CrearOrdenDTO
-    // subtotal, impuestos y total son placeholders — OrdenService los recalcula
     const codigoPromocion =
-  typeof checkoutData.codigoPromocion === "string"
-    ? checkoutData.codigoPromocion.trim().toUpperCase()
-    : undefined;
+      typeof checkoutData.codigoPromocion === "string"
+        ? checkoutData.codigoPromocion.trim().toUpperCase()
+        : undefined;
 
-const crearOrdenDTO: CrearOrdenDTO = {
-  usuarioId,
-  items: pricing.items.map((item) => ({
-    productoId: item.productId,
-    cantidad: item.quantity,
-    precioUnitario: item.unitPriceFinal,
-    subtotal: item.subtotalFinal,
-    ...(item.tallaId ? { tallaId: item.tallaId } : {}),
-  })),
-  subtotal: pricing.subtotalFinal,
-  impuestos: 0,
-  total: pricing.total,
-  fulfillmentMethod,
-  direccionEnvio,
-  pickupLocationId: checkoutData.pickupLocationId,
-  pickupContact: checkoutData.pickupContact,
-  metodoPago: checkoutData.metodoPago,
-  ...(codigoPromocion ? { codigoPromocion } : {}),
+    const orderDraft: CrearOrdenDTO = {
+      usuarioId,
+      items: pricing.items.map((item) => ({
+        productoId: item.productId,
+        cantidad: item.quantity,
+        precioUnitario: item.unitPriceFinal,
+        subtotal: item.subtotalFinal,
+        ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+      })),
+      subtotal: pricing.subtotalFinal,
+      impuestos: 0,
+      total: pricing.total,
+      fulfillmentMethod,
+      direccionEnvio,
+      pickupLocationId: checkoutData.pickupLocationId,
+      pickupContact: checkoutData.pickupContact,
+      metodoPago: checkoutData.metodoPago,
+      ...(codigoPromocion ? { codigoPromocion } : {}),
       costoEnvio: pricing.shippingTotal,
       shipping: pricing.shipping,
       pricingSnapshot: pricing,
@@ -982,7 +975,8 @@ const crearOrdenDTO: CrearOrdenDTO = {
         shippingProvider: pricing.shipping.provider || "",
         shippingCarrier: pricing.shipping.carrier || "",
         shippingServiceType: pricing.shipping.serviceType || "",
-        shippingMethod: pricing.shipping.shippingMethod || pricing.shipping.method,
+        shippingMethod:
+          pricing.shipping.shippingMethod || pricing.shipping.method,
         carrierCode: pricing.shipping.carrierCode || "",
       },
       discountTotal: pricing.discountTotal,
@@ -996,12 +990,45 @@ const crearOrdenDTO: CrearOrdenDTO = {
       notas: checkoutData.notas,
     };
 
-    // PASO 5: Crear orden (valida stock disponible, recalcula precios; sin descontar físico)
-    // Si falla aquí, el carrito queda intacto (rollback natural)
-    const orden = await ordenService.createOrden(crearOrdenDTO);
+    return { cartId: carrito.id!, orderDraft, pricing };
+  }
+
+  /**
+   * @deprecated Preferir checkoutAttemptService.startCheckout para Stripe.
+   * Se conserva para compatibilidad con integraciones legacy.
+   */
+  async checkout(
+    usuarioId: string,
+    checkoutData: {
+  fulfillmentMethod?: FulfillmentMethod | string;
+  direccionEnvio?: DireccionEnvio;
+  pickupLocationId?: string;
+  pickupContact?: PickupContact;
+  metodoPago: MetodoPago;
+  codigoPromocion?: string;
+  costoEnvio?: number;
+  shippingQuoteId?: string;
+  selectedShippingOptionId?: string;
+  selectedServiceType?: string;
+  shippingSelection?: Partial<CheckoutShippingSelection>;
+  notas?: string;
+},
+  ): Promise<Orden> {
+    console.log(`🛒 Iniciando checkout legacy para usuario: ${usuarioId}`);
+
+    const { cartId, orderDraft } = await this.buildCheckoutOrderDraft(
+      usuarioId,
+      checkoutData,
+    );
 
     console.log(
-      `✅ Orden ${orden.id} creada exitosamente desde carrito ${carrito.id}`,
+      `📦 Carrito ${cartId} tiene ${orderDraft.items.length} items. Creando orden...`,
+    );
+
+    const orden = await ordenService.createOrden(orderDraft);
+
+    console.log(
+      `✅ Orden ${orden.id} creada exitosamente desde carrito ${cartId}`,
     );
 
     return orden;

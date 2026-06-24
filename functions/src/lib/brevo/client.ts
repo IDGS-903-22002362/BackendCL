@@ -1,14 +1,54 @@
 // src/lib/brevo/client.ts - Versión con axios
-import axios from 'axios';
+import axios, { isAxiosError } from 'axios';
 import { Contacto } from '../../models/contacto.model';
 
-const BREVO_API_KEY = process.env.BREVO_API_KEY;
-const senderEmail = process.env.BREVO_SENDER_EMAIL || 'no-reply@clubleon.com';
-const senderName = process.env.BREVO_SENDER_NAME || 'Club León';
+const getBrevoConfig = () => ({
+  apiKey: process.env.BREVO_API_KEY,
+  senderEmail: process.env.BREVO_SENDER_EMAIL || 'no-reply@clubleon.com',
+  senderName: process.env.BREVO_SENDER_NAME || 'Club León',
+});
+
+const isLocalDevRuntime = () =>
+  process.env.IS_LOCAL === "true" ||
+  (process.env.NODE_ENV !== "production" &&
+    !process.env.K_SERVICE &&
+    !process.env.FUNCTION_NAME);
+
+const logBrevoSendError = (context: string, error: unknown): void => {
+  if (isAxiosError(error)) {
+    const data = error.response?.data as { message?: string; code?: string } | undefined;
+    console.error(`[Brevo] ${context} failed`, {
+      status: error.response?.status,
+      code: data?.code,
+      message: data?.message,
+    });
+    return;
+  }
+
+  console.error(
+    `[Brevo] ${context} failed`,
+    error instanceof Error ? error.message : "unknown error",
+  );
+};
+
+const devOtpFallback = (to: string, code: string, reason: string): boolean => {
+  if (!isLocalDevRuntime()) {
+    return false;
+  }
+
+  console.warn(`[DEV] Brevo no disponible (${reason}); OTP para ${to}: ${code}`);
+  return true;
+};
 
 export async function sendVerificationEmail(to: string, code: string, nombre?: string) {
-  if (!BREVO_API_KEY) {
-    console.error(' Brevo no configurado - API key faltante');
+  const { apiKey, senderEmail, senderName } = getBrevoConfig();
+
+  if (!apiKey) {
+    if (devOtpFallback(to, code, "API key faltante")) {
+      return true;
+    }
+
+    console.error('[Brevo] API key faltante');
     return false;
   }
 
@@ -178,16 +218,19 @@ export async function sendVerificationEmail(to: string, code: string, nombre?: s
       },
       {
         headers: {
-          'api-key': BREVO_API_KEY,
+          'api-key': apiKey,
           'Content-Type': 'application/json'
         }
       }
     );
 
-    console.log(' Email enviado exitosamente');
+    console.log('[Brevo] Email de verificación enviado');
     return true;
   } catch (error) {
-    console.error(' Error al enviar email:', error);
+    logBrevoSendError('sendVerificationEmail', error);
+    if (devOtpFallback(to, code, "fallo al enviar")) {
+      return true;
+    }
     return false;
   }
 }
@@ -196,9 +239,10 @@ export async function sendContactConfirmationEmail(
   to: string,
   nombre: string
 ): Promise<boolean> {
+  const { apiKey, senderEmail, senderName } = getBrevoConfig();
 
-  if (!BREVO_API_KEY) {
-    console.error("Brevo no configurado");
+  if (!apiKey) {
+    console.error("[Brevo] API key faltante");
     return false;
   }
 
@@ -236,7 +280,7 @@ export async function sendContactConfirmationEmail(
       },
       {
         headers: {
-          "api-key": BREVO_API_KEY,
+          "api-key": apiKey,
           "Content-Type": "application/json"
         }
       }
@@ -245,18 +289,17 @@ export async function sendContactConfirmationEmail(
     return true;
 
   } catch (error) {
-
-    console.error(error);
-
+    logBrevoSendError("sendContactConfirmationEmail", error);
     return false;
   }
 }
 export async function sendContactNotificationEmail(
   contacto: Contacto
 ): Promise<boolean> {
+  const { apiKey, senderEmail, senderName } = getBrevoConfig();
 
-  if (!BREVO_API_KEY) {
-    console.error("Brevo no configurado");
+  if (!apiKey) {
+    console.error("[Brevo] API key faltante");
     return false;
   }
 
@@ -293,7 +336,7 @@ export async function sendContactNotificationEmail(
       },
       {
         headers: {
-          "api-key": BREVO_API_KEY,
+          "api-key": apiKey,
           "Content-Type": "application/json"
         }
       }
@@ -302,9 +345,7 @@ export async function sendContactNotificationEmail(
     return true;
 
   } catch (error) {
-
-    console.error(error);
-
+    logBrevoSendError("sendContactNotificationEmail", error);
     return false;
   }
 }
