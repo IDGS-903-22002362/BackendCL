@@ -443,10 +443,10 @@ export class CheckoutAttemptService {
         "El intento de checkout ya fue finalizado con una orden pagada",
       );
     }
-    if (!ACTIVE_ATTEMPT_STATUSES.has(attempt.status)) {
+    if (attempt.orderId) {
       throw new ApiError(
         409,
-        "El intento de checkout ya no se puede cancelar",
+        "El intento de checkout ya tiene un pedido asociado",
       );
     }
 
