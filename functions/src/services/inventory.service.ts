@@ -960,18 +960,67 @@ class InventoryService {
       });
     });
 
-    alertsResult.alertas.slice(0, 10).forEach((alert) => {
-      const id = `stock_low:${alert.productoId}`;
-      items.push({
-        id,
-        type: "stock_low",
-        title: "Alerta de stock bajo",
-        message: `${alert.descripcion} (${alert.clave}) · ${alert.existencias} disponibles`,
-        href: `/admin/inventario/alertas-stock?producto=${alert.productoId}`,
-        createdAt: new Date().toISOString(),
-        read: readIds.has(id),
-      });
+    const stockNotifications: Array<{
+      id: string;
+      type: string;
+      title: string;
+      message: string;
+      href: string;
+      createdAt: string;
+      read: boolean;
+      deficit: number;
+    }> = [];
+
+    alertsResult.alertas.forEach((alert) => {
+      const stockEvents: Array<{
+        idSuffix: string;
+        message: string;
+        tallaId?: string;
+        deficit: number;
+      }> = [];
+
+      if (alert.globalBajoStock) {
+        stockEvents.push({
+          idSuffix: "global",
+          message: `${alert.descripcion} (${alert.clave}) · ${alert.existencias} disponibles`,
+          deficit: Math.max(0, alert.stockMinimoGlobal - alert.existencias),
+        });
+      }
+
+      for (const talla of alert.tallasBajoStock) {
+        stockEvents.push({
+          idSuffix: `talla:${talla.tallaId}`,
+          tallaId: talla.tallaId,
+          message: `${alert.descripcion} (${alert.clave}) · talla ${talla.tallaId}: ${talla.cantidadActual}/${talla.minimo}`,
+          deficit: talla.deficit,
+        });
+      }
+
+      for (const event of stockEvents) {
+        const tallaQuery = event.tallaId
+          ? `&talla=${encodeURIComponent(event.tallaId)}`
+          : "";
+        const id = `stock_low:${alert.productoId}:${event.idSuffix}`;
+
+        stockNotifications.push({
+          id,
+          type: "stock_low",
+          title: "Alerta de stock bajo",
+          message: event.message,
+          href: `/admin/inventario/movimientos?producto=${encodeURIComponent(alert.productoId)}${tallaQuery}`,
+          createdAt: new Date().toISOString(),
+          read: readIds.has(id),
+          deficit: event.deficit,
+        });
+      }
     });
+
+    stockNotifications
+      .sort((a, b) => b.deficit - a.deficit)
+      .slice(0, 10)
+      .forEach(({ deficit: _deficit, ...notification }) => {
+        items.push(notification);
+      });
 
     const sorted = items
       .sort(
