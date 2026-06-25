@@ -43,6 +43,46 @@ const ACTIVE_ATTEMPT_STATUSES = new Set<CheckoutAttemptStatus>([
   CheckoutAttemptStatus.PROCESSING,
 ]);
 
+function roundMoney(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+/**
+ * Genera una firma comparable del carrito + pricing del intento.
+ * Incluye items (producto/talla/cantidad/precio unitario), total, subtotal con
+ * ofertas y con código, código aplicado, envío y método de fulfillment.
+ * Si dos firmas difieren, el monto de Stripe debe recalcularse con una sesión
+ * nueva (el amount de una Checkout Session es inmutable tras crearse).
+ */
+function computeCartSignature(
+  orderDraft: Pick<CrearOrdenDTO, "items" | "fulfillmentMethod">,
+  pricing: CheckoutPricingSnapshot,
+): string {
+  const items = [...(orderDraft.items ?? [])]
+    .map((item) =>
+      [
+        item.productoId,
+        item.tallaId ?? "",
+        item.cantidad,
+        roundMoney(item.precioUnitario),
+      ].join(":"),
+    )
+    .sort()
+    .join("|");
+
+  return [
+    `items=${items}`,
+    `total=${roundMoney(pricing.total)}`,
+    `subtotalFinal=${roundMoney(pricing.subtotalFinal)}`,
+    `subtotalConCodigo=${roundMoney(
+      pricing.subtotalConCodigo ?? pricing.subtotalFinal,
+    )}`,
+    `codigo=${pricing.codigoPromocion ?? ""}`,
+    `envio=${roundMoney(pricing.shippingTotal)}`,
+    `fulfillment=${orderDraft.fulfillmentMethod ?? ""}`,
+  ].join("||");
+}
+
 export class CheckoutAttemptService {
   async startCheckout(
     userId: string,
@@ -68,27 +108,79 @@ export class CheckoutAttemptService {
       );
     }
 
-    const existingByKey =
-      await checkoutAttemptRepository.findByIdempotencyKey(idempotencyKey);
-    if (existingByKey && ACTIVE_ATTEMPT_STATUSES.has(existingByKey.status)) {
-      return this.rehydrateAttemptSession(existingByKey, false);
-    }
-
+    // Recalculamos SIEMPRE el carrito/pricing actual (backend es la fuente de
+    // verdad) antes de decidir si reutilizamos un intento previo. Sin esto, un
+    // carrito modificado reutilizaría una sesión de Stripe con el monto viejo.
     const { cartId, orderDraft, pricing } =
       await carritoService.buildCheckoutOrderDraft(userId, {
         ...body,
         metodoPago,
       } as Parameters<typeof carritoService.buildCheckoutOrderDraft>[1]);
 
+    const currentSignature = computeCartSignature(orderDraft, pricing);
+
+    // 1) Reuso por Idempotency-Key: solo si el carrito/pricing es idéntico.
+    //    Si el cliente reusa la misma key con un carrito distinto, gana el
+    //    carrito nuevo: liberamos el intento viejo y creamos uno nuevo.
+    const existingByKey =
+      await checkoutAttemptRepository.findByIdempotencyKey(idempotencyKey);
+    if (existingByKey && ACTIVE_ATTEMPT_STATUSES.has(existingByKey.status)) {
+      if (this.resolveAttemptSignature(existingByKey) === currentSignature) {
+        checkoutLogger.info("checkout_attempt_reuse_idempotency", {
+          checkoutAttemptId: existingByKey.id,
+          userId,
+          cartId,
+        });
+        return this.rehydrateAttemptSession(existingByKey, false);
+      }
+      checkoutLogger.info("checkout_attempt_invalidate_idempotency", {
+        checkoutAttemptId: existingByKey.id,
+        userId,
+        cartId,
+      });
+      await this.releaseAttempt(
+        existingByKey.id!,
+        "Carrito cambió; se recrea el intento de checkout",
+        {
+          status: CheckoutAttemptStatus.CANCELED,
+          failureCode: "cart_changed",
+          failureMessage:
+            "El carrito cambió respecto al intento previo; se generó uno nuevo",
+        },
+      );
+    }
+
+    // 2) Reuso por usuario+carrito: solo si el carrito/pricing es idéntico.
+    //    Un intento PAID/finalizado nunca se invalida ni recrea.
     const activeAttempt =
       await checkoutAttemptRepository.findActiveByUserAndCart(userId, cartId);
     if (activeAttempt) {
-      checkoutLogger.info("checkout_attempt_reuse_active", {
+      const sameCart =
+        this.resolveAttemptSignature(activeAttempt) === currentSignature;
+      const canInvalidate = ACTIVE_ATTEMPT_STATUSES.has(activeAttempt.status);
+      if (sameCart || !canInvalidate) {
+        checkoutLogger.info("checkout_attempt_reuse_active", {
+          checkoutAttemptId: activeAttempt.id,
+          userId,
+          cartId,
+        });
+        return this.rehydrateAttemptSession(activeAttempt, false);
+      }
+      checkoutLogger.info("checkout_attempt_invalidate_active", {
         checkoutAttemptId: activeAttempt.id,
         userId,
         cartId,
       });
-      return this.rehydrateAttemptSession(activeAttempt, false);
+      await this.releaseAttempt(
+        activeAttempt.id!,
+        "Carrito cambió; se recrea el intento de checkout",
+        {
+          status: CheckoutAttemptStatus.CANCELED,
+          failureCode: "cart_changed",
+          failureMessage:
+            "El carrito cambió respecto al intento previo; se generó uno nuevo",
+        },
+      );
     }
 
     const attempt = await checkoutAttemptRepository.create({
@@ -102,6 +194,7 @@ export class CheckoutAttemptService {
       metodoPago,
       fulfillmentMethod: orderDraft.fulfillmentMethod,
       idempotencyKey,
+      cartSignature: currentSignature,
     });
 
     checkoutLogger.info("checkout_attempt_created", {
@@ -181,6 +274,18 @@ export class CheckoutAttemptService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Obtiene la firma del carrito guardada en el intento. Para documentos
+   * legacy sin `cartSignature`, la deriva del snapshot persistido para
+   * mantener compatibilidad.
+   */
+  private resolveAttemptSignature(attempt: CheckoutAttempt): string {
+    if (attempt.cartSignature) {
+      return attempt.cartSignature;
+    }
+    return computeCartSignature(attempt.orderDraft, attempt.pricingSnapshot);
   }
 
   private async rehydrateAttemptSession(
