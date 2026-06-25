@@ -29,59 +29,12 @@ import { RolUsuario } from "../../models/usuario.model";
  * @returns 500 - Error del servidor
  */
 export const create = async (req: Request, res: Response) => {
-  try {
-    if (!req.user?.uid) {
-      return res.status(401).json({
-        success: false,
-        message: "No autorizado. Se requiere autenticación.",
-      });
-    }
-
-    // Body ya validado por middleware de Zod (validateBody)
-    // Tipos garantizados: usuarioId, items[], direccionEnvio, metodoPago
-    const ordenData = {
-      ...req.body,
-      usuarioId: req.user.uid,
-    };
-
-    console.log(
-      `📦 POST /api/ordenes - Intentando crear orden para usuario autenticado: ${req.user.uid}`,
-    );
-
-    // Llamar al servicio (recalcula totales internamente)
-    const nuevaOrden = await ordenService.createOrden(ordenData);
-
-    return res.status(201).json({
-      success: true,
-      message: "Orden creada exitosamente",
-      data: nuevaOrden,
-    });
-  } catch (error) {
-    console.error("Error en POST /api/ordenes:", error);
-
-    // Determinar código de estado según tipo de error
-    let statusCode = 500;
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-      // Errores de validación de negocio -> 400
-      if (
-        errorMessage.includes("no existe") ||
-        errorMessage.includes("no está disponible") ||
-        errorMessage.includes("stock insuficiente")
-      ) {
-        statusCode = 400;
-      }
-    }
-
-    return res.status(statusCode).json({
-      success: false,
-      message:
-        statusCode === 400
-          ? "Error al procesar la orden"
-          : "Error al crear la orden",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
-  }
+  return res.status(410).json({
+    success: false,
+    code: "LEGACY_ORDER_CREATE_DISABLED",
+    message:
+      "La creación directa de órdenes fue retirada. Inicia el checkout con POST /api/checkout/attempts y completa el pago en Stripe.",
+  });
 };
 
 /**

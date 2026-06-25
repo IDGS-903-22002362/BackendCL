@@ -32,7 +32,6 @@ import inventoryService from "./inventory.service";
 import adminNotificationService from "./admin-notification.service";
 import inventoryReservationService from "./inventory-reservation.service";
 import {
-  completeInventarioPorTalla,
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import pickupLocationService from "./pickup-location.service";
@@ -51,6 +50,7 @@ import {
   MANUAL_FEDEX_STATUS,
   resolveManualShippingZone,
 } from "../config/manual-shipping.config";
+import { getAvailableForVariant } from "../utils/inventory-stock.util";
 
 /**
  * Colección de órdenes en Firestore
@@ -84,6 +84,19 @@ function toStringArray(value: unknown): string[] {
 
 function buildVariantKey(productoId: string, tallaId?: string) {
   return `${productoId}::${tallaId ?? "__GLOBAL__"}`;
+}
+
+function isUnpaidPendingOrder(orden: {
+  estado?: EstadoOrden;
+  paymentStatus?: PaymentState | string;
+}): boolean {
+  if (orden.estado !== EstadoOrden.PENDIENTE) {
+    return false;
+  }
+  const paymentStatus = String(orden.paymentStatus || PaymentState.PENDIENTE)
+    .trim()
+    .toUpperCase();
+  return paymentStatus !== PaymentState.PAGADO;
 }
 
 /**
@@ -122,6 +135,7 @@ export class OrdenService {
     producto: Producto,
     item: { cantidad: number; tallaId?: string; productoId: string },
   ): { available: number; tallaId?: string } {
+    const productData = producto as unknown as Record<string, unknown>;
     const tallaIds = normalizeTallaIds(producto.tallaIds);
 
     if (tallaIds.length === 0) {
@@ -132,7 +146,7 @@ export class OrdenService {
       }
 
       return {
-        available: Math.max(0, Math.floor(Number(producto.existencias ?? 0))),
+        available: getAvailableForVariant(productData, null),
       };
     }
 
@@ -149,16 +163,8 @@ export class OrdenService {
       );
     }
 
-    const inventarioPorTalla = completeInventarioPorTalla(
-      tallaIds,
-      producto.inventarioPorTalla,
-    );
-    const cantidadDisponible =
-      inventarioPorTalla.find((size) => size.tallaId === tallaId)?.cantidad ??
-      0;
-
     return {
-      available: cantidadDisponible,
+      available: getAvailableForVariant(productData, tallaId),
       tallaId,
     };
   }
@@ -254,7 +260,10 @@ export class OrdenService {
    *   - Error al reducir stock (rollback automático)
    *   - Error al guardar en Firestore
    */
-  async createOrden(data: CrearOrdenDTO): Promise<Orden> {
+  async createOrden(
+    data: CrearOrdenDTO,
+    options?: { skipStockRevalidation?: boolean },
+  ): Promise<Orden> {
     try {
       console.log(
         `📝 Creando orden para usuario: ${data.usuarioId} con ${data.items.length} items`,
@@ -367,13 +376,15 @@ const requestedByVariant = new Map<string, number>();
         const requestedSoFar = requestedByVariant.get(variantKey) ?? 0;
         const requestedTotal = requestedSoFar + item.cantidad;
 
-        // Validar stock disponible
-        if (stockContext.available < requestedTotal) {
-          throw new Error(
-            `Stock insuficiente para "${producto.descripcion}". ` +
-              `${stockContext.tallaId ? `Talla: ${stockContext.tallaId}. ` : ""}` +
-              `Disponible: ${stockContext.available}, Solicitado: ${requestedTotal}`,
-          );
+        if (!options?.skipStockRevalidation) {
+          // Validar stock disponible
+          if (stockContext.available < requestedTotal) {
+            throw new Error(
+              `Stock insuficiente para "${producto.descripcion}". ` +
+                `${stockContext.tallaId ? `Talla: ${stockContext.tallaId}. ` : ""}` +
+                `Disponible: ${stockContext.available}, Solicitado: ${requestedTotal}`,
+            );
+          }
         }
         requestedByVariant.set(variantKey, requestedTotal);
 
@@ -1285,8 +1296,16 @@ subtotalFinal: subtotalCalculado,
         };
       });
 
-      console.log(`✅ Se encontraron ${ordenes.length} órdenes`);
-      return ordenes;
+      const userRole = usuarioActual?.rol as RolUsuario | undefined;
+      const esAdmin =
+        userRole === RolUsuario.ADMIN || userRole === RolUsuario.EMPLEADO;
+
+      const visibleOrdenes = esAdmin
+        ? ordenes
+        : ordenes.filter((orden) => !isUnpaidPendingOrder(orden));
+
+      console.log(`✅ Se encontraron ${visibleOrdenes.length} órdenes`);
+      return visibleOrdenes;
     } catch (error) {
       console.error("❌ Error al obtener órdenes:", error);
 
@@ -1355,6 +1374,16 @@ subtotalFinal: subtotalCalculado,
         );
       }
 
+      if (
+        !esAdmin &&
+        isUnpaidPendingOrder({
+          estado: data.estado as EstadoOrden,
+          paymentStatus: data.paymentStatus as PaymentState | string,
+        })
+      ) {
+        return null;
+      }
+
       // Mapear a objeto Orden
       const orden: Orden = {
         id: ordenDoc.id,
@@ -1384,6 +1413,8 @@ subtotalFinal: subtotalCalculado,
         deliveredAt: data.deliveredAt,
         fulfillmentMethod: data.fulfillmentMethod,
         fulfillmentStatus: data.fulfillmentStatus,
+        paymentStatus: data.paymentStatus,
+        preparationStatus: data.preparationStatus,
         pickupLocationId: data.pickupLocationId,
         pickupLocation: data.pickupLocation,
         pickupInstructions: data.pickupInstructions,

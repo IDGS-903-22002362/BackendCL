@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import carritoService from "../../services/carrito.service";
-import { CheckoutFlowError } from "../../models/checkout-pricing.model";
 import {
   shippingQuoteService,
   ShippingQuoteError,
@@ -310,66 +309,12 @@ export const clearCart = async (req: Request, res: Response) => {
  * @returns 500 - Error del servidor
  */
 export const checkout = async (req: Request, res: Response) => {
-  try {
-    if (!req.user?.uid) {
-      return res.status(401).json({
-        success: false,
-        message: "Se requiere autenticación para realizar el checkout",
-      });
-    }
-
-    const usuarioId = req.user.uid as string;
-
-    // Crear orden desde carrito (body ya validado por Zod middleware)
-    const orden = await carritoService.checkout(usuarioId, req.body);
-
-    return res.status(201).json({
-      success: true,
-      message: "Orden creada exitosamente desde el carrito",
-      data: orden,
-    });
-  } catch (error) {
-    console.error("Error en POST /api/carrito/checkout:", error);
-
-    if (error instanceof CheckoutFlowError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        code: error.code,
-        message: error.message,
-        ...(error.data ? { data: error.data } : {}),
-      });
-    }
-
-    let statusCode = 500;
-    if (error instanceof Error) {
-      const msg = error.message.toLowerCase();
-      if (
-        msg.includes("carrito está vacío") ||
-        msg.includes("no existe") ||
-        msg.includes("no está disponible") ||
-        msg.includes("stock insuficiente") ||
-        msg.includes("pickup") ||
-        msg.includes("envío") ||
-        msg.includes("sucursal")
-      ) {
-        statusCode = 400;
-      }
-    }
-
-    return res.status(statusCode).json({
-      success: false,
-      message:
-        statusCode === 400
-          ? error instanceof Error
-            ? error.message
-            : "Error de validación"
-          : "Error al procesar el checkout",
-      error:
-        statusCode === 500 && error instanceof Error
-          ? error.message
-          : undefined,
-    });
-  }
+  return res.status(410).json({
+    success: false,
+    code: "LEGACY_CART_CHECKOUT_DISABLED",
+    message:
+      "El checkout legacy del carrito fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe.",
+  });
 };
 
 export const createFedexShippingQuote = async (req: Request, res: Response) => {

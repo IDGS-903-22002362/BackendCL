@@ -381,7 +381,14 @@ export class CheckoutAttemptService {
       return lock.attempt.orderId;
     }
 
-    const orden = await ordenService.createOrden(attempt.orderDraft);
+    const hasAttemptReservations =
+      await inventoryReservationService.checkoutAttemptHasActiveReservations(
+        attempt.id!,
+      );
+
+    const orden = await ordenService.createOrden(attempt.orderDraft, {
+      skipStockRevalidation: hasAttemptReservations,
+    });
     await inventoryReservationService.migrateReservationsToOrder(
       attempt.id!,
       orden.id!,
@@ -413,9 +420,59 @@ export class CheckoutAttemptService {
       provider: "stripe",
       sourceEventId: input.eventId,
       paymentAttemptId: input.pagoId,
+      paymentConfirmed: true,
     });
 
     return orden.id!;
+  }
+
+  async cancelAttemptForUser(
+    attemptId: string,
+    userId: string,
+  ): Promise<{ attemptId: string; status: CheckoutAttemptStatus }> {
+    const attempt = await checkoutAttemptRepository.getById(attemptId);
+    if (!attempt) {
+      throw new ApiError(404, "Intento de checkout no encontrado");
+    }
+    if (attempt.userId !== userId) {
+      throw new ApiError(403, "No tienes permisos para cancelar este intento");
+    }
+    if (attempt.status === CheckoutAttemptStatus.FINALIZED) {
+      throw new ApiError(
+        409,
+        "El intento de checkout ya fue finalizado con una orden pagada",
+      );
+    }
+    if (!ACTIVE_ATTEMPT_STATUSES.has(attempt.status)) {
+      throw new ApiError(
+        409,
+        "El intento de checkout ya no se puede cancelar",
+      );
+    }
+
+    if (attempt.stripeCheckoutSessionId) {
+      await pagoService
+        .expireStripeCheckoutSessionIfOpen(attempt.stripeCheckoutSessionId)
+        .catch((error) => {
+          checkoutLogger.warn("checkout_attempt_stripe_expire_failed", {
+            checkoutAttemptId: attemptId,
+            stripeSessionId: attempt.stripeCheckoutSessionId,
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
+
+    await this.releaseAttempt(attemptId, "Cancelado por el usuario", {
+      status: CheckoutAttemptStatus.CANCELED,
+      failureCode: "user_canceled",
+      failureMessage: "El usuario canceló el intento de checkout",
+    });
+
+    return {
+      attemptId,
+      status: CheckoutAttemptStatus.CANCELED,
+    };
   }
 
   async releaseAttempt(
@@ -431,7 +488,30 @@ export class CheckoutAttemptService {
     if (!attempt) {
       return;
     }
+
+    if (attempt.status === CheckoutAttemptStatus.FINALIZED) {
+      return;
+    }
+
+    const hasActiveReservations =
+      await inventoryReservationService.checkoutAttemptHasActiveReservations(
+        checkoutAttemptId,
+      );
+
     if (TERMINAL_CHECKOUT_ATTEMPT_STATUSES.has(attempt.status)) {
+      if (!hasActiveReservations) {
+        return;
+      }
+      await inventoryReservationService.releaseCheckoutAttemptReservations({
+        checkoutAttemptId,
+        motivo: `${motivo} (reparación de reservas huérfanas)`,
+        usuarioId: attempt.userId,
+      });
+      checkoutLogger.info("checkout_attempt_orphan_reservations_released", {
+        checkoutAttemptId,
+        motivo,
+        priorStatus: attempt.status,
+      });
       return;
     }
 
@@ -455,7 +535,7 @@ export class CheckoutAttemptService {
   }
 
   async expireStaleAttempts(): Promise<number> {
-    const expiredIds = await checkoutAttemptRepository.expireDueAttempts();
+    const expiredIds = await checkoutAttemptRepository.findDueAttemptIds();
     for (const attemptId of expiredIds) {
       await this.releaseAttempt(attemptId, "Intento de checkout expirado", {
         status: CheckoutAttemptStatus.EXPIRED,

@@ -85,3 +85,32 @@ export const getAttemptStatus = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const cancelAttempt = async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthenticatedUid(req);
+    const result = await checkoutAttemptService.cancelAttemptForUser(
+      req.params.attemptId,
+      userId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Intento de checkout cancelado",
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_cancel",
+      });
+    }
+
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al cancelar el intento de checkout",
+      fallbackCode: "CHECKOUT_CANCEL_FAILED",
+      logLabel: "checkout_cancel",
+    });
+  }
+};

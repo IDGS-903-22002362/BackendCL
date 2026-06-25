@@ -12,7 +12,7 @@ import {
 } from "../../models/checkout-pricing.model";
 import { Producto } from "../../models/producto.model";
 import { checkoutShippingService, CheckoutShippingService } from "./checkout-shipping.service";
-import { normalizeTallaIds, completeInventarioPorTalla } from "../../utils/size-inventory.util";
+import { normalizeTallaIds } from "../../utils/size-inventory.util";
 import { ofertasService, OfertasService } from "../ofertas.service";
 import {
   ProductoOfertaBase,
@@ -20,6 +20,7 @@ import {
 } from "../../utils/ofertas-pricing.util";
 import { Oferta } from "../../models/ofertas.model";
 import { codigosPromocionService } from "../codigos-promocion.service";
+import { getAvailableForVariant } from "../../utils/inventory-stock.util";
 
 const CARRITOS_COLLECTION = "carritos";
 const PRODUCTOS_COLLECTION = "productos";
@@ -397,6 +398,7 @@ export class CheckoutPricingService {
     product: Producto,
     item: ItemCarrito,
   ): { available: number; tallaId?: string } {
+    const productData = product as unknown as Record<string, unknown>;
     const tallaIds = normalizeTallaIds(product.tallaIds);
 
     if (tallaIds.length === 0) {
@@ -409,7 +411,7 @@ export class CheckoutPricingService {
       }
 
       return {
-        available: Math.max(0, Math.floor(Number(product.existencias ?? 0))),
+        available: getAvailableForVariant(productData, null),
       };
     }
 
@@ -430,15 +432,8 @@ export class CheckoutPricingService {
       );
     }
 
-    const inventarioPorTalla = completeInventarioPorTalla(
-      tallaIds,
-      product.inventarioPorTalla,
-    );
-    const available =
-      inventarioPorTalla.find((entry) => entry.tallaId === tallaId)?.cantidad ?? 0;
-
     return {
-      available,
+      available: getAvailableForVariant(productData, tallaId),
       tallaId,
     };
   }

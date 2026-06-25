@@ -92,7 +92,8 @@ export class CheckoutAttemptRepository {
     return attempt;
   }
 
-  async expireDueAttempts(limit = 100): Promise<string[]> {
+  /** Devuelve IDs de intentos vencidos sin mutar estado (releaseAttempt marca terminal). */
+  async findDueAttemptIds(limit = 100): Promise<string[]> {
     const now = Timestamp.now();
     const snap = await this.collection
       .where("status", "in", [
@@ -104,20 +105,7 @@ export class CheckoutAttemptRepository {
       .limit(limit)
       .get();
 
-    const expiredIds: string[] = [];
-    for (const doc of snap.docs) {
-      await doc.ref.set(
-        {
-          status: CheckoutAttemptStatus.EXPIRED,
-          updatedAt: now,
-          failureCode: "attempt_expired",
-          failureMessage: "El intento de checkout expiro por tiempo",
-        },
-        { merge: true },
-      );
-      expiredIds.push(doc.id);
-    }
-    return expiredIds;
+    return snap.docs.map((doc) => doc.id);
   }
 
   async tryFinalize(

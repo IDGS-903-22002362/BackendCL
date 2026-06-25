@@ -7,6 +7,7 @@ import {
   TipoMovimientoInventario,
 } from "../models/inventario.model";
 import { Orden } from "../models/orden.model";
+import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
 import { InventarioPorTallaExtended } from "../models/producto.model";
 import {
   buildFirestoreInventoryPatch,
@@ -408,6 +409,18 @@ class InventoryReservationService {
     const snapshot = await firestoreTienda
       .collection(RESERVAS_INVENTARIO_COLLECTION)
       .where("ordenId", "==", ordenId)
+      .where("estado", "==", EstadoReservaInventario.ACTIVA)
+      .limit(1)
+      .get();
+    return !snapshot.empty;
+  }
+
+  async checkoutAttemptHasActiveReservations(
+    checkoutAttemptId: string,
+  ): Promise<boolean> {
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("checkoutAttemptId", "==", checkoutAttemptId)
       .where("estado", "==", EstadoReservaInventario.ACTIVA)
       .limit(1)
       .get();
@@ -885,6 +898,29 @@ class InventoryReservationService {
     return ordenIds.length;
   }
 
+  private async orderHasConfirmedPayment(ordenId: string): Promise<boolean> {
+    const pagosSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", ordenId)
+      .limit(5)
+      .get();
+
+    return pagosSnapshot.docs.some((doc) => {
+      const pago = doc.data() as {
+        estado?: EstadoPago;
+        status?: PaymentStatus | string;
+      };
+      const status = String(pago.status || "").toLowerCase();
+      return (
+        pago.estado === EstadoPago.COMPLETADO ||
+        status === PaymentStatus.PAID ||
+        status === PaymentStatus.AUTHORIZED ||
+        status === "paid" ||
+        status === "succeeded"
+      );
+    });
+  }
+
   async reconcilePaidOrdersWithoutSale(limit = 50): Promise<number> {
     const snapshot = await firestoreTienda
       .collection(ORDENES_COLLECTION)
@@ -895,6 +931,11 @@ class InventoryReservationService {
     let reconciled = 0;
     for (const doc of snapshot.docs) {
       const ordenId = doc.id;
+      const hasConfirmedPayment = await this.orderHasConfirmedPayment(ordenId);
+      if (!hasConfirmedPayment) {
+        continue;
+      }
+
       const hasSale = await inventoryService.orderHasSaleMovements(ordenId);
       if (hasSale) {
         continue;

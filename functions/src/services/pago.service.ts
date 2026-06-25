@@ -1678,6 +1678,14 @@ async createStripeCheckoutSession(
     return { sessionId: session.id, clientSecret: session.client_secret };
   }
 
+  async expireStripeCheckoutSessionIfOpen(sessionId: string): Promise<void> {
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.status === "open") {
+      await stripe.checkout.sessions.expire(sessionId);
+    }
+  }
+
   async getPaymentStatusSummary(
     pagoId: string,
   ): Promise<{ status?: string } | null> {

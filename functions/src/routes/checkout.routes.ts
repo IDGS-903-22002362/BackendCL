@@ -33,4 +33,11 @@ router.get(
   checkoutController.getAttemptStatus,
 );
 
+router.post(
+  "/attempts/:attemptId/cancel",
+  authMiddleware,
+  validateParams(attemptIdParamSchema),
+  checkoutController.cancelAttempt,
+);
+
 export default router;

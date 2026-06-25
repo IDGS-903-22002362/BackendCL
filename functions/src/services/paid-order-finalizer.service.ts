@@ -1,6 +1,7 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../config/firebase";
 import { Orden, FulfillmentMethod } from "../models/orden.model";
+import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
 import logger from "../utils/logger";
 import { getFedexConfig } from "../modules/shipping/fedex/fedex.config";
 import {
@@ -33,6 +34,8 @@ export interface FinalizePaidOrderInput {
   sourceEventId?: string;
   paymentAttemptId?: string;
   requestedBy?: string;
+  /** Solo usar cuando el caller ya verificó el pago con el proveedor (p. ej. webhook Stripe paid). */
+  paymentConfirmed?: boolean;
 }
 
 const safeErrorMessage = (error: unknown): string =>
@@ -40,7 +43,69 @@ const safeErrorMessage = (error: unknown): string =>
     ? error.message.slice(0, 500)
     : "Error desconocido al generar guía FedEx";
 
+const PAID_PAYMENT_STATUSES = new Set<string>([
+  PaymentStatus.PAID,
+  PaymentStatus.AUTHORIZED,
+  "paid",
+  "succeeded",
+  "completado",
+  "completed",
+]);
+
 class PaidOrderFinalizerService {
+  private async assertPaymentConfirmed(
+    input: FinalizePaidOrderInput,
+  ): Promise<void> {
+    if (input.paymentAttemptId) {
+      const pagoDoc = await firestoreTienda
+        .collection(COLECCION_PAGOS)
+        .doc(input.paymentAttemptId)
+        .get();
+      if (pagoDoc.exists) {
+        const pago = pagoDoc.data() as {
+          estado?: EstadoPago;
+          status?: PaymentStatus | string;
+        };
+        const status = String(pago.status || "").toLowerCase();
+        if (
+          pago.estado === EstadoPago.COMPLETADO ||
+          PAID_PAYMENT_STATUSES.has(status)
+        ) {
+          return;
+        }
+      }
+    }
+
+    const pagosSnapshot = await firestoreTienda
+      .collection(COLECCION_PAGOS)
+      .where("ordenId", "==", input.orderId)
+      .orderBy("createdAt", "desc")
+      .limit(5)
+      .get();
+
+    const hasConfirmedPayment = pagosSnapshot.docs.some((doc) => {
+      const pago = doc.data() as {
+        estado?: EstadoPago;
+        status?: PaymentStatus | string;
+      };
+      const status = String(pago.status || "").toLowerCase();
+      return (
+        pago.estado === EstadoPago.COMPLETADO ||
+        PAID_PAYMENT_STATUSES.has(status)
+      );
+    });
+
+    if (!hasConfirmedPayment) {
+      paidOrderFinalizerLogger.warn("finalize_paid_order_skipped_unconfirmed_payment", {
+        orderId: input.orderId,
+        paymentAttemptId: input.paymentAttemptId,
+      });
+      throw new Error(
+        "No se puede finalizar la orden: el pago no está confirmado",
+      );
+    }
+  }
+
   private async writePaymentConfirmedEvent(input: FinalizePaidOrderInput): Promise<void> {
     const eventId = `payment_confirmed_${input.orderId}`;
     try {
@@ -137,6 +202,10 @@ class PaidOrderFinalizerService {
     }
 
     const order = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
+
+    if (!input.paymentConfirmed) {
+      await this.assertPaymentConfirmed(input);
+    }
 
     const { default: ordenService } = await import("./orden.service");
     await ordenService.commitStockForOrder(input.orderId);

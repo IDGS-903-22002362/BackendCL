@@ -11,23 +11,6 @@ const getAuthenticatedUid = (req: Request): string => {
   return req.user.uid;
 };
 
-const getOptionalIdempotencyKey = (req: Request): string | undefined => {
-  const raw = req.header("Idempotency-Key");
-  if (!raw) {
-    return undefined;
-  }
-
-  const normalized = raw.trim();
-  if (normalized.length < 8 || normalized.length > 255) {
-    throw new ApiError(
-      400,
-      "Idempotency-Key debe tener entre 8 y 255 caracteres",
-    );
-  }
-
-  return normalized;
-};
-
 const getRawWebhookBody = (req: Request): Buffer => {
   if (Buffer.isBuffer(req.body) && req.body.length > 0) {
     return req.body;
@@ -74,42 +57,12 @@ export const getConfig = async (_req: Request, res: Response) => {
 };
 
 export const createPaymentIntent = async (req: Request, res: Response) => {
-  try {
-    const userId = getAuthenticatedUid(req);
-
-    const result = await pagoService.createStripePaymentIntent({
-      orderId: req.body.orderId,
-      userId,
-      currency: req.body.currency,
-      customerId: req.body.customerId,
-      savePaymentMethod: req.body.savePaymentMethod,
-      shipping: req.body.shipping,
-      idempotencyKey: getOptionalIdempotencyKey(req),
-    });
-
-    return res.status(result.created ? 201 : 200).json({
-      success: true,
-      message: result.created
-        ? "PaymentIntent creado exitosamente"
-        : "PaymentIntent reutilizado por idempotencia",
-      data: {
-        clientSecret: result.clientSecret,
-        paymentIntentId: result.paymentIntentId,
-        paymentId: result.pagoId,
-        status: result.status,
-        stripeCustomerId: result.stripeCustomerId,
-      },
-    });
-  } catch (error) {
-    return respondStripeError(
-      res,
-      req,
-      error,
-      "Error interno al crear PaymentIntent",
-      "STRIPE_PAYMENT_INTENT_FAILED",
-      "stripe_create_payment_intent",
-    );
-  }
+  return res.status(410).json({
+    success: false,
+    code: "LEGACY_STRIPE_PAYMENT_INTENT_DISABLED",
+    message:
+      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Embedded Checkout.",
+  });
 };
 
 export const getPaymentIntent = async (req: Request, res: Response) => {
@@ -137,42 +90,12 @@ export const getPaymentIntent = async (req: Request, res: Response) => {
 };
 
 export const createCheckoutSession = async (req: Request, res: Response) => {
-  try {
-    const userId = getAuthenticatedUid(req);
-
-    const result = await pagoService.createStripeCheckoutSession({
-      orderId: req.body.orderId,
-      userId,
-      successUrl: req.body.successUrl,
-      cancelUrl: req.body.cancelUrl,
-      idempotencyKey: getOptionalIdempotencyKey(req),
-    });
-
-   return res.status(result.created ? 201 : 200).json({
-  success: true,
-  message: result.created
-    ? "Checkout Session creada exitosamente"
-    : "Checkout Session reutilizada por idempotencia",
-  data: {
-    sessionId: result.sessionId,
-    clientSecret: result.clientSecret,
-    url: result.url,
-    pagoId: result.pagoId,
-    paymentId: result.pagoId,
-    stripeCustomerId: result.stripeCustomerId,
-    created: result.created,
-  },
-});
-  } catch (error) {
-    return respondStripeError(
-      res,
-      req,
-      error,
-      "Error interno al crear Checkout Session",
-      "STRIPE_CHECKOUT_SESSION_FAILED",
-      "stripe_create_checkout_session",
-    );
-  }
+  return res.status(410).json({
+    success: false,
+    code: "LEGACY_STRIPE_CHECKOUT_SESSION_DISABLED",
+    message:
+      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Embedded Checkout.",
+  });
 };
 
 export const getCheckoutSession = async (req: Request, res: Response) => {
