@@ -150,6 +150,28 @@ class PaidOrderFinalizerService {
 
     await this.writePaymentConfirmedEvent(input);
 
+    try {
+      const { default: adminNotificationService } = await import(
+        "./admin-notification.service"
+      );
+      const pagoSnapshot = await firestoreTienda
+        .collection("pagos")
+        .where("ordenId", "==", input.orderId)
+        .orderBy("createdAt", "desc")
+        .limit(1)
+        .get();
+      const pagoId = pagoSnapshot.docs[0]?.id ?? input.orderId;
+      await adminNotificationService.notifyPaymentConfirmed(
+        input.orderId,
+        pagoId,
+      );
+    } catch (error) {
+      paidOrderFinalizerLogger.error("admin_notification_payment_confirmed_failed", {
+        orderId: input.orderId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     if (
       order.fulfillmentMethod === FulfillmentMethod.PICKUP ||
       order.shipping?.provider !== "FEDEX" ||

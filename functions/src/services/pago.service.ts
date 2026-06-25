@@ -2390,6 +2390,24 @@ async createStripeCheckoutSession(
     }
   }
 
+  private async emitAdminPaymentFailedNotification(
+    pagoId: string,
+    ordenId: string,
+  ): Promise<void> {
+    try {
+      const { default: adminNotificationService } = await import(
+        "./admin-notification.service"
+      );
+      await adminNotificationService.notifyPaymentFailed(ordenId, pagoId);
+    } catch (error) {
+      console.error("admin_notification_payment_failed_emit_error", {
+        pagoId,
+        ordenId,
+        message: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   private async recordWebhookEventIfNotFinalized(
     pagoRef: FirebaseFirestore.DocumentReference,
     eventId: string,
@@ -2667,6 +2685,10 @@ async createStripeCheckoutSession(
     });
 
     await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+    await this.emitAdminPaymentFailedNotification(
+      pagoMatch.pagoId,
+      pagoMatch.ordenId,
+    );
 
     return {
       outcome: "processed",
@@ -3172,6 +3194,10 @@ async createStripeCheckoutSession(
     });
 
     await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+    await this.emitAdminPaymentFailedNotification(
+      pagoMatch.pagoId,
+      pagoMatch.ordenId,
+    );
 
     return {
       outcome: "processed",
@@ -3253,6 +3279,10 @@ async createStripeCheckoutSession(
     });
 
     await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+    await this.emitAdminPaymentFailedNotification(
+      pagoMatch.pagoId,
+      pagoMatch.ordenId,
+    );
 
     return {
       outcome: "processed",
@@ -3326,6 +3356,10 @@ async createStripeCheckoutSession(
     });
 
     await ordenService.releaseUnpaidOrder(pagoMatch.ordenId);
+    await this.emitAdminPaymentFailedNotification(
+      pagoMatch.pagoId,
+      pagoMatch.ordenId,
+    );
 
     return {
       outcome: "processed",

@@ -1,8 +1,31 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Todo el acceso a datos pasa por Cloud Functions (Admin SDK).
-    // Clientes web/móvil no deben leer ni escribir Firestore directamente.
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdminStaff() {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        request.auth.token.rol in ['ADMIN', 'EMPLEADO', 'SUPER_ADMIN']
+      );
+    }
+
+    // Notificaciones sanitizadas escritas solo por backend (Admin SDK).
+    match /adminNotificaciones/{notificationId} {
+      allow read: if isAdminStaff();
+      allow write: if false;
+    }
+
+    // Estado de lectura por usuario; escritura solo vía REST/backend.
+    match /adminNotificationReads/{userId} {
+      allow get: if isAdminStaff() && request.auth.uid == userId;
+      allow list: if false;
+      allow write: if false;
+    }
+
+    // Todo lo demás sigue bloqueado: acceso vía Cloud Functions.
     match /{document=**} {
       allow read, write: if false;
     }

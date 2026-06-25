@@ -16,8 +16,11 @@ import {
 } from "../models/inventario.model";
 import { RolUsuario } from "../models/usuario.model";
 import { EstadoOrden } from "../models/orden.model";
-import { COLECCION_PAGOS, EstadoPago } from "../models/pago.model";
 import productService from "./product.service";
+import {
+  ADMIN_NOTIFICACIONES_COLLECTION,
+  adminNotificationService,
+} from "./admin-notification.service";
 import {
   completeInventarioPorTalla,
   normalizeTallaIds,
@@ -359,6 +362,8 @@ class InventoryService {
       }
     }
 
+    void adminNotificationService.emitStockAlertsForProduct(payload.productoId);
+
     return movimiento;
   }
 
@@ -499,6 +504,8 @@ class InventoryService {
         movimiento,
       );
     }
+
+    void adminNotificationService.emitStockAlertsForProduct(payload.productoId);
 
     return {
       movimiento,
@@ -874,164 +881,33 @@ class InventoryService {
   }
 
   async listAdminNotifications(userId: string) {
-    const since = admin.firestore.Timestamp.fromDate(
-      new Date(Date.now() - 72 * 60 * 60 * 1000),
-    );
+    const since = adminNotificationService.getNotificationWindowStart();
     const readIds = await this.getAdminReadNotificationIds(userId);
-    const items: Array<{
-      id: string;
-      type: string;
-      title: string;
-      message: string;
-      href: string;
-      createdAt: string;
-      read: boolean;
-    }> = [];
 
-    const [ordersSnapshot, paymentsSnapshot, alertsResult] = await Promise.all([
-      firestoreTienda
-        .collection(ORDENES_COLLECTION)
-        .where("createdAt", ">=", since)
-        .orderBy("createdAt", "desc")
-        .limit(40)
-        .get(),
-      firestoreTienda
-        .collection(COLECCION_PAGOS)
-        .where("updatedAt", ">=", since)
-        .orderBy("updatedAt", "desc")
-        .limit(40)
-        .get(),
-      this.listLowStockAlerts({ limit: 15, soloCriticas: true }),
-    ]);
+    const snapshot = await firestoreTienda
+      .collection(ADMIN_NOTIFICACIONES_COLLECTION)
+      .where("createdAt", ">=", since)
+      .orderBy("createdAt", "desc")
+      .limit(30)
+      .get();
 
-    ordersSnapshot.docs.forEach((doc) => {
+    const items = snapshot.docs.map((doc) => {
       const data = doc.data();
-      const estado = String(data.estado ?? "");
-      if (estado === EstadoOrden.CANCELADA || estado === EstadoOrden.ENTREGADA) {
-        return;
-      }
-
-      const type = estado === EstadoOrden.PENDIENTE ? "order_new" : "order_pending";
-      const id = `${type}:${doc.id}`;
-      items.push({
-        id,
-        type,
-        title:
-          type === "order_new"
-            ? "Nueva orden recibida"
-            : "Orden pendiente de atencion",
-        message: `Orden ${doc.id.slice(0, 8).toUpperCase()} (${estado})`,
-        href: `/admin/ordenes?orden=${doc.id}`,
+      return {
+        id: doc.id,
+        type: String(data.type ?? ""),
+        title: String(data.title ?? ""),
+        message: String(data.message ?? ""),
+        href: String(data.href ?? ""),
         createdAt:
           data.createdAt?.toDate?.().toISOString() ?? new Date().toISOString(),
-        read: readIds.has(id),
-      });
+        read: readIds.has(doc.id),
+      };
     });
-
-    paymentsSnapshot.docs.forEach((doc) => {
-      const data = doc.data();
-      const estado = String(data.estado ?? "") as EstadoPago;
-      if (estado !== EstadoPago.COMPLETADO && estado !== EstadoPago.FALLIDO) {
-        return;
-      }
-
-      const ordenId = String(data.ordenId ?? "");
-      if (!ordenId) {
-        return;
-      }
-
-      const type =
-        estado === EstadoPago.FALLIDO ? "payment_failed" : "payment_confirmed";
-      const id = `${type}:${doc.id}`;
-      items.push({
-        id,
-        type,
-        title: estado === EstadoPago.FALLIDO ? "Pago fallido" : "Pago confirmado",
-        message:
-          estado === EstadoPago.FALLIDO
-            ? `Pago fallido en orden ${ordenId.slice(0, 8).toUpperCase()}`
-            : `Pago confirmado en orden ${ordenId.slice(0, 8).toUpperCase()}`,
-        href: `/admin/ordenes?orden=${ordenId}`,
-        createdAt:
-          data.updatedAt?.toDate?.().toISOString() ??
-          data.createdAt?.toDate?.().toISOString() ??
-          new Date().toISOString(),
-        read: readIds.has(id),
-      });
-    });
-
-    const stockNotifications: Array<{
-      id: string;
-      type: string;
-      title: string;
-      message: string;
-      href: string;
-      createdAt: string;
-      read: boolean;
-      deficit: number;
-    }> = [];
-
-    alertsResult.alertas.forEach((alert) => {
-      const stockEvents: Array<{
-        idSuffix: string;
-        message: string;
-        tallaId?: string;
-        deficit: number;
-      }> = [];
-
-      if (alert.globalBajoStock) {
-        stockEvents.push({
-          idSuffix: "global",
-          message: `${alert.descripcion} (${alert.clave}) · ${alert.existencias} disponibles`,
-          deficit: Math.max(0, alert.stockMinimoGlobal - alert.existencias),
-        });
-      }
-
-      for (const talla of alert.tallasBajoStock) {
-        stockEvents.push({
-          idSuffix: `talla:${talla.tallaId}`,
-          tallaId: talla.tallaId,
-          message: `${alert.descripcion} (${alert.clave}) · talla ${talla.tallaId}: ${talla.cantidadActual}/${talla.minimo}`,
-          deficit: talla.deficit,
-        });
-      }
-
-      for (const event of stockEvents) {
-        const tallaQuery = event.tallaId
-          ? `&talla=${encodeURIComponent(event.tallaId)}`
-          : "";
-        const id = `stock_low:${alert.productoId}:${event.idSuffix}`;
-
-        stockNotifications.push({
-          id,
-          type: "stock_low",
-          title: "Alerta de stock bajo",
-          message: event.message,
-          href: `/admin/inventario/movimientos?producto=${encodeURIComponent(alert.productoId)}${tallaQuery}`,
-          createdAt: new Date().toISOString(),
-          read: readIds.has(id),
-          deficit: event.deficit,
-        });
-      }
-    });
-
-    stockNotifications
-      .sort((a, b) => b.deficit - a.deficit)
-      .slice(0, 10)
-      .forEach(({ deficit: _deficit, ...notification }) => {
-        items.push(notification);
-      });
-
-    const sorted = items
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      )
-      .slice(0, 30);
 
     return {
-      items: sorted,
-      unreadCount: sorted.filter((item) => !item.read).length,
+      items,
+      unreadCount: items.filter((item) => !item.read).length,
     };
   }
 

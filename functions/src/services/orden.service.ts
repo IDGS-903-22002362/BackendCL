@@ -29,6 +29,7 @@ import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model
 import { RolUsuario } from "../models/usuario.model";
 import { TipoMovimientoInventario } from "../models/inventario.model";
 import inventoryService from "./inventory.service";
+import adminNotificationService from "./admin-notification.service";
 import inventoryReservationService from "./inventory-reservation.service";
 import {
   completeInventarioPorTalla,
@@ -747,6 +748,7 @@ subtotalFinal: subtotalCalculado,
       // - Enviar email al usuario con detalles de la orden
       // - Registrar en logs de auditoría
       await this.enqueueOrderNotificationEvent("order_created", ordenCreada);
+      void adminNotificationService.notifyOrderNew(docRef.id);
 
       return ordenCreada;
     } catch (error) {
