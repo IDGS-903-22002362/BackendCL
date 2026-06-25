@@ -1,11 +1,13 @@
 // checkout attempt service
 import { Timestamp } from "firebase-admin/firestore";
 import {
+  CheckoutAttempt,
   CheckoutAttemptStatus,
   StartCheckoutAttemptResult,
   TERMINAL_CHECKOUT_ATTEMPT_STATUSES,
 } from "../../models/checkout-attempt.model";
-import { MetodoPago } from "../../models/orden.model";
+import { CrearOrdenDTO, MetodoPago } from "../../models/orden.model";
+import { CheckoutPricingSnapshot } from "../../models/checkout-pricing.model";
 import { ApiError } from "../../utils/error-handler";
 import logger from "../../utils/logger";
 import carritoService from "../carrito.service";

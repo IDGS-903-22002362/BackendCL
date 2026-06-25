@@ -199,7 +199,13 @@ export const mergeCarritoSchema = z
  * El cliente solo envía dirección de envío y método de pago.
  * El usuarioId se extrae del token de autenticación (authMiddleware).
  */
-export const checkoutCarritoSchema = z
+/**
+ * Objeto base del checkout de carrito (sin refinamientos).
+ * Se mantiene `.strict()` para prevenir mass assignment. Se extrae como base
+ * para poder reutilizar los mismos campos en otros endpoints (p. ej. el
+ * endpoint de intentos de checkout con Stripe) sin duplicar la definición.
+ */
+const checkoutCarritoBaseObject = z
   .object({
     fulfillmentMethod: fulfillmentMethodSchema
       .optional()
@@ -238,45 +244,90 @@ export const checkoutCarritoSchema = z
       .max(1000, "Las notas no pueden exceder 1000 caracteres")
       .optional(),
   })
-  .strict()
-  .superRefine((data, ctx) => {
-    const method = data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
-    if (method === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+  .strict();
+
+/**
+ * Refinamiento compartido para validar consistencia entre el método de
+ * fulfillment y los datos requeridos (dirección para DELIVERY, sucursal y
+ * contacto para PICKUP).
+ */
+const checkoutCarritoRefinement = (
+  data: z.infer<typeof checkoutCarritoBaseObject>,
+  ctx: z.RefinementCtx,
+): void => {
+  const method = data.fulfillmentMethod ?? FulfillmentMethod.DELIVERY;
+  if (method === FulfillmentMethod.DELIVERY && !data.direccionEnvio) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["direccionEnvio"],
+      message: "La dirección de envío es requerida para DELIVERY",
+    });
+  }
+
+  if (method === FulfillmentMethod.DELIVERY) {
+    return;
+  }
+
+  if (method === FulfillmentMethod.PICKUP) {
+    if (!data.pickupLocationId) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["direccionEnvio"],
-        message: "La dirección de envío es requerida para DELIVERY",
+        path: ["pickupLocationId"],
+        message: "La sucursal de pickup es requerida para PICKUP",
       });
     }
-
-    if (method === FulfillmentMethod.DELIVERY) {
-      return;
+    if (!data.pickupContact) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pickupContact"],
+        message: "El contacto de pickup es requerido para PICKUP",
+      });
     }
-
-    if (method === FulfillmentMethod.PICKUP) {
-      if (!data.pickupLocationId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["pickupLocationId"],
-          message: "La sucursal de pickup es requerida para PICKUP",
-        });
-      }
-      if (!data.pickupContact) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["pickupContact"],
-          message: "El contacto de pickup es requerido para PICKUP",
-        });
-      }
-      if (typeof data.costoEnvio === "number" && data.costoEnvio > 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["costoEnvio"],
-          message: "PICKUP no permite costo de envío",
-        });
-      }
+    if (typeof data.costoEnvio === "number" && data.costoEnvio > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["costoEnvio"],
+        message: "PICKUP no permite costo de envío",
+      });
     }
-  });
+  }
+};
+
+export const checkoutCarritoSchema = checkoutCarritoBaseObject.superRefine(
+  checkoutCarritoRefinement,
+);
+
+/**
+ * URL de retorno de Stripe Embedded Checkout.
+ *
+ * No se usa `z.string().url()` porque el frontend inserta placeholders como
+ * `{CHECKOUT_ATTEMPT_ID}` y `{CHECKOUT_SESSION_ID}` que el backend reemplaza
+ * antes de crear la sesión. Validamos como string no vacía con longitud
+ * acotada para evitar abuso. El servicio vuelve a exigir que no sea vacía.
+ */
+const checkoutReturnUrlSchema = z
+  .string({
+    required_error: "La URL de retorno es requerida",
+    invalid_type_error: "La URL de retorno debe ser una cadena de texto",
+  })
+  .trim()
+  .min(1, "La URL de retorno no puede estar vacía")
+  .max(2048, "La URL de retorno es demasiado larga");
+
+/**
+ * Schema para iniciar un intento de checkout con Stripe Embedded Checkout.
+ * POST /api/checkout/attempts
+ *
+ * Incluye todos los campos del checkout de carrito más `successUrl` y
+ * `cancelUrl`, que el frontend envía y el servicio requiere.
+ */
+export const startCheckoutAttemptSchema = checkoutCarritoBaseObject
+  .extend({
+    successUrl: checkoutReturnUrlSchema,
+    cancelUrl: checkoutReturnUrlSchema,
+  })
+  .strict()
+  .superRefine(checkoutCarritoRefinement);
 
 export const createCartFedexQuoteSchema = z
   .object({

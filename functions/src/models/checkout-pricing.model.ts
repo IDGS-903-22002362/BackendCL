@@ -99,6 +99,16 @@ export type CheckoutPricingSnapshot = {
   discountTotal: number;
   shippingTotal: number;
   total: number;
+  /**
+   * Subtotal tras aplicar el código promocional sobre el subtotal con ofertas.
+   * Cuando no hay código aplicable es igual a `subtotalFinal`.
+   */
+  subtotalConCodigo?: number;
+  /** Descuento generado únicamente por el código promocional (no incluye ofertas). */
+  codigoDescuento?: number;
+  codigoPromocion?: string;
+  codigoPromocionId?: string | null;
+  codigoPromocionTitulo?: string | null;
   items: CheckoutItemPricingSnapshot[];
   shipping: CheckoutShippingSnapshot;
   warnings: string[];
@@ -115,6 +125,8 @@ export type CheckoutPricingInput = {
   shippingQuoteId?: string;
   selectedShippingOptionId?: string;
   selectedServiceType?: string;
+  /** Código promocional ingresado por el cliente (se valida/aplica en backend). */
+  codigoPromocion?: string;
 };
 
 export type CheckoutFlowErrorCode =
@@ -130,6 +142,7 @@ export type CheckoutFlowErrorCode =
   | "FEDEX_SERVICE_NOT_AVAILABLE"
   | "FEDEX_RATE_UNAVAILABLE"
   | "PAYMENT_PROVIDER_NOT_SUPPORTED"
+  | "CHECKOUT_CODE_NOT_APPLICABLE"
   | "CHECKOUT_TOTAL_INVALID";
 
 export class CheckoutFlowError extends Error {
