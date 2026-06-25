@@ -160,34 +160,28 @@ class ProductCardsService {
           }
         | undefined;
 
-      const storedOffer = readStoredOfferSnapshot(product!);
       const precioOriginal = Math.max(0, Number(product!.precioPublico || 0));
 
-      if (
-        storedOffer?.tieneOfertaActiva === true &&
-        typeof storedOffer.precioOferta === "number" &&
-        storedOffer.precioOferta > 0 &&
-        storedOffer.precioOferta < precioOriginal
-      ) {
-        offer = {
-          precioFinal: storedOffer.precioOferta,
-          ofertaId: storedOffer.ofertaAplicadaId || "",
-          ofertaTitulo: storedOffer.ofertaTitulo || "Oferta",
-          descuentoTotal: Math.max(0, precioOriginal - storedOffer.precioOferta),
-          porcentajeDescuento: storedOffer.porcentajeDescuento,
-        };
-      } else if (withOffers && product) {
+      if (withOffers && product) {
+        // Fuente de verdad: ofertas activas + precio ACTUAL (mismo criterio que
+        // catálogo, ficha y checkout). Nunca usar el precioOferta congelado del
+        // snapshot, que queda desfasado al cambiar el precio del producto.
         const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
           id: product.id || productId,
           precioPublico: product.precioPublico,
           categoriaId: product.categoriaId,
           lineaId: product.lineaId,
+          tallaIds: product.tallaIds ?? [],
         });
 
-        if (mejorOferta) {
+        if (
+          mejorOferta &&
+          mejorOferta.precioFinal > 0 &&
+          mejorOferta.precioFinal < precioOriginal
+        ) {
           const descuentoTotal = Math.max(
             0,
-            product.precioPublico - mejorOferta.precioFinal,
+            precioOriginal - mejorOferta.precioFinal,
           );
           offer = {
             precioFinal: mejorOferta.precioFinal,
@@ -195,9 +189,28 @@ class ProductCardsService {
             ofertaTitulo: mejorOferta.oferta.titulo || "Oferta",
             descuentoTotal,
             porcentajeDescuento:
-              product.precioPublico > 0
-                ? Math.round((descuentoTotal / product.precioPublico) * 100)
+              precioOriginal > 0
+                ? Math.round((descuentoTotal / precioOriginal) * 100)
                 : 0,
+          };
+        }
+      } else {
+        // Respaldo cuando no se cargan ofertas (withOffers=false): snapshot
+        // denormalizado validado contra el precio actual.
+        const storedOffer = readStoredOfferSnapshot(product!);
+
+        if (
+          storedOffer?.tieneOfertaActiva === true &&
+          typeof storedOffer.precioOferta === "number" &&
+          storedOffer.precioOferta > 0 &&
+          storedOffer.precioOferta < precioOriginal
+        ) {
+          offer = {
+            precioFinal: storedOffer.precioOferta,
+            ofertaId: storedOffer.ofertaAplicadaId || "",
+            ofertaTitulo: storedOffer.ofertaTitulo || "Oferta",
+            descuentoTotal: Math.max(0, precioOriginal - storedOffer.precioOferta),
+            porcentajeDescuento: storedOffer.porcentajeDescuento,
           };
         }
       }

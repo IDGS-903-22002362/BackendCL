@@ -26,7 +26,6 @@ import {
   isOrdenPagada,
 } from "./utils/order-paid.util";
 import { seleccionarMejorOferta } from "../../utils/ofertas-pricing.util";
-import { isFirestoreMissingIndexError } from "../../utils/firebase-error.util";
 
 const ORDENES_COLLECTION = "ordenes";
 const PRODUCTOS_COLLECTION = "productos";
@@ -277,53 +276,62 @@ class AggregatesService {
     });
   }
 
+  /**
+   * Devuelve los IDs de productos con una oferta vigente, calculada
+   * DINÁMICAMENTE a partir de las ofertas activas + el precio actual del
+   * producto (misma fuente de verdad que ficha, catálogo y checkout vía
+   * `seleccionarMejorOferta`).
+   *
+   * No depende del flag denormalizado `tieneOfertaActiva`, que puede quedar
+   * desincronizado (p.ej. al cambiar el precio del producto o si el re-sync
+   * best-effort falla) y ocultar productos con oferta vigente del listado de
+   * OFERTAS. El costo es acotado: una query de productos elegibles (<=500) y la
+   * carga única de ofertas activas, con filtrado en memoria (sin N+1).
+   */
   async getActiveOfferProductIds(limit = 300): Promise<string[]> {
-    try {
-      const snapshot = await firestoreTienda
-        .collection(PRODUCTOS_COLLECTION)
-        .where("activo", "==", true)
-        .where("tieneOfertaActiva", "==", true)
-        .orderBy("porcentajeDescuento", "desc")
-        .orderBy("updatedAt", "desc")
-        .limit(Math.min(limit, 500))
-        .get();
-
-      if (snapshot.empty) {
-        return this.getActiveOfferProductIdsLegacy(limit);
-      }
-
-      return uniqueProductIds(snapshot.docs.map((doc) => doc.id)).slice(0, limit);
-    } catch (error) {
-      if (isFirestoreMissingIndexError(error)) {
-        return this.getActiveOfferProductIdsLegacy(limit);
-      }
-
-      throw error;
-    }
-  }
-
-  private async getActiveOfferProductIdsLegacy(limit = 300): Promise<string[]> {
+    const scanLimit = Math.min(Math.max(limit, 200), 500);
     const [products, ofertasActivas] = await Promise.all([
-      productCardsService.listEligibleActiveProducts(Math.min(limit, 500)),
+      productCardsService.listEligibleActiveProducts(scanLimit),
       ofertasService.listarOfertasActivas(),
     ]);
 
-    const ids: string[] = [];
-
-    for (const product of products) {
-      const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
-        id: product.id || "",
-        precioPublico: product.precioPublico,
-        categoriaId: product.categoriaId,
-        lineaId: product.lineaId,
-      });
-
-      if (mejorOferta) {
-        ids.push(product.id || "");
-      }
+    if (ofertasActivas.length === 0) {
+      return [];
     }
 
-    return uniqueProductIds(ids.filter(Boolean)).slice(0, limit);
+    const scored: Array<{ id: string; descuentoPct: number }> = [];
+
+    for (const product of products) {
+      const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
+      if (precioOriginal <= 0) {
+        continue;
+      }
+
+      const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
+        id: product.id || "",
+        precioPublico: precioOriginal,
+        categoriaId: product.categoriaId,
+        lineaId: product.lineaId,
+        tallaIds: product.tallaIds ?? [],
+      });
+
+      if (!mejorOferta || mejorOferta.precioFinal >= precioOriginal) {
+        continue;
+      }
+
+      scored.push({
+        id: product.id || "",
+        descuentoPct: (precioOriginal - mejorOferta.precioFinal) / precioOriginal,
+      });
+    }
+
+    // Mismo orden que el índice anterior: mayor descuento primero.
+    scored.sort((left, right) => right.descuentoPct - left.descuentoPct);
+
+    return uniqueProductIds(scored.map((item) => item.id).filter(Boolean)).slice(
+      0,
+      limit,
+    );
   }
 
   private async rankOfferProductIds(
@@ -355,25 +363,9 @@ class AggregatesService {
   }
 
   async getOfertasRecientesRankedProductIds(limit = 100): Promise<string[]> {
-    try {
-      const snapshot = await firestoreTienda
-        .collection(PRODUCTOS_COLLECTION)
-        .where("activo", "==", true)
-        .where("tieneOfertaActiva", "==", true)
-        .orderBy("createdAt", "desc")
-        .limit(Math.max(limit, 200))
-        .get();
-
-      if (!snapshot.empty) {
-        return snapshot.docs.map((doc) => doc.id).slice(0, limit);
-      }
-    } catch (error) {
-      if (!isFirestoreMissingIndexError(error)) {
-        throw error;
-      }
-    }
-
-    const [ofertasActivas, fallbackSnapshot] = await Promise.all([
+    // Fuente de verdad dinámica (ofertas activas + precio actual), ordenado por
+    // recientes. No depende del flag denormalizado `tieneOfertaActiva`.
+    const [ofertasActivas, snapshot] = await Promise.all([
       ofertasService.listarOfertasActivas(),
       firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
@@ -383,18 +375,28 @@ class AggregatesService {
         .get(),
     ]);
 
+    if (ofertasActivas.length === 0) {
+      return [];
+    }
+
     const ids: string[] = [];
 
-    for (const doc of fallbackSnapshot.docs) {
+    for (const doc of snapshot.docs) {
       const product = { id: doc.id, ...(doc.data() as Producto) };
+      const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
+      if (precioOriginal <= 0) {
+        continue;
+      }
+
       const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
         id: product.id || doc.id,
-        precioPublico: product.precioPublico,
+        precioPublico: precioOriginal,
         categoriaId: product.categoriaId,
         lineaId: product.lineaId,
+        tallaIds: product.tallaIds ?? [],
       });
 
-      if (mejorOferta) {
+      if (mejorOferta && mejorOferta.precioFinal < precioOriginal) {
         ids.push(doc.id);
       }
 
@@ -881,6 +883,7 @@ class AggregatesService {
         precioPublico: product.precioPublico,
         categoriaId: product.categoriaId,
         lineaId: product.lineaId,
+        tallaIds: product.tallaIds ?? [],
       });
 
       if (!mejorOferta) {

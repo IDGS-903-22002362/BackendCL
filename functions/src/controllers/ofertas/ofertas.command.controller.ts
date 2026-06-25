@@ -56,7 +56,10 @@ function handleError(res: Response, error: unknown): void {
     return;
   }
 
-  if (message.toLowerCase().includes("ya existe")) {
+  if (
+    message.toLowerCase().includes("ya existe") ||
+    message.toLowerCase().includes("ya tiene una oferta activa")
+  ) {
     res.status(409).json({
       success: false,
       message,

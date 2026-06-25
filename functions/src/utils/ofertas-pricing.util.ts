@@ -13,6 +13,13 @@ export interface ProductoOfertaBase {
 
   lineaId?: string | null;
   lineaIds?: string[];
+
+  /**
+   * Tallas del producto. Se usa para evaluar ofertas con alcance por talla
+   * cuando NO se evalúa una talla concreta (catálogo/ficha): la oferta aplica si
+   * alguna talla del producto califica.
+   */
+  tallaIds?: string[];
 }
 
 export interface OfertaPrecioEvaluada {
@@ -113,6 +120,41 @@ export function esOfertaVigente(
   return ahora >= fechaInicio.getTime() && ahora <= fechaFin.getTime();
 }
 
+/**
+ * Busca, dentro de un conjunto de ofertas ya existentes, una oferta vigente que
+ * cubra el producto indicado por alcance "productos". Se usa para impedir que un
+ * mismo producto quede cubierto por más de una oferta activa a la vez.
+ *
+ * - Solo considera ofertas con alcance `aplicaA === "productos"` que listan el
+ *   producto en `productoIds` (caso documentado y soportado).
+ * - Excluye la propia oferta cuando se está editando (`ofertaIdActual`).
+ * - Reutiliza `esOfertaVigente` para mantener el mismo criterio de
+ *   estado + vigencia que el resto del sistema.
+ */
+export function encontrarOfertaActivaEnConflicto(
+  productoId: string,
+  ofertasExistentes: Oferta[],
+  opciones: { ofertaIdActual?: string; fechaReferencia?: Date } = {}
+): Oferta | null {
+  const { ofertaIdActual, fechaReferencia } = opciones;
+
+  if (!productoId) {
+    return null;
+  }
+
+  const conflicto = ofertasExistentes.find(
+    (oferta) =>
+      oferta.id !== ofertaIdActual &&
+      !oferta.deletedAt &&
+      oferta.aplicaA === "productos" &&
+      Array.isArray(oferta.productoIds) &&
+      oferta.productoIds.includes(productoId) &&
+      esOfertaVigente(oferta, fechaReferencia)
+  );
+
+  return conflicto ?? null;
+}
+
 export function puedeEliminarOferta(
   oferta: Pick<Oferta, "estado" | "fechaInicio" | "fechaFin">,
   fechaReferencia: Date = new Date(),
@@ -166,6 +208,39 @@ export function esOfertaAplicableATalla(
   return tallaIds.includes(tallaId);
 }
 
+/**
+ * Evalúa si una oferta con alcance por talla aplica a un producto.
+ *
+ * - Si la oferta no restringe tallas, aplica siempre.
+ * - Si se pasa una talla concreta (línea de carrito/checkout), se valida de forma
+ *   estricta que esa talla esté incluida en la oferta.
+ * - Si NO se pasa talla (catálogo/ficha, donde aún no se eligió una talla), la
+ *   oferta aplica cuando alguna de las tallas del producto califica.
+ */
+export function esOfertaAplicableATallaProducto(
+  oferta: Oferta,
+  producto: ProductoOfertaBase,
+  tallaId?: string
+): boolean {
+  const ofertaTallaIds = oferta.tallaIds ?? [];
+
+  if (ofertaTallaIds.length === 0) {
+    return true;
+  }
+
+  if (tallaId) {
+    return ofertaTallaIds.includes(tallaId);
+  }
+
+  const productoTallaIds = producto.tallaIds ?? [];
+
+  if (productoTallaIds.length === 0) {
+    return false;
+  }
+
+  return productoTallaIds.some((talla) => ofertaTallaIds.includes(talla));
+}
+
 export function esOfertaAplicableAProducto(
   oferta: Oferta,
   producto: ProductoOfertaBase
@@ -214,7 +289,7 @@ export function evaluarOfertaParaProducto(
     return null;
   }
 
-  if (!esOfertaAplicableATalla(oferta, tallaId)) {
+  if (!esOfertaAplicableATallaProducto(oferta, producto, tallaId)) {
     return null;
   }
 

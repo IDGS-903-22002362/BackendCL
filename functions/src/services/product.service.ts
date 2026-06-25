@@ -942,6 +942,23 @@ export class ProductService {
     return value;
   }
 
+  /**
+   * Carga las ofertas activas vigentes para resolver precios de catálogo de
+   * forma dinámica. Devuelve null si no se pudieron cargar, para que el catálogo
+   * caiga al snapshot denormalizado en vez de fallar la petición completa.
+   */
+  private async loadActiveOffersForCatalog(): Promise<Oferta[] | null> {
+    try {
+      return await ofertasService.listarOfertasActivas();
+    } catch (error) {
+      console.warn(
+        "No se pudieron cargar ofertas activas para el catálogo; se usará el snapshot denormalizado",
+        error,
+      );
+      return null;
+    }
+  }
+
   private async loadCatalogLabels(): Promise<{
     categorias: Map<string, string>;
     lineas: Map<string, string>;
@@ -970,31 +987,112 @@ export class ProductService {
     return { categorias, lineas };
   }
 
-  private toCatalogCard(
+  /**
+   * Resuelve la oferta vigente de un producto para el catálogo.
+   *
+   * Fuente de verdad: ofertas activas + precio ACTUAL del producto (mismo
+   * criterio que la ficha de producto y el checkout, vía seleccionarMejorOferta).
+   * El snapshot denormalizado (precioOferta) solo se usa como respaldo cuando las
+   * ofertas activas no pudieron cargarse en esta petición, para evitar servir un
+   * precio de oferta "congelado" que quede desfasado cuando cambia el precio.
+   */
+  private resolveCatalogCardOffer(
     product: Producto,
-    labels: { categorias: Map<string, string>; lineas: Map<string, string> },
-  ): CatalogProductCardDTO {
-    const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
-    const stockTotal = this.getProductStockTotal(product);
-    const disponible = this.isProductAvailableForCatalog(product);
+    precioOriginal: number,
+    ofertasActivas: Oferta[] | null,
+  ): {
+    tieneOferta: boolean;
+    precioFinal: number;
+    descuentoTotal: number;
+    porcentajeDescuento: number;
+    ofertaAplicadaId: string | null;
+    ofertaTitulo: string | null;
+  } {
+    const sinOferta = {
+      tieneOferta: false,
+      precioFinal: precioOriginal,
+      descuentoTotal: 0,
+      porcentajeDescuento: 0,
+      ofertaAplicadaId: null as string | null,
+      ofertaTitulo: null as string | null,
+    };
+
+    if (precioOriginal <= 0) {
+      return sinOferta;
+    }
+
+    if (ofertasActivas) {
+      const mejorOferta = seleccionarMejorOferta(ofertasActivas, {
+        id: product.id || "",
+        precioPublico: precioOriginal,
+        categoriaId: product.categoriaId,
+        lineaId: product.lineaId,
+        tallaIds: product.tallaIds ?? [],
+      });
+
+      if (
+        !mejorOferta ||
+        mejorOferta.precioFinal <= 0 ||
+        mejorOferta.precioFinal >= precioOriginal
+      ) {
+        return sinOferta;
+      }
+
+      const precioFinal = mejorOferta.precioFinal;
+      const descuentoTotal = Math.max(0, precioOriginal - precioFinal);
+
+      return {
+        tieneOferta: true,
+        precioFinal,
+        descuentoTotal,
+        porcentajeDescuento: Math.round((descuentoTotal / precioOriginal) * 100),
+        ofertaAplicadaId: mejorOferta.oferta.id || null,
+        ofertaTitulo: mejorOferta.oferta.titulo || "Oferta",
+      };
+    }
+
     const offerSnapshot = readStoredOfferSnapshot(product);
-    const tieneOferta =
+    const snapshotTieneOferta =
       offerSnapshot?.tieneOfertaActiva === true &&
       typeof offerSnapshot.precioOferta === "number" &&
       offerSnapshot.precioOferta > 0 &&
       offerSnapshot.precioOferta < precioOriginal;
-    const precioFinal = tieneOferta
-      ? offerSnapshot!.precioOferta!
-      : precioOriginal;
-    const descuentoTotal = tieneOferta
-      ? Math.max(0, precioOriginal - precioFinal)
-      : 0;
-    const porcentajeDescuento = tieneOferta
-      ? offerSnapshot?.porcentajeDescuento ??
-        (precioOriginal > 0
-          ? Math.round((descuentoTotal / precioOriginal) * 100)
-          : 0)
-      : 0;
+
+    if (!snapshotTieneOferta || !offerSnapshot) {
+      return sinOferta;
+    }
+
+    const precioFinal = offerSnapshot.precioOferta as number;
+    const descuentoTotal = Math.max(0, precioOriginal - precioFinal);
+
+    return {
+      tieneOferta: true,
+      precioFinal,
+      descuentoTotal,
+      porcentajeDescuento:
+        offerSnapshot.porcentajeDescuento ||
+        Math.round((descuentoTotal / precioOriginal) * 100),
+      ofertaAplicadaId: offerSnapshot.ofertaAplicadaId ?? null,
+      ofertaTitulo: offerSnapshot.ofertaTitulo ?? null,
+    };
+  }
+
+  private toCatalogCard(
+    product: Producto,
+    labels: { categorias: Map<string, string>; lineas: Map<string, string> },
+    ofertasActivas: Oferta[] | null = null,
+  ): CatalogProductCardDTO {
+    const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
+    const stockTotal = this.getProductStockTotal(product);
+    const disponible = this.isProductAvailableForCatalog(product);
+    const {
+      tieneOferta,
+      precioFinal,
+      descuentoTotal,
+      porcentajeDescuento,
+      ofertaAplicadaId,
+      ofertaTitulo,
+    } = this.resolveCatalogCardOffer(product, precioOriginal, ofertasActivas);
 
     return {
       id: product.id || "",
@@ -1008,10 +1106,8 @@ export class ProductService {
       precioOriginal,
       precioFinal,
       tieneOferta,
-      ofertaAplicadaId: tieneOferta
-        ? offerSnapshot?.ofertaAplicadaId ?? null
-        : null,
-      ofertaTitulo: tieneOferta ? offerSnapshot?.ofertaTitulo ?? null : null,
+      ofertaAplicadaId: tieneOferta ? ofertaAplicadaId : null,
+      ofertaTitulo: tieneOferta ? ofertaTitulo : null,
       descuentoTotal,
       porcentajeDescuento,
       imagenPrincipal:
@@ -1077,6 +1173,7 @@ export class ProductService {
           precioPublico: product.precioPublico,
           categoriaId: product.categoriaId,
           lineaId: product.lineaId,
+          tallaIds: product.tallaIds ?? [],
         });
 
         if (!mejorOferta) {
@@ -1156,6 +1253,7 @@ export class ProductService {
     const batchSize = Math.max(pageLimit * 3, 48);
     const maxScanDocs = 1000;
     const labels = await this.loadCatalogLabels();
+    const catalogOfertasActivas = await this.loadActiveOffersForCatalog();
     let baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
     let legacyOfertasActivas: Oferta[] | null = null;
 
@@ -1206,7 +1304,9 @@ export class ProductService {
           legacyOfertasActivas === null &&
           isFirestoreMissingIndexError(error)
         ) {
-          legacyOfertasActivas = await ofertasService.listarOfertasActivas();
+          legacyOfertasActivas =
+            catalogOfertasActivas ??
+            (await ofertasService.listarOfertasActivas());
           baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig, {
             skipOfferIndexFilter: true,
           });
@@ -1252,7 +1352,7 @@ export class ProductService {
     const hasMore = matched.length > pageLimit;
     const pageProducts = matched.slice(0, pageLimit);
     const items = pageProducts.map((product) =>
-      this.toCatalogCard(product, labels),
+      this.toCatalogCard(product, labels, catalogOfertasActivas),
     );
     const cursorProduct = pageProducts[pageProducts.length - 1];
 
@@ -1290,6 +1390,7 @@ export class ProductService {
   ): Promise<CatalogResponse> {
     const rankedIds = await getRankedIds(200);
     const labels = await this.loadCatalogLabels();
+    const catalogOfertasActivas = await this.loadActiveOffersForCatalog();
 
     let offset = 0;
     if (query.cursor) {
@@ -1324,7 +1425,9 @@ export class ProductService {
 
     const pageProducts = filteredProducts.slice(offset, offset + query.limit);
     const hasMore = offset + query.limit < filteredProducts.length;
-    const items = pageProducts.map((product) => this.toCatalogCard(product, labels));
+    const items = pageProducts.map((product) =>
+      this.toCatalogCard(product, labels, catalogOfertasActivas),
+    );
     const lastProduct = pageProducts[pageProducts.length - 1];
 
     return {
@@ -1487,6 +1590,7 @@ export class ProductService {
   ): Promise<CatalogResponse> {
     const pageLimit = query.limit;
     const labels = await this.loadCatalogLabels();
+    const catalogOfertasActivas = await this.loadActiveOffersForCatalog();
     const normalizedTerm = filters.q || "";
     const filtersWithoutQuery = { ...filters, q: undefined };
     const sortConfig = { field: "updatedAt", direction: "desc" as const };
@@ -1497,7 +1601,9 @@ export class ProductService {
     let legacyOfertasActivas: Oferta[] | null = null;
 
     if (filters.onlyOffers) {
-      legacyOfertasActivas = await ofertasService.listarOfertasActivas();
+      legacyOfertasActivas =
+        catalogOfertasActivas ??
+        (await ofertasService.listarOfertasActivas());
     }
 
     const matched: Producto[] = [];
@@ -1569,7 +1675,9 @@ export class ProductService {
     const cursorProduct = pageProducts[pageProducts.length - 1];
 
     return {
-      items: pageProducts.map((product) => this.toCatalogCard(product, labels)),
+      items: pageProducts.map((product) =>
+        this.toCatalogCard(product, labels, catalogOfertasActivas),
+      ),
       hasMore,
       nextCursor:
         hasMore && cursorProduct

@@ -29,6 +29,7 @@ import {
   seleccionarMejorOferta,
   esOfertaVigente,
   puedeEliminarOferta,
+  encontrarOfertaActivaEnConflicto,
 } from "../utils/ofertas-pricing.util";
 import { productOfferSnapshotService } from "./product-offer-snapshot.service";
 
@@ -165,6 +166,8 @@ interface ProductoFirestoreData {
 
   lineaId?: string | null;
   lineaIds?: string[];
+
+  tallaIds?: string[];
 }
 
 export class OfertasService {
@@ -263,6 +266,11 @@ export class OfertasService {
     normalizeProductoIds(data.productoIds)
   );
 
+  await this.validarProductosSinOfertaActivaDuplicada(
+    data.aplicaA,
+    normalizeProductoIds(data.productoIds)
+  );
+
   validarRangoFechasOferta(data.fechaInicio, data.fechaFin);
 
   const productoIds = normalizeProductoIds(data.productoIds) ?? [];
@@ -339,6 +347,12 @@ await this.validarProductosActivosParaOferta(
   normalizeProductoIds(
     data.productoIds ?? ofertaActual.productoIds
   )
+);
+
+await this.validarProductosSinOfertaActivaDuplicada(
+  data.aplicaA ?? ofertaActual.aplicaA,
+  normalizeProductoIds(data.productoIds ?? ofertaActual.productoIds),
+  id
 );
 
 const fechaInicioParaValidar = data.fechaInicio ?? ofertaActual.fechaInicio;
@@ -617,6 +631,51 @@ if (nuevoStockVendido > oferta.stockLimiteOferta) {
   }
 }
 
+  /**
+   * Impide que un producto quede cubierto por más de una oferta activa/vigente
+   * a la vez. Solo aplica a ofertas con alcance "productos" (caso soportado).
+   * Al editar, se excluye la propia oferta vía `ofertaIdActual`.
+   */
+  private async validarProductosSinOfertaActivaDuplicada(
+    aplicaA: Oferta["aplicaA"],
+    productoIds: string[] | undefined,
+    ofertaIdActual?: string
+  ): Promise<void> {
+    if (aplicaA !== "productos") {
+      return;
+    }
+
+    if (!Array.isArray(productoIds) || productoIds.length === 0) {
+      return;
+    }
+
+    for (const productoId of productoIds) {
+      // array-contains no requiere índice compuesto; el resto del filtrado
+      // (estado, vigencia, alcance, oferta propia) se hace en memoria reusando
+      // el mismo criterio que el catálogo/checkout.
+      const snapshot = await this.ofertasCollection
+        .where("productoIds", "array-contains", productoId)
+        .get();
+
+      const ofertasExistentes = snapshot.docs.map((doc) =>
+        this.mapOfertaDoc(doc)
+      );
+
+      const conflicto = encontrarOfertaActivaEnConflicto(
+        productoId,
+        ofertasExistentes,
+        { ofertaIdActual }
+      );
+
+      if (conflicto) {
+        throw new Error(
+          `El producto ${productoId} ya tiene una oferta activa: "${conflicto.titulo}". ` +
+            "Desactívala o espera a que termine para asignarle otra oferta."
+        );
+      }
+    }
+  }
+
   private async obtenerProductoBase(
     productoId: string
   ): Promise<ProductoOfertaBase> {
@@ -645,6 +704,8 @@ if (typeof data.precioPublico !== "number") {
 
       lineaId: data.lineaId ?? null,
       lineaIds: stringArrayOrUndefined(data.lineaIds),
+
+      tallaIds: stringArrayOrUndefined(data.tallaIds),
     };
   }
 

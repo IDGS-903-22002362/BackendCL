@@ -92,6 +92,7 @@ export function toProductoOfertaBase(product: Producto): ProductoOfertaBase {
     precioPublico: Math.max(0, Number(product.precioPublico || 0)),
     categoriaId: product.categoriaId,
     lineaId: product.lineaId,
+    tallaIds: product.tallaIds ?? [],
   };
 }
 
