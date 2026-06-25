@@ -389,6 +389,7 @@ export class CheckoutPricingService {
       categoriaIds: toStringArray(record.categoriaIds),
       lineaId: product.lineaId ?? null,
       lineaIds: toStringArray(record.lineaIds),
+      tallaIds: toStringArray(record.tallaIds) ?? product.tallaIds ?? [],
     };
   }
 

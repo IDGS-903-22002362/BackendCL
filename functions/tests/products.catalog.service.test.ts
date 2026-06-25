@@ -285,6 +285,110 @@ describe("ProductService.listCatalogProducts", () => {
     expect(result.items[0]).not.toHaveProperty("inventarioPorTalla");
   });
 
+  it("applies an active offer dynamically over the current price, ignoring a stale frozen snapshot", async () => {
+    // Snapshot congelado: el precio de oferta quedó en 300 (cuando el precio era
+    // 600). Luego el admin subió el precio a 1200, pero la oferta del 50% sigue
+    // activa y debe recalcularse sobre el precio ACTUAL (1200 -> 600).
+    dbState.productos.prod_1.precioPublico = 1200;
+    dbState.productos.prod_1.tieneOfertaActiva = true;
+    dbState.productos.prod_1.precioOferta = 300;
+    dbState.productos.prod_1.porcentajeDescuento = 50;
+    dbState.productos.prod_1.ofertaAplicadaId = "of_1";
+    dbState.productos.prod_1.ofertaTitulo = "Rebaja";
+
+    dbState.ofertas = {
+      of_1: {
+        titulo: "Rebaja Club León",
+        estado: true,
+        tipoDescuento: "porcentaje",
+        valorDescuento: 50,
+        aplicaA: "categorias",
+        productoIds: [],
+        categoriaIds: ["jerseys"],
+        lineaIds: [],
+        tallaIds: [],
+        fechaInicio: "2020-01-01T00:00:00.000Z",
+        fechaFin: "2035-01-01T00:00:00.000Z",
+        hastaAgotarExistencias: false,
+        stockLimiteOferta: null,
+        stockVendidoOferta: 0,
+        prioridad: 1,
+        combinable: false,
+        mostrarBadge: true,
+        createdAt: "2026-06-01T00:00:00.000Z",
+        updatedAt: "2026-06-01T00:00:00.000Z",
+        deletedAt: null,
+      },
+    };
+
+    const result = await productService.listCatalogProducts({
+      limit: 24,
+      sort: "recientes",
+      onlyOffers: false,
+      onlyAvailable: false,
+    });
+
+    const card = result.items.find((item) => item.id === "prod_1");
+
+    expect(card).toBeDefined();
+    expect(card).toMatchObject({
+      precioOriginal: 1200,
+      precioFinal: 600,
+      tieneOferta: true,
+      porcentajeDescuento: 50,
+      ofertaAplicadaId: "of_1",
+    });
+  });
+
+  it("does not apply an inactive/expired offer even if the snapshot says so", async () => {
+    dbState.productos.prod_1.precioPublico = 1200;
+    dbState.productos.prod_1.tieneOfertaActiva = true;
+    dbState.productos.prod_1.precioOferta = 600;
+    dbState.productos.prod_1.porcentajeDescuento = 50;
+
+    dbState.ofertas = {
+      of_expired: {
+        titulo: "Rebaja vencida",
+        estado: true,
+        tipoDescuento: "porcentaje",
+        valorDescuento: 50,
+        aplicaA: "categorias",
+        productoIds: [],
+        categoriaIds: ["jerseys"],
+        lineaIds: [],
+        tallaIds: [],
+        fechaInicio: "2020-01-01T00:00:00.000Z",
+        fechaFin: "2020-02-01T00:00:00.000Z",
+        hastaAgotarExistencias: false,
+        stockLimiteOferta: null,
+        stockVendidoOferta: 0,
+        prioridad: 1,
+        combinable: false,
+        mostrarBadge: true,
+        createdAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+        deletedAt: null,
+      },
+    };
+
+    const result = await productService.listCatalogProducts({
+      limit: 24,
+      sort: "recientes",
+      onlyOffers: false,
+      onlyAvailable: false,
+    });
+
+    const card = result.items.find((item) => item.id === "prod_1");
+
+    expect(card).toBeDefined();
+    expect(card).toMatchObject({
+      precioOriginal: 1200,
+      precioFinal: 1200,
+      tieneOferta: false,
+      porcentajeDescuento: 0,
+    });
+  });
+
   it("uses cursor pagination", async () => {
     const first = await productService.listCatalogProducts({
       limit: 1,
