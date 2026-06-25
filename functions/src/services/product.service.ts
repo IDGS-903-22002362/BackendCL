@@ -61,6 +61,7 @@ const DEFAULT_PRODUCT_RATING_SUMMARY: ProductRatingSummary = {
 const CATEGORIAS_COLLECTION = "categorias";
 const LINEAS_COLLECTION = "lineas";
 const CURSOR_VERSION = 1;
+const CATALOG_SEARCH_MAX_SCAN = 1000;
 
 export class CatalogQueryError extends Error {
   statusCode = 400;
@@ -210,12 +211,70 @@ export class ProductService {
     );
   }
 
-  private buildProductSearchText(product: Pick<Producto, "descripcion" | "clave" | "categoriaId" | "lineaId">): string {
+  private buildProductSearchText(
+    product: Pick<Producto, "descripcion" | "clave" | "categoriaId" | "lineaId">,
+    labels?: { categoriaNombre?: string; lineaNombre?: string },
+  ): string {
     return this.normalizeSearchText(
-      [product.descripcion, product.clave, product.categoriaId, product.lineaId]
+      [
+        product.descripcion,
+        product.clave,
+        product.categoriaId,
+        product.lineaId,
+        labels?.categoriaNombre,
+        labels?.lineaNombre,
+      ]
         .filter(Boolean)
         .join(" "),
     );
+  }
+
+  private buildProductSearchHaystack(
+    product: Producto,
+    labels: { categorias: Map<string, string>; lineas: Map<string, string> },
+  ): string {
+    return this.normalizeSearchText(
+      [
+        product.descripcion,
+        product.clave,
+        product.searchText,
+        product.categoriaId,
+        product.lineaId,
+        labels.categorias.get(product.categoriaId || ""),
+        labels.lineas.get(product.lineaId || ""),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
+  }
+
+  private matchesCatalogSearchQuery(
+    product: Producto,
+    normalizedTerm: string,
+    labels: { categorias: Map<string, string>; lineas: Map<string, string> },
+  ): boolean {
+    if (!normalizedTerm) {
+      return true;
+    }
+
+    return this.buildProductSearchHaystack(product, labels).includes(
+      normalizedTerm,
+    );
+  }
+
+  private async resolveProductSearchText(
+    product: Pick<Producto, "descripcion" | "clave" | "categoriaId" | "lineaId">,
+    explicitSearchText?: string,
+  ): Promise<string> {
+    if (typeof explicitSearchText === "string" && explicitSearchText.trim()) {
+      return explicitSearchText.trim();
+    }
+
+    const labels = await this.loadCatalogLabels();
+    return this.buildProductSearchText(product, {
+      categoriaNombre: labels.categorias.get(product.categoriaId || ""),
+      lineaNombre: labels.lineas.get(product.lineaId || ""),
+    });
   }
 
   private encodeCatalogCursor(cursor: CatalogCursor): string {
@@ -1420,10 +1479,175 @@ export class ProductService {
     return query.sort;
   }
 
+  private async listCatalogProductsWithMemorySearch(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+    effectiveSort: CatalogSort,
+    offset = 0,
+  ): Promise<CatalogResponse> {
+    const pageLimit = query.limit;
+    const labels = await this.loadCatalogLabels();
+    const normalizedTerm = filters.q || "";
+    const filtersWithoutQuery = { ...filters, q: undefined };
+    const sortConfig = { field: "updatedAt", direction: "desc" as const };
+    let baseQuery = this.buildCatalogFirestoreQuery(
+      filtersWithoutQuery,
+      sortConfig,
+    );
+    let legacyOfertasActivas: Oferta[] | null = null;
+
+    if (filters.onlyOffers) {
+      legacyOfertasActivas = await ofertasService.listarOfertasActivas();
+    }
+
+    const matched: Producto[] = [];
+    let scannedDocs = 0;
+    const batchSize = 200;
+    let startAfterValue:
+      | string
+      | number
+      | boolean
+      | FirebaseFirestore.Timestamp
+      | null = null;
+    let startAfterId: string | null = null;
+
+    while (matched.length < CATALOG_SEARCH_MAX_SCAN && scannedDocs < CATALOG_SEARCH_MAX_SCAN) {
+      let firestoreQuery = baseQuery;
+
+      if (startAfterValue !== null && startAfterId) {
+        firestoreQuery = firestoreQuery.startAfter(
+          startAfterValue,
+          startAfterId,
+        );
+      }
+
+      const snapshot = await firestoreQuery.limit(batchSize).get();
+      if (snapshot.empty) {
+        break;
+      }
+
+      scannedDocs += snapshot.docs.length;
+
+      for (const doc of snapshot.docs) {
+        const product = this.normalizeProduct(doc.id, doc.data());
+
+        if (
+          !this.matchesCatalogSearchQuery(product, normalizedTerm, labels) ||
+          !this.matchesCatalogFilters(product, filters, legacyOfertasActivas)
+        ) {
+          continue;
+        }
+
+        matched.push(product);
+
+        if (matched.length >= CATALOG_SEARCH_MAX_SCAN) {
+          break;
+        }
+      }
+
+      if (snapshot.docs.length < batchSize || matched.length >= CATALOG_SEARCH_MAX_SCAN) {
+        break;
+      }
+
+      const lastProduct = this.normalizeProduct(
+        snapshot.docs[snapshot.docs.length - 1].id,
+        snapshot.docs[snapshot.docs.length - 1].data(),
+      );
+      startAfterValue = this.getCursorStartAfterValue(
+        this.toCatalogOrderValue(lastProduct, "updatedAt"),
+        "updatedAt",
+      );
+      startAfterId = lastProduct.id || "";
+    }
+
+    matched.sort((left, right) =>
+      (left.descripcion || "").localeCompare(right.descripcion || "", "es-MX"),
+    );
+
+    const pageProducts = matched.slice(offset, offset + pageLimit);
+    const hasMore = matched.length > offset + pageLimit;
+    const cursorProduct = pageProducts[pageProducts.length - 1];
+
+    return {
+      items: pageProducts.map((product) => this.toCatalogCard(product, labels)),
+      hasMore,
+      nextCursor:
+        hasMore && cursorProduct
+          ? this.encodeCatalogCursor({
+              v: CURSOR_VERSION,
+              sort: effectiveSort,
+              filters,
+              last: {
+                value: offset + pageProducts.length,
+                id: cursorProduct.id || "",
+              },
+            })
+          : null,
+    };
+  }
+
+  private async listCatalogProductsWithSearch(
+    query: CatalogQuery,
+    filters: CatalogCursor["filters"],
+    effectiveSort: CatalogSort,
+  ): Promise<CatalogResponse> {
+    if (query.cursor) {
+      const cursor = this.decodeCatalogCursor(query.cursor);
+      this.assertCursorMatchesQuery(cursor, effectiveSort, filters);
+
+      if (typeof cursor.last.value === "number" && Number.isFinite(cursor.last.value)) {
+        return this.listCatalogProductsWithMemorySearch(
+          query,
+          filters,
+          effectiveSort,
+          cursor.last.value,
+        );
+      }
+
+      return this.listCatalogProductsFromFirestore(
+        query,
+        filters,
+        effectiveSort,
+        { field: "searchText", direction: "asc" },
+      );
+    }
+
+    const prefixResult = await this.listCatalogProductsFromFirestore(
+      query,
+      filters,
+      effectiveSort,
+      { field: "searchText", direction: "asc" },
+    );
+
+    if (prefixResult.items.length > 0) {
+      return prefixResult;
+    }
+
+    return this.listCatalogProductsWithMemorySearch(
+      query,
+      filters,
+      effectiveSort,
+      0,
+    );
+  }
+
   async listCatalogProducts(query: CatalogQuery): Promise<CatalogResponse> {
     const filters = this.normalizeCatalogFilters(query);
     const resolvedSort = this.resolveCatalogSort(query);
     const effectiveSort: CatalogSort = filters.q ? "nombre_asc" : resolvedSort;
+
+    if (filters.q) {
+      if (
+        (filters.minPrice !== undefined || filters.maxPrice !== undefined) &&
+        !["precio_asc", "precio_desc"].includes(effectiveSort)
+      ) {
+        throw new CatalogQueryError(
+          "minPrice/maxPrice requieren sort=precio_asc o sort=precio_desc",
+        );
+      }
+
+      return this.listCatalogProductsWithSearch(query, filters, effectiveSort);
+    }
 
     if (this.shouldUseAggregateCatalogRanking(effectiveSort, filters)) {
       if (effectiveSort === "destacados") {
@@ -1524,6 +1748,72 @@ export class ProductService {
     return this.updateProduct(productId, { activo });
   }
 
+  async backfillProductSearchText(options?: {
+    dryRun?: boolean;
+    onlyActive?: boolean;
+  }): Promise<{ processed: number; updated: number; skipped: number }> {
+    const dryRun = options?.dryRun === true;
+    const onlyActive = options?.onlyActive !== false;
+    const labels = await this.loadCatalogLabels();
+    const snapshot = await firestoreTienda.collection(PRODUCTOS_COLLECTION).get();
+
+    let processed = 0;
+    let updated = 0;
+    let skipped = 0;
+    let batch = firestoreTienda.batch();
+    let batchOps = 0;
+
+    for (const doc of snapshot.docs) {
+      processed += 1;
+      const data = doc.data();
+
+      if (onlyActive && data.activo !== true) {
+        skipped += 1;
+        continue;
+      }
+
+      const nextSearchText = this.buildProductSearchText(
+        {
+          descripcion: String(data.descripcion ?? ""),
+          clave: String(data.clave ?? ""),
+          categoriaId: String(data.categoriaId ?? ""),
+          lineaId: String(data.lineaId ?? ""),
+        },
+        {
+          categoriaNombre: labels.categorias.get(String(data.categoriaId ?? "")),
+          lineaNombre: labels.lineas.get(String(data.lineaId ?? "")),
+        },
+      );
+
+      if (typeof data.searchText === "string" && data.searchText.trim() === nextSearchText) {
+        skipped += 1;
+        continue;
+      }
+
+      if (!dryRun) {
+        batch.update(doc.ref, {
+          searchText: nextSearchText,
+          updatedAt: admin.firestore.Timestamp.now(),
+        });
+        batchOps += 1;
+
+        if (batchOps >= 400) {
+          await batch.commit();
+          batch = firestoreTienda.batch();
+          batchOps = 0;
+        }
+      }
+
+      updated += 1;
+    }
+
+    if (!dryRun && batchOps > 0) {
+      await batch.commit();
+    }
+
+    return { processed, updated, skipped };
+  }
+
   /**
    * Crea un nuevo producto
    * @param productoData - Datos del producto a crear
@@ -1564,19 +1854,22 @@ export class ProductService {
       }
 
       // Crear el documento con timestamps
+      const searchText = await this.resolveProductSearchText(
+        {
+          descripcion: productoData.descripcion,
+          clave: productoData.clave,
+          categoriaId: productoData.categoriaId,
+          lineaId: productoData.lineaId,
+        },
+        productoData.searchText,
+      );
+
       const docRef = await firestoreTienda
         .collection(PRODUCTOS_COLLECTION)
         .add({
           ...productoData,
           slug: productoData.slug || this.buildSlug(productoData.descripcion),
-          searchText:
-            productoData.searchText ||
-            this.buildProductSearchText({
-              descripcion: productoData.descripcion,
-              clave: productoData.clave,
-              categoriaId: productoData.categoriaId,
-              lineaId: productoData.lineaId,
-            }),
+          searchText,
           tallaIds,
           inventarioPorTalla,
           stockMinimoGlobal,
@@ -1689,14 +1982,15 @@ export class ProductService {
       payload.slug =
         updateData.slug ||
         this.buildSlug(updateData.descripcion || productoActual.descripcion);
-      payload.searchText =
-        updateData.searchText ||
-        this.buildProductSearchText({
+      payload.searchText = await this.resolveProductSearchText(
+        {
           descripcion: updateData.descripcion || productoActual.descripcion,
           clave: updateData.clave || productoActual.clave,
           categoriaId: updateData.categoriaId || productoActual.categoriaId,
           lineaId: updateData.lineaId || productoActual.lineaId,
-        });
+        },
+        updateData.searchText,
+      );
       payload.destacado =
         updateData.destacado !== undefined
           ? updateData.destacado === true

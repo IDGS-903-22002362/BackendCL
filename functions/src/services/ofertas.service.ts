@@ -464,6 +464,92 @@ if (data.fechaFin) {
     };
   }
 
+  async commitOfferStockForOrder(input: {
+    ordenId: string;
+    items: Array<{ ofertaAplicadaId?: string | null; quantity: number }>;
+  }): Promise<void> {
+    const quantitiesByOffer = new Map<string, number>();
+
+    for (const item of input.items) {
+      const ofertaId = item.ofertaAplicadaId?.trim();
+      const quantity = Math.max(0, Math.floor(item.quantity));
+      if (!ofertaId || quantity <= 0) {
+        continue;
+      }
+      quantitiesByOffer.set(
+        ofertaId,
+        (quantitiesByOffer.get(ofertaId) ?? 0) + quantity,
+      );
+    }
+
+    for (const [ofertaId, cantidad] of quantitiesByOffer) {
+      await this.incrementarStockVendidoOfertaForOrder(
+        input.ordenId,
+        ofertaId,
+        cantidad,
+      );
+    }
+  }
+
+  async incrementarStockVendidoOfertaForOrder(
+    ordenId: string,
+    ofertaId: string,
+    cantidad: number,
+  ): Promise<void> {
+    if (cantidad <= 0) {
+      return;
+    }
+
+    const usoRef = db.collection("ofertaStockUsos").doc(`${ordenId}_${ofertaId}`);
+    const docRef = this.ofertasCollection.doc(ofertaId);
+
+    await db.runTransaction(async (transaction: Transaction) => {
+      const [usoSnap, snapshot] = await Promise.all([
+        transaction.get(usoRef),
+        transaction.get(docRef),
+      ]);
+
+      if (usoSnap.exists) {
+        return;
+      }
+
+      if (!snapshot.exists) {
+        throw new Error("Oferta no encontrada");
+      }
+
+      const oferta = this.mapOfertaDoc(snapshot);
+
+      if (typeof oferta.stockLimiteOferta !== "number") {
+        transaction.set(usoRef, {
+          ordenId,
+          ofertaId,
+          cantidad,
+          skipped: true,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      const nuevoStockVendido = oferta.stockVendidoOferta + cantidad;
+
+      if (nuevoStockVendido > oferta.stockLimiteOferta) {
+        throw new Error("La oferta ya no tiene stock disponible");
+      }
+
+      transaction.update(docRef, {
+        stockVendidoOferta: FieldValue.increment(cantidad),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      transaction.set(usoRef, {
+        ordenId,
+        ofertaId,
+        cantidad,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
   async incrementarStockVendidoOferta(
     ofertaId: string,
     cantidad: number

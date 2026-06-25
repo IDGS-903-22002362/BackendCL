@@ -101,11 +101,13 @@ class InventoryService {
     payload: RegistrarMovimientoInventarioDTO,
     idempotencyKey: string,
     movimiento: MovimientoInventario,
-  ): Promise<void> {
-    await firestoreTienda
+  ): Promise<boolean> {
+    const docRef = firestoreTienda
       .collection(MOVIMIENTOS_IDEMPOTENCY_COLLECTION)
-      .doc(this.buildMovementIdempotencyDocId(payload, idempotencyKey))
-      .set({
+      .doc(this.buildMovementIdempotencyDocId(payload, idempotencyKey));
+
+    try {
+      await docRef.create({
         idempotencyKey,
         payload: {
           tipo: payload.tipo,
@@ -117,6 +119,17 @@ class InventoryService {
         movimiento,
         createdAt: admin.firestore.Timestamp.now(),
       });
+      return true;
+    } catch (error) {
+      const code = String((error as { code?: unknown })?.code || "").toLowerCase();
+      const message = String(
+        (error as { message?: unknown })?.message || "",
+      ).toLowerCase();
+      if (code === "6" || code === "already-exists" || message.includes("already exists")) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   private async getCantidadActual(
@@ -324,7 +337,7 @@ class InventoryService {
     };
 
     if (idempotencyKey) {
-      await this.cacheMovement(
+      const cachedFirst = await this.cacheMovement(
         {
           ...payload,
           tallaId,
@@ -332,6 +345,18 @@ class InventoryService {
         idempotencyKey,
         movimiento,
       );
+      if (!cachedFirst) {
+        const existing = await this.getCachedMovement(
+          {
+            ...payload,
+            tallaId,
+          },
+          idempotencyKey,
+        );
+        if (existing) {
+          return existing;
+        }
+      }
     }
 
     return movimiento;
