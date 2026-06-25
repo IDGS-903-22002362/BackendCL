@@ -67,6 +67,7 @@ function handleError(res: Response, error: unknown): void {
   if (
     message.toLowerCase().includes("no tiene") ||
     message.toLowerCase().includes("no válido") ||
+    message.toLowerCase().includes("no se puede eliminar") ||
     message.toLowerCase().includes("stock") ||
     message.toLowerCase().includes("cantidad")
   ) {

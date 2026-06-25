@@ -23,7 +23,9 @@ import {
 import { RolUsuario } from "../models/usuario.model";
 import { ApiError } from "../utils/error-handler";
 import {
+  buildEmbeddedCheckoutSessionBaseParams,
   buildStripeIdempotencyKey,
+  buildStripePaymentIntentCardOptions,
   getAppUrl,
   getStripeClient,
   getStripeCurrency,
@@ -1029,12 +1031,17 @@ class PagoService {
           .add(pagoDraft);
 
         try {
+          const cardPaymentOptions = buildStripePaymentIntentCardOptions(currency);
+
           const paymentIntent = await stripe.paymentIntents.create(
             {
               amount,
               currency,
               customer: stripeCustomerId,
               automatic_payment_methods: { enabled: true },
+              ...(cardPaymentOptions
+                ? { payment_method_options: cardPaymentOptions }
+                : {}),
               setup_future_usage: savePaymentMethod ? "off_session" : undefined,
               shipping: shipping as
                 | Stripe.PaymentIntentCreateParams.Shipping
@@ -1395,6 +1402,8 @@ async createStripeCheckoutSession(
       },
     ];
 
+    const embeddedCheckoutBase = buildEmbeddedCheckoutSessionBaseParams(currency);
+
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -1402,6 +1411,7 @@ async createStripeCheckoutSession(
         customer: stripeCustomerId,
         line_items: lineItems,
         return_url: resolvedSuccessUrl,
+        ...embeddedCheckoutBase,
         metadata: {
           ordenId: orderId,
           userId,
@@ -1538,6 +1548,7 @@ async createStripeCheckoutSession(
       cartId: input.cartId,
       checkoutAttemptId: input.checkoutAttemptId,
       fulfillmentMethod: input.orderDraft.fulfillmentMethod || "DELIVERY",
+      pickupLocationId: input.orderDraft.pickupLocationId || "",
       shippingTotal: String(input.pricing.shippingTotal || 0),
       discountTotal: String(input.pricing.discountTotal || 0),
     };
@@ -1560,6 +1571,8 @@ async createStripeCheckoutSession(
       updatedAt: now,
     } satisfies Omit<Pago, "id">);
 
+    const embeddedCheckoutBase = buildEmbeddedCheckoutSessionBaseParams(currency);
+
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
@@ -1577,17 +1590,23 @@ async createStripeCheckoutSession(
                 metadata: {
                   checkoutAttemptId: input.checkoutAttemptId,
                   cartId: input.cartId,
+                  fulfillmentMethod: paymentMetadata.fulfillmentMethod,
                 },
               },
             },
           },
         ],
         return_url: input.successUrl,
+        ...embeddedCheckoutBase,
         metadata: {
           checkoutAttemptId: input.checkoutAttemptId,
           userId: input.userId,
           pagoId: pagoRef.id,
           cartId: input.cartId,
+          fulfillmentMethod: paymentMetadata.fulfillmentMethod,
+          pickupLocationId: paymentMetadata.pickupLocationId,
+          shippingTotal: paymentMetadata.shippingTotal,
+          discountTotal: paymentMetadata.discountTotal,
         },
         payment_intent_data: {
           metadata: {
@@ -1595,6 +1614,10 @@ async createStripeCheckoutSession(
             userId: input.userId,
             pagoId: pagoRef.id,
             cartId: input.cartId,
+            fulfillmentMethod: paymentMetadata.fulfillmentMethod,
+            pickupLocationId: paymentMetadata.pickupLocationId,
+            shippingTotal: paymentMetadata.shippingTotal,
+            discountTotal: paymentMetadata.discountTotal,
           },
         },
       },
@@ -2284,6 +2307,43 @@ async createStripeCheckoutSession(
     }
   }
 
+  private assertStripeAmountMatchesPago(
+    stripeAmountMinor: number | null | undefined,
+    pagoData: Pago,
+    context: {
+      eventId: string;
+      pagoId?: string;
+      checkoutAttemptId?: string;
+      source: string;
+    },
+  ): void {
+    const expectedMinor =
+      typeof pagoData.amountMinor === "number" && pagoData.amountMinor > 0
+        ? pagoData.amountMinor
+        : Math.round(Number(pagoData.monto || 0) * 100);
+
+    if (
+      typeof stripeAmountMinor !== "number" ||
+      !Number.isFinite(stripeAmountMinor) ||
+      stripeAmountMinor !== expectedMinor
+    ) {
+      console.error("stripe_payment_amount_mismatch", {
+        eventId: context.eventId,
+        pagoId: context.pagoId,
+        checkoutAttemptId: context.checkoutAttemptId,
+        source: context.source,
+        expectedMinor,
+        receivedMinor: stripeAmountMinor ?? null,
+        pagoTotal: pagoData.monto,
+      });
+
+      throw new ApiError(
+        409,
+        "El monto pagado en Stripe no coincide con el total del checkout",
+      );
+    }
+  }
+
   private async handleStripeEvent(
     event: Stripe.Event,
   ): Promise<StripeWebhookProcessResult> {
@@ -2330,6 +2390,43 @@ async createStripeCheckoutSession(
     }
   }
 
+  private async recordWebhookEventIfNotFinalized(
+    pagoRef: FirebaseFirestore.DocumentReference,
+    eventId: string,
+    pagoData: Pago,
+    ordenData?: Orden,
+  ): Promise<boolean> {
+    if (
+      pagoData.estado !== EstadoPago.COMPLETADO &&
+      ordenData?.estado !== EstadoOrden.CONFIRMADA
+    ) {
+      return false;
+    }
+
+    const now = admin.firestore.Timestamp.now();
+
+    await firestoreTienda.runTransaction(async (tx) => {
+      const pagoSnapshot = await tx.get(pagoRef);
+      if (!pagoSnapshot.exists) {
+        return;
+      }
+
+      const latestPago = pagoSnapshot.data() as Pago;
+      if (latestPago.webhookEventIdsProcesados?.includes(eventId)) {
+        return;
+      }
+
+      tx.update(pagoRef, {
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          eventId,
+        ),
+        updatedAt: now,
+      });
+    });
+
+    return true;
+  }
+
   private async handlePaymentIntentSucceeded(
     event: Stripe.Event,
     paymentIntent: Stripe.PaymentIntent,
@@ -2346,6 +2443,23 @@ async createStripeCheckoutSession(
     }
 
     if (!pagoMatch.ordenRef) {
+      const initialPagoDoc = await pagoMatch.pagoRef.get();
+      const initialPagoData = initialPagoDoc.data() as Pago;
+      const checkoutAttemptId =
+        pagoMatch.checkoutAttemptId ||
+        initialPagoData.checkoutAttemptId ||
+        getMetadataString(paymentIntent.metadata, "checkoutAttemptId");
+
+      if (checkoutAttemptId) {
+        return this.handlePaymentIntentSucceededForCheckoutAttempt(
+          event,
+          paymentIntent,
+          pagoMatch,
+          checkoutAttemptId,
+          initialPagoData,
+        );
+      }
+
       throw new ApiError(
         404,
         "Orden no encontrada al procesar webhook de PaymentIntent",
@@ -2357,6 +2471,27 @@ async createStripeCheckoutSession(
     const ordenDataForValidation = ordenSnapshot.data() as Orden | undefined;
     if (!ordenDataForValidation) {
       throw new ApiError(404, "Orden no encontrada al procesar webhook");
+    }
+
+    const initialPagoDoc = await pagoMatch.pagoRef.get();
+    const initialPagoData = initialPagoDoc.data() as Pago;
+
+    if (
+      await this.recordWebhookEventIfNotFinalized(
+        pagoMatch.pagoRef,
+        event.id,
+        initialPagoData,
+        ordenDataForValidation,
+      )
+    ) {
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        ordenId: pagoMatch.ordenId,
+        reason: "payment_already_finalized",
+      };
     }
 
     this.assertStripeAmountMatchesOrder(
@@ -2382,8 +2517,8 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
-      const ordenSnapshot = await tx.get(ordenRef);
-      const ordenData = ordenSnapshot.data() as Orden | undefined;
+      const ordenSnapshotTx = await tx.get(ordenRef);
+      const ordenData = ordenSnapshotTx.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
         estado: EstadoPago.COMPLETADO,
@@ -2539,6 +2674,86 @@ async createStripeCheckoutSession(
       eventType: event.type,
       pagoId: pagoMatch.pagoId,
       ordenId: pagoMatch.ordenId,
+    };
+  }
+
+  private async handlePaymentIntentSucceededForCheckoutAttempt(
+    event: Stripe.Event,
+    paymentIntent: Stripe.PaymentIntent,
+    pagoMatch: {
+      pagoId: string;
+      pagoRef: FirebaseFirestore.DocumentReference;
+    },
+    checkoutAttemptId: string,
+    initialPagoData: Pago,
+  ): Promise<StripeWebhookProcessResult> {
+    if (
+      initialPagoData.webhookEventIdsProcesados?.includes(event.id) ||
+      initialPagoData.estado === EstadoPago.COMPLETADO
+    ) {
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        reason: "checkout_attempt_payment_already_finalized",
+      };
+    }
+
+    this.assertStripeAmountMatchesPago(paymentIntent.amount, initialPagoData, {
+      eventId: event.id,
+      pagoId: pagoMatch.pagoId,
+      checkoutAttemptId,
+      source: "payment_intent.succeeded",
+    });
+
+    const now = admin.firestore.Timestamp.now();
+    const { default: checkoutAttemptService } = await import(
+      "./checkout/checkout-attempt.service"
+    );
+
+    const orderId = await checkoutAttemptService.finalizePaidFromWebhook({
+      checkoutAttemptId,
+      pagoId: pagoMatch.pagoId,
+      eventId: event.id,
+    });
+
+    await pagoMatch.pagoRef.set(
+      {
+        estado: EstadoPago.COMPLETADO,
+        status: PaymentStatus.PAID,
+        providerStatus: paymentIntent.status,
+        paymentIntentId: paymentIntent.id,
+        stripeCustomerId:
+          typeof paymentIntent.customer === "string"
+            ? paymentIntent.customer
+            : initialPagoData.stripeCustomerId,
+        fechaPago: now,
+        failureCode: admin.firestore.FieldValue.delete(),
+        failureMessage: admin.firestore.FieldValue.delete(),
+        rawEventId: event.id,
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          event.id,
+        ),
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+
+    console.log("stripe_checkout_attempt_paid_via_payment_intent", {
+      checkoutAttemptId,
+      orderId,
+      pagoId: pagoMatch.pagoId,
+      eventId: event.id,
+    });
+
+    return {
+      outcome: "processed",
+      eventId: event.id,
+      eventType: event.type,
+      pagoId: pagoMatch.pagoId,
+      ordenId: orderId,
+      reason: "checkout_attempt_finalized_via_payment_intent",
     };
   }
 
@@ -2757,6 +2972,24 @@ async createStripeCheckoutSession(
       throw new ApiError(404, "Orden no encontrada al procesar webhook");
     }
 
+    if (
+      await this.recordWebhookEventIfNotFinalized(
+        pagoMatch.pagoRef,
+        event.id,
+        initialPagoData,
+        ordenDataForValidation,
+      )
+    ) {
+      return {
+        outcome: "processed",
+        eventId: event.id,
+        eventType: event.type,
+        pagoId: pagoMatch.pagoId,
+        ordenId: pagoMatch.ordenId,
+        reason: "payment_already_finalized",
+      };
+    }
+
     this.assertStripeAmountMatchesOrder(
       session.amount_total,
       ordenDataForValidation,
@@ -2780,8 +3013,8 @@ async createStripeCheckoutSession(
       if (pagoData.webhookEventIdsProcesados?.includes(event.id)) {
         return;
       }
-      const ordenSnapshot = await tx.get(ordenRef);
-      const ordenData = ordenSnapshot.data() as Orden | undefined;
+      const ordenSnapshotTx = await tx.get(ordenRef);
+      const ordenData = ordenSnapshotTx.data() as Orden | undefined;
 
       tx.update(pagoMatch.pagoRef, {
         estado: EstadoPago.COMPLETADO,

@@ -433,4 +433,133 @@ describe("ProductService.listCatalogProducts", () => {
     expect(result.map((item) => item.id)).toEqual(["prod_3"]);
     expect(result[0].activo).toBe(false);
   });
+
+  describe("catalog search", () => {
+    beforeEach(() => {
+      dbState.categorias = {
+        jerseys: { nombre: "Jerseys", activo: true },
+        playera: { nombre: "Playera", activo: true },
+      };
+      dbState.lineas = {
+        hombre: { nombre: "Hombre", activo: true },
+        caballero: { nombre: "Caballero", activo: true },
+      };
+      dbState.productos.prod_playera = {
+        clave: "APP 6215",
+        descripcion: "Playera azul grisáceo",
+        lineaId: "caballero",
+        categoriaId: "playera",
+        precioPublico: 499,
+        precioCompra: 200,
+        existencias: 2,
+        disponible: true,
+        proveedorId: "prov_1",
+        tallaIds: ["m"],
+        inventarioPorTalla: [{ tallaId: "m", cantidad: 2 }],
+        stockMinimoGlobal: 5,
+        stockMinimoPorTalla: [],
+        imagenes: ["https://example.com/playera.jpg"],
+        detalleIds: [],
+        ratingSummary: { average: 0, count: 0 },
+        activo: true,
+        createdAt: ts("2026-06-04T00:00:00.000Z"),
+        updatedAt: ts("2026-06-04T00:00:00.000Z"),
+      };
+    });
+
+    it("finds products without searchText by description", async () => {
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "playera",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).toContain("prod_playera");
+    });
+
+    it("finds products by partial clave", async () => {
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "6215",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).toContain("prod_playera");
+    });
+
+    it("finds products by middle word in description", async () => {
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "grisaceo",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).toContain("prod_playera");
+    });
+
+    it("finds products by category label", async () => {
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "playera",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).toContain("prod_playera");
+    });
+
+    it("excludes inactive products from search", async () => {
+      dbState.productos.prod_playera.activo = false;
+
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "playera azul grisaceo",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).not.toContain("prod_playera");
+    });
+
+    it("excludes unavailable products when onlyAvailable is true", async () => {
+      dbState.productos.prod_playera.existencias = 0;
+      dbState.productos.prod_playera.inventarioPorTalla = [
+        { tallaId: "m", cantidad: 0 },
+      ];
+      dbState.productos.prod_playera.disponible = false;
+
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "playera",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).not.toContain("prod_playera");
+    });
+
+    it("uses prefix search when searchText matches at start", async () => {
+      dbState.productos.prod_playera.searchText =
+        "playera azul grisaceo app 6215 playera caballero";
+
+      const result = await productService.listCatalogProducts({
+        limit: 24,
+        sort: "recientes",
+        q: "playera azul",
+        onlyOffers: false,
+        onlyAvailable: true,
+      });
+
+      expect(result.items.map((item) => item.id)).toContain("prod_playera");
+    });
+  });
 });

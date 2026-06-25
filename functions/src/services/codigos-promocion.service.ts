@@ -14,10 +14,12 @@ import {
   calcularSubtotalOriginalItems,
   construirItemsSinDescuento,
   normalizarCodigoPromocion,
+  puedeEliminarCodigoPromocion,
   toDateValue,
 } from "../utils/codigos-promocion-pricing.util";
 
 const CODIGOS_PROMOCION_COLLECTION = "codigos_promocion";
+const CODIGO_PROMOCION_USOS_COLLECTION = "codigoPromocionUsos";
 const PRODUCTOS_COLLECTION = "productos";
 
 type FirestoreData = FirebaseFirestore.DocumentData;
@@ -541,18 +543,21 @@ export const codigosPromocionService = {
     return mapCodigoPromocionDoc(updatedDoc);
   },
 
-  async eliminar(id: string, userId?: string | null): Promise<boolean> {
+  async eliminar(id: string, _userId?: string | null): Promise<boolean> {
     const docRef = collectionRef().doc(id);
     const doc = await docRef.get();
 
     if (!doc.exists) return false;
 
-    await docRef.update({
-      estado: false,
-      deletedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedBy: userId ?? null,
-    });
+    const codigoPromocion = mapCodigoPromocionDoc(doc);
+
+    if (!puedeEliminarCodigoPromocion(codigoPromocion)) {
+      throw new Error(
+        "No se puede eliminar un código promocional activo o programado. Desactívalo o espera a que venza.",
+      );
+    }
+
+    await docRef.delete();
 
     return true;
   },
@@ -698,12 +703,106 @@ export const codigosPromocionService = {
     codigoPromocionId: string,
     cantidadUsada = 1,
   ): Promise<void> {
-    const docRef = collectionRef().doc(codigoPromocionId);
+    const cantidad = Math.max(1, Math.floor(cantidadUsada));
+    const codigoRef = collectionRef().doc(codigoPromocionId);
 
-    await docRef.update({
-      usosActuales: FieldValue.increment(1),
-      stockUsadoCodigo: FieldValue.increment(cantidadUsada),
-      updatedAt: FieldValue.serverTimestamp(),
+    await firestoreTienda.runTransaction(async (transaction) => {
+      const codigoSnap = await transaction.get(codigoRef);
+      if (!codigoSnap.exists) {
+        throw new Error(
+          `Código promocional con ID ${codigoPromocionId} no encontrado`,
+        );
+      }
+
+      const codigo = mapCodigoPromocionDoc(codigoSnap);
+      const usosActuales = codigo.usosActuales ?? 0;
+      const stockUsado = codigo.stockUsadoCodigo ?? 0;
+
+      if (
+        typeof codigo.usoMaximoTotal === "number" &&
+        usosActuales >= codigo.usoMaximoTotal
+      ) {
+        throw new Error("El código promocional alcanzó su límite de usos");
+      }
+
+      if (
+        !codigo.hastaAgotarExistencias &&
+        typeof codigo.stockLimiteCodigo === "number" &&
+        stockUsado + cantidad > codigo.stockLimiteCodigo
+      ) {
+        throw new Error("El código promocional alcanzó su stock disponible");
+      }
+
+      transaction.update(codigoRef, {
+        usosActuales: FieldValue.increment(1),
+        stockUsadoCodigo: FieldValue.increment(cantidad),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    });
+  },
+
+  /**
+   * Registra el uso de un código promocional al confirmar pago.
+   * Idempotente por ordenId + codigoPromocionId.
+   */
+  async registrarUsoOrden(input: {
+    ordenId: string;
+    codigoPromocionId: string;
+    cantidadUsada?: number;
+  }): Promise<void> {
+    const cantidadUsada = Math.max(1, Math.floor(input.cantidadUsada ?? 1));
+    const codigoRef = collectionRef().doc(input.codigoPromocionId);
+    const usoRef = firestoreTienda
+      .collection(CODIGO_PROMOCION_USOS_COLLECTION)
+      .doc(`${input.ordenId}_${input.codigoPromocionId}`);
+
+    await firestoreTienda.runTransaction(async (transaction) => {
+      const [usoSnap, codigoSnap] = await Promise.all([
+        transaction.get(usoRef),
+        transaction.get(codigoRef),
+      ]);
+
+      if (usoSnap.exists) {
+        return;
+      }
+
+      if (!codigoSnap.exists) {
+        throw new Error(
+          `Código promocional con ID ${input.codigoPromocionId} no encontrado`,
+        );
+      }
+
+      const codigo = mapCodigoPromocionDoc(codigoSnap);
+      const usosActuales = codigo.usosActuales ?? 0;
+      const stockUsado = codigo.stockUsadoCodigo ?? 0;
+
+      if (
+        typeof codigo.usoMaximoTotal === "number" &&
+        usosActuales >= codigo.usoMaximoTotal
+      ) {
+        throw new Error("El código promocional alcanzó su límite de usos");
+      }
+
+      if (
+        !codigo.hastaAgotarExistencias &&
+        typeof codigo.stockLimiteCodigo === "number" &&
+        stockUsado + cantidadUsada > codigo.stockLimiteCodigo
+      ) {
+        throw new Error("El código promocional alcanzó su stock disponible");
+      }
+
+      transaction.update(codigoRef, {
+        usosActuales: FieldValue.increment(1),
+        stockUsadoCodigo: FieldValue.increment(cantidadUsada),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      transaction.set(usoRef, {
+        ordenId: input.ordenId,
+        codigoPromocionId: input.codigoPromocionId,
+        cantidadUsada,
+        createdAt: FieldValue.serverTimestamp(),
+      });
     });
   },
 };

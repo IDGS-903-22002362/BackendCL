@@ -1,8 +1,7 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../config/firebase";
 import { Orden, FulfillmentMethod } from "../models/orden.model";
-import carritoService from "./carrito.service";
-import ordenService from "./orden.service";
+import logger from "../utils/logger";
 import { getFedexConfig } from "../modules/shipping/fedex/fedex.config";
 import {
   fedexShipService,
@@ -11,6 +10,10 @@ import {
 
 const ORDENES_COLLECTION = "ordenes";
 const SHIPPING_EVENTS_COLLECTION = "shipping_events";
+
+const paidOrderFinalizerLogger = logger.child({
+  component: "paid-order-finalizer-service",
+});
 
 const hasFedexTrackingLabel = (shipping: Orden["shipping"]): boolean => {
   if (!shipping || shipping.provider !== "FEDEX") {
@@ -65,6 +68,67 @@ class PaidOrderFinalizerService {
     }
   }
 
+  private async commitPromotionalCounters(order: Orden): Promise<void> {
+    if (order.codigoPromocionId) {
+      try {
+        const { codigosPromocionService } = await import(
+          "./codigos-promocion.service"
+        );
+        const cantidadUsada = order.items.reduce(
+          (total, item) => total + Math.max(0, item.cantidad),
+          0,
+        );
+        await codigosPromocionService.registrarUsoOrden({
+          ordenId: order.id!,
+          codigoPromocionId: order.codigoPromocionId,
+          cantidadUsada: Math.max(1, cantidadUsada),
+        });
+      } catch (error) {
+        paidOrderFinalizerLogger.error("codigo_promocion_usage_failed", {
+          orderId: order.id,
+          codigoPromocionId: order.codigoPromocionId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const pricingItems = order.pricingSnapshot?.items ?? [];
+    const pricingHasOffers = pricingItems.some(
+      (item) => typeof item.ofertaAplicadaId === "string" && item.ofertaAplicadaId,
+    );
+
+    try {
+      const { ofertasService } = await import("./ofertas.service");
+      const offerItems = pricingHasOffers
+        ? pricingItems.map((item) => ({
+            ofertaAplicadaId: item.ofertaAplicadaId,
+            quantity: item.quantity,
+          }))
+        : (
+            await ofertasService.calcularPreciosCarrito(
+              order.items.map((item) => ({
+                productoId: item.productoId,
+                cantidad: item.cantidad,
+                ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+              })),
+            )
+          ).items.map((item) => ({
+            ofertaAplicadaId: item.ofertaAplicadaId,
+            quantity: item.cantidad,
+          }));
+
+      await ofertasService.commitOfferStockForOrder({
+        ordenId: order.id!,
+        items: offerItems,
+      });
+    } catch (error) {
+      paidOrderFinalizerLogger.error("oferta_stock_commit_failed", {
+        orderId: order.id,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async finalizePaidOrder(input: FinalizePaidOrderInput): Promise<void> {
     const orderRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(input.orderId);
     const orderDoc = await orderRef.get();
@@ -74,10 +138,13 @@ class PaidOrderFinalizerService {
 
     const order = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
 
+    const { default: ordenService } = await import("./orden.service");
     await ordenService.commitStockForOrder(input.orderId);
+    await this.commitPromotionalCounters(order);
 
     const cartId = order.paymentMetadata?.cartId;
     if (typeof cartId === "string" && cartId.trim()) {
+      const { default: carritoService } = await import("./carrito.service");
       await carritoService.clearCartAfterSuccessfulPayment(cartId.trim());
     }
 

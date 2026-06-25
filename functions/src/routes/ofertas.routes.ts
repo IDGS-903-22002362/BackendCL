@@ -270,6 +270,8 @@ router.get(
  */
 router.post(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateBody(createOfertaSchema),
   ofertasCommandController.crear
 );
@@ -315,6 +317,8 @@ router.post(
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(ofertaIdParamSchema),
   validateBody(updateOfertaSchema),
   ofertasCommandController.actualizar
@@ -325,9 +329,11 @@ router.put(
  * /api/ofertas/{id}:
  *   delete:
  *     summary: Eliminar oferta
- *     description: Realiza soft delete de una oferta. Pendiente conectar autenticación y autorización admin.
+ *     description: Elimina permanentemente una oferta desactivada o vencida. Requiere admin. No permite eliminar ofertas activas o programadas.
  *     tags:
  *       - Ofertas
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -350,12 +356,18 @@ router.put(
  *                   type: string
  *                   example: Oferta eliminada correctamente
  *       400:
- *         description: Parámetros inválidos.
+ *         description: Parámetros inválidos o la oferta sigue activa/programada.
+ *       401:
+ *         description: No autenticado.
+ *       403:
+ *         description: No autorizado.
  *       404:
  *         description: Oferta no encontrada.
  */
 router.delete(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(ofertaIdParamSchema),
   ofertasCommandController.eliminar
 );

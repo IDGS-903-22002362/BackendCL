@@ -21,6 +21,14 @@ import {
     deleteImageSchema as deleteNewsImageSchema,
 } from "../middleware/validators/new.validator";
 import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
+import { verifyRole } from "../middleware/validation.middleware";
+import { RolUsuario } from "../models/usuario.model";
+
+const NEWS_STAFF_ROLES = [
+  RolUsuario.ADMIN,
+  RolUsuario.EMPLEADO,
+  RolUsuario.EMPLEADO_CLUB,
+];
 
 
 // Configurar multer para almacenar archivos en memoria
@@ -95,7 +103,13 @@ router.get("/", optionalAuthMiddleware, queryController.getAll);
  *       401:
  *         description: No autorizado
  */
-router.post("/", authMiddleware, validateBody(createNewSchema), commandController.create);
+router.post(
+  "/",
+  authMiddleware,
+  verifyRole(NEWS_STAFF_ROLES),
+  validateBody(createNewSchema),
+  commandController.create,
+);
 
 // 2. Rutas con parámetros específicas
 /**
@@ -130,6 +144,8 @@ router.get(
  */
 router.post(
     "/sync-instagram",
+    authMiddleware,
+    verifyRole(NEWS_STAFF_ROLES),
     commandController.syncInstagramNoticias
 );
 
@@ -174,6 +190,8 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
  */
 router.post(
     "/:id/generar-ia",
+    authMiddleware,
+    verifyRole(NEWS_STAFF_ROLES),
     validateParams(idParamSchema),
     commandController.generarIA
 );
@@ -206,7 +224,14 @@ router.post(
  *       404:
  *         description: Noticia no encontrada
  */
-router.put("/:id", validateParams(idParamSchema), validateBody(updateNewSchema), commandController.update);
+router.put(
+  "/:id",
+  authMiddleware,
+  verifyRole(NEWS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  validateBody(updateNewSchema),
+  commandController.update,
+);
 
 /**
  * @swagger
@@ -222,7 +247,13 @@ router.put("/:id", validateParams(idParamSchema), validateBody(updateNewSchema),
  *       200:
  *         description: Noticia eliminada
  */
-router.delete("/:id", validateParams(idParamSchema), commandController.remove);
+router.delete(
+  "/:id",
+  authMiddleware,
+  verifyRole(NEWS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  commandController.remove,
+);
 
 /**
  * @swagger
@@ -256,6 +287,8 @@ router.delete("/:id", validateParams(idParamSchema), commandController.remove);
 // 4. Rutas de imágenes
 router.post(
     "/:id/imagenes",
+    authMiddleware,
+    verifyRole(NEWS_STAFF_ROLES),
     validateParams(idParamSchema),
     upload.array("imagenes", 5),
     commandController.uploadImages
@@ -289,6 +322,8 @@ router.post(
 
 router.delete(
     "/:id/imagenes",
+    authMiddleware,
+    verifyRole(NEWS_STAFF_ROLES),
     validateParams(idParamSchema),
     validateBody(deleteNewsImageSchema),
     commandController.deleteImage

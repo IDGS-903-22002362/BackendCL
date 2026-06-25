@@ -16,6 +16,7 @@ import {
   validateQuery,
 } from "../middleware/validation.middleware";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -71,6 +72,8 @@ const couponRateLimit = createSimpleRateLimiter({
  */
 router.get(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateQuery(listCodigosPromocionQuerySchema),
   codigosPromocionQueryController.listar,
 );
@@ -190,6 +193,8 @@ router.get(
  */
 router.post(
   "/",
+  authMiddleware,
+  requireAdmin,
   validateBody(createCodigoPromocionSchema),
   codigosPromocionCommandController.crear,
 );
@@ -235,6 +240,8 @@ router.post(
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(codigoPromocionParamsSchema),
   validateBody(updateCodigoPromocionSchema),
   codigosPromocionCommandController.actualizar,
@@ -245,9 +252,11 @@ router.put(
  * /api/codigos-promocion/{id}:
  *   delete:
  *     summary: Eliminar código promocional
- *     description: Elimina/desactiva un código promocional existente.
+ *     description: Elimina permanentemente un código promocional desactivado o vencido. Requiere admin. No permite eliminar códigos activos o programados.
  *     tags:
  *       - Codigos Promocionales
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -259,12 +268,18 @@ router.put(
  *       200:
  *         description: Código promocional eliminado correctamente.
  *       400:
- *         description: Parámetros inválidos.
+ *         description: Parámetros inválidos o el código sigue activo/programado.
+ *       401:
+ *         description: No autenticado.
+ *       403:
+ *         description: No autorizado.
  *       404:
  *         description: Código promocional no encontrado.
  */
 router.delete(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(codigoPromocionParamsSchema),
   codigosPromocionCommandController.eliminar,
 );

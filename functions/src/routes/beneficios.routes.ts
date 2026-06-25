@@ -11,6 +11,14 @@ import {
   updateBeneficioSchema,
 } from "../middleware/validators/beneficio.validator";
 import { authMiddleware } from "../utils/middlewares";
+import { verifyRole } from "../middleware/validation.middleware";
+import { RolUsuario } from "../models/usuario.model";
+
+const BENEFICIOS_STAFF_ROLES = [
+  RolUsuario.ADMIN,
+  RolUsuario.EMPLEADO,
+  RolUsuario.EMPLEADO_CLUB,
+];
 
 const router = Router();
 
@@ -66,6 +74,7 @@ router.get("/", queryController.getAll);
 router.post(
   "/",
   authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
   validateBody(createBeneficioSchema),
   commandController.create,
 );
@@ -123,6 +132,7 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
 router.put(
   "/:id",
   authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
   validateParams(idParamSchema),
   validateBody(updateBeneficioSchema),
   commandController.update,
@@ -154,6 +164,7 @@ router.put(
 router.delete(
   "/:id",
   authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
   validateParams(idParamSchema),
   commandController.remove,
 );

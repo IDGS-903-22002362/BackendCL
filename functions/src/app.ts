@@ -96,7 +96,7 @@ app.use(express.raw({
 
 app.use((req, res, next) => {
   if (isNotMultipart(req)) {
-    express.json({ limit: "500mb" })(req, res, next);
+    express.json({ limit: "32mb" })(req, res, next);
   } else {
     next();
   }
@@ -104,7 +104,7 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   if (isNotMultipart(req)) {
-    express.urlencoded({ limit: "500mb", extended: true })(req, res, next);
+    express.urlencoded({ limit: "32mb", extended: true })(req, res, next);
   } else {
     next();
   }
@@ -115,16 +115,17 @@ if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Swagger UI - Documentación interactiva de la API
-// Accesible en: http://localhost:3000/api-docs
-app.use(
-  "/api-docs",
-  swaggerUi.serve,
-  swaggerUi.setup(getSwaggerSpec(), {
-    customCss: ".swagger-ui .topbar { display: none }",
-    customSiteTitle: "Tienda Club León - API Docs",
-  }),
-);
+// Swagger UI - solo en desarrollo/local (no exponer en producción)
+if (!isProductionRuntime) {
+  app.use(
+    "/api-docs",
+    swaggerUi.serve,
+    swaggerUi.setup(getSwaggerSpec(), {
+      customCss: ".swagger-ui .topbar { display: none }",
+      customSiteTitle: "Tienda Club León - API Docs",
+    }),
+  );
+}
 
 app.use(publicPaymentsRoutes);
 app.use("/api", routes);

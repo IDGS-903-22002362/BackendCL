@@ -16,6 +16,7 @@ import {
   searchTermSchema,
   lineaIdParamSchema,
 } from "../middleware/validators/common.validator";
+import { authMiddleware, requireAdmin } from "../utils/middlewares";
 
 const router = Router();
 
@@ -238,10 +239,18 @@ router.get("/:id", validateParams(idParamSchema), queryController.getById);
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/", validateBody(createCategorySchema), commandController.create);
+router.post(
+  "/",
+  authMiddleware,
+  requireAdmin,
+  validateBody(createCategorySchema),
+  commandController.create,
+);
 
 router.post(
   "/:id/imagen",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   parseMultipartImages({
     fieldName: "imagen",
@@ -299,6 +308,8 @@ router.post(
  */
 router.put(
   "/:id",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   validateBody(updateCategorySchema),
   commandController.update,
@@ -306,6 +317,8 @@ router.put(
 
 router.delete(
   "/:id/imagen",
+  authMiddleware,
+  requireAdmin,
   validateParams(idParamSchema),
   commandController.deleteImage,
 );
@@ -343,6 +356,12 @@ router.delete(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.delete("/:id", validateParams(idParamSchema), commandController.remove);
+router.delete(
+  "/:id",
+  authMiddleware,
+  requireAdmin,
+  validateParams(idParamSchema),
+  commandController.remove,
+);
 
 export default router;

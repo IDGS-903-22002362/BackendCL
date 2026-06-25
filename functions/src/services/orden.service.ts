@@ -42,12 +42,13 @@ import {
 } from "./shipping-refund-guard.service";
 import {
   buildFedexTrackingUrl,
+  calculateManualShippingCost,
   MANUAL_FEDEX_CARRIER,
   MANUAL_FEDEX_CURRENCY,
   MANUAL_FEDEX_METHOD,
   MANUAL_FEDEX_PROVIDER,
-  MANUAL_FEDEX_SHIPPING_COST,
   MANUAL_FEDEX_STATUS,
+  resolveManualShippingZone,
 } from "../config/manual-shipping.config";
 
 /**
@@ -212,6 +213,9 @@ export class OrdenService {
     address: NonNullable<Orden["direccionEnvio"]>,
     existing?: Record<string, any>,
   ): Record<string, any> {
+    const shippingAmount = calculateManualShippingCost(address.codigoPostal);
+    const shippingZone = resolveManualShippingZone(address.codigoPostal);
+
     return {
       ...(existing || {}),
       method: "MANUAL",
@@ -219,12 +223,13 @@ export class OrdenService {
       carrier: MANUAL_FEDEX_CARRIER,
       shippingMethod: MANUAL_FEDEX_METHOD,
       serviceName: existing?.serviceName || "FedEx manual",
-      amount: MANUAL_FEDEX_SHIPPING_COST,
+      amount: shippingAmount,
       currency: MANUAL_FEDEX_CURRENCY,
       status: existing?.status || MANUAL_FEDEX_STATUS,
       address,
       addressValidationStatus: "USER_CONFIRMED",
       createdManually: true,
+      shippingZone,
       quotedAt: existing?.quotedAt || new Date().toISOString(),
     };
   }
@@ -645,7 +650,7 @@ console.log(
       const costoEnvioCalculado =
         fulfillmentMethod === FulfillmentMethod.PICKUP
           ? 0
-          : MANUAL_FEDEX_SHIPPING_COST;
+          : calculateManualShippingCost(direccionEnvio?.codigoPostal);
       const totalCalculado = roundCurrency(
   subtotalCalculado + impuestosCalculados + costoEnvioCalculado,
 );

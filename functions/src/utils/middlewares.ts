@@ -115,27 +115,65 @@ export const blockDebugInProduction = (
   next();
 };
 
+const APP_CHECK_SKIP_PATH_PREFIXES = [
+  "/api/stripe/webhook",
+  "/api/pagos/webhook",
+  "/api/webhooks/aplazo",
+  "/health",
+  "/api/health",
+];
+
+function shouldSkipAppCheck(req: Request): boolean {
+  const path = req.path || "";
+  const originalUrl = req.originalUrl || "";
+
+  return APP_CHECK_SKIP_PATH_PREFIXES.some(
+    (prefix) => path.startsWith(prefix) || originalUrl.startsWith(prefix),
+  );
+}
+
 export const optionalAppCheckMiddleware = async (
   req: Request,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  if (process.env.APP_CHECK_ENFORCED !== "true") {
+  if (shouldSkipAppCheck(req)) {
     next();
     return;
   }
 
+  const enforced = process.env.APP_CHECK_ENFORCED === "true";
   const token = req.header("X-Firebase-AppCheck");
+
   if (!token) {
-    res.status(401).json({ success: false, message: "App Check token requerido" });
+    if (enforced) {
+      res.status(401).json({ success: false, message: "App Check token requerido" });
+      return;
+    }
+
+    console.warn("app_check_observation_missing", {
+      route: req.originalUrl,
+      method: req.method,
+    });
+    next();
     return;
   }
 
   try {
     await getAppCheck(admin.app()).verifyToken(token);
     next();
-  } catch {
-    res.status(401).json({ success: false, message: "App Check token invalido" });
+  } catch (error) {
+    if (enforced) {
+      res.status(401).json({ success: false, message: "App Check token invalido" });
+      return;
+    }
+
+    console.warn("app_check_observation_invalid", {
+      route: req.originalUrl,
+      method: req.method,
+      reason: error instanceof Error ? error.message : "invalid",
+    });
+    next();
   }
 };
 

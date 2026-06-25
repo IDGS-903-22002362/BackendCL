@@ -20,12 +20,13 @@ import {
 } from "../../modules/shipping/fedex/fedex-rates.types";
 import { shippingQuoteService } from "../../modules/shipping/shipping-quote.service";
 import {
+  calculateManualShippingCost,
   MANUAL_FEDEX_CARRIER,
   MANUAL_FEDEX_CURRENCY,
   MANUAL_FEDEX_METHOD,
   MANUAL_FEDEX_PROVIDER,
-  MANUAL_FEDEX_SHIPPING_COST,
   MANUAL_FEDEX_STATUS,
+  resolveManualShippingZone,
 } from "../../config/manual-shipping.config";
 import type {
   ShippingQuoteRecord,
@@ -185,19 +186,27 @@ export class CheckoutShippingService {
 
     if (method === "MANUAL") {
       const shippingAddress = this.requireShippingAddress(input.shippingAddress);
+      const shippingZone = resolveManualShippingZone(
+        shippingAddress.postalCode,
+      );
+      const shippingAmount = calculateManualShippingCost(
+        shippingAddress.postalCode,
+      );
+
       return {
         method: "MANUAL",
         provider: MANUAL_FEDEX_PROVIDER,
         carrier: MANUAL_FEDEX_CARRIER,
         shippingMethod: MANUAL_FEDEX_METHOD,
         serviceName: "FedEx manual",
-        amount: MANUAL_FEDEX_SHIPPING_COST,
+        amount: shippingAmount,
         currency: MANUAL_FEDEX_CURRENCY || input.currency,
         address: shippingAddress,
         addressValidationStatus:
           shippingAddress.addressValidationStatus || "USER_CONFIRMED",
         status: MANUAL_FEDEX_STATUS,
         createdManually: true,
+        shippingZone,
         quotedAt: new Date().toISOString(),
       };
     }
