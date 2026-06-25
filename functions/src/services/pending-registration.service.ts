@@ -79,7 +79,14 @@ class PendingRegistrationService {
 
       return { success: true, code };
     } catch (error) {
-      console.error("Error almacenando registro pendiente:", error);
+      if (
+        error instanceof Error &&
+        error.message.includes("JWT_SECRET no está configurado")
+      ) {
+        console.error("Error de configuración al cifrar registro pendiente:", error.message);
+      } else {
+        console.error("Error almacenando registro pendiente:", error);
+      }
       return { success: false };
     }
   }

@@ -35,6 +35,13 @@ export interface CreateEmailUserInput {
   genero?: string;
 }
 
+function getFirebaseErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: string }).code || "");
+  }
+  return "";
+}
+
 export async function isEmailAlreadyRegistered(email: string): Promise<boolean> {
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -42,12 +49,16 @@ export async function isEmailAlreadyRegistered(email: string): Promise<boolean> 
     await authAppOficial.getUserByEmail(normalizedEmail);
     return true;
   } catch (error: unknown) {
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? String((error as { code?: string }).code || "")
-        : "";
+    const code = getFirebaseErrorCode(error);
 
-    if (code !== "auth/user-not-found") {
+    if (code === "auth/user-not-found") {
+      // Continue with Firestore lookup below.
+    } else if (code) {
+      console.warn("auth_email_lookup_failed", {
+        code,
+        email: normalizedEmail,
+      });
+    } else {
       throw error;
     }
   }

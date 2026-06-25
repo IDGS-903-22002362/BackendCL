@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import pagoService from "../../services/pago.service";
 import { ApiError } from "../../utils/error-handler";
+import { sendPublicError } from "../../utils/public-error.util";
 
 const getAuthenticatedUid = (req: Request): string => {
   if (!req.user?.uid) {
@@ -42,6 +43,28 @@ const getRawWebhookBody = (req: Request): Buffer => {
   );
 };
 
+const respondStripeError = (
+  res: Response,
+  req: Request,
+  error: unknown,
+  fallbackMessage: string,
+  fallbackCode: string,
+  logLabel: string,
+): Response => {
+  if (error instanceof ApiError) {
+    return sendPublicError(res, error, req.requestId, {
+      fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+      logLabel,
+    });
+  }
+
+  return sendPublicError(res, error, req.requestId, {
+    fallbackMessage,
+    fallbackCode,
+    logLabel,
+  });
+};
+
 export const getConfig = async (_req: Request, res: Response) => {
   const config = pagoService.getPublicStripeConfig();
   return res.status(200).json({
@@ -78,18 +101,14 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al crear PaymentIntent",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al crear PaymentIntent",
+      "STRIPE_PAYMENT_INTENT_FAILED",
+      "stripe_create_payment_intent",
+    );
   }
 };
 
@@ -106,18 +125,14 @@ export const getPaymentIntent = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al consultar PaymentIntent",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al consultar PaymentIntent",
+      "STRIPE_PAYMENT_INTENT_READ_FAILED",
+      "stripe_get_payment_intent",
+    );
   }
 };
 
@@ -149,18 +164,14 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
   },
 });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al crear Checkout Session",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al crear Checkout Session",
+      "STRIPE_CHECKOUT_SESSION_FAILED",
+      "stripe_create_checkout_session",
+    );
   }
 };
 
@@ -177,18 +188,14 @@ export const getCheckoutSession = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al consultar Checkout Session",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al consultar Checkout Session",
+      "STRIPE_CHECKOUT_SESSION_READ_FAILED",
+      "stripe_get_checkout_session",
+    );
   }
 };
 
@@ -206,18 +213,14 @@ export const createSetupIntent = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al crear SetupIntent",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al crear SetupIntent",
+      "STRIPE_SETUP_INTENT_FAILED",
+      "stripe_create_setup_intent",
+    );
   }
 };
 
@@ -235,18 +238,14 @@ export const createBillingPortal = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al crear sesión de portal",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al crear sesión de portal",
+      "STRIPE_PORTAL_SESSION_FAILED",
+      "stripe_create_portal_session",
+    );
   }
 };
 
@@ -264,18 +263,14 @@ export const createRefund = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al procesar el reembolso",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al procesar el reembolso",
+      "STRIPE_REFUND_FAILED",
+      "stripe_refund",
+    );
   }
 };
 
@@ -300,17 +295,13 @@ export const webhook = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
-    if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Error interno al procesar webhook Stripe",
-      error: error instanceof Error ? error.message : "Error desconocido",
-    });
+    return respondStripeError(
+      res,
+      req,
+      error,
+      "Error interno al procesar webhook Stripe",
+      "STRIPE_WEBHOOK_FAILED",
+      "stripe_webhook",
+    );
   }
 };

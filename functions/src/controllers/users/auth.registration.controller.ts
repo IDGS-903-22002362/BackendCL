@@ -9,6 +9,35 @@ import {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD_LENGTH = 6;
 
+function getFirebaseErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: string }).code || "");
+  }
+  return "";
+}
+
+function registrationServerErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    if (
+      error.message.includes("PENDING_REGISTRATION_SECRET") ||
+      error.message.includes("JWT_SECRET no está configurado")
+    ) {
+      return "Configuración del servidor incompleta. Contacta soporte.";
+    }
+  }
+
+  const code = getFirebaseErrorCode(error);
+  if (
+    code === "auth/insufficient-permission" ||
+    code === "permission-denied" ||
+    code === "7"
+  ) {
+    return "Configuración del servidor incompleta. Contacta soporte.";
+  }
+
+  return "Error interno del servidor";
+}
+
 function normalizeGenero(genero?: string): string | undefined {
   if (!genero) return undefined;
 
@@ -73,9 +102,11 @@ export async function requestRegistrationCode(req: Request, res: Response) {
     const alreadyRegistered = await isEmailAlreadyRegistered(normalizedEmail);
 
     if (alreadyRegistered) {
-      return res.status(409).json({
-        success: false,
-        message: "Ya existe una cuenta con este correo electrónico",
+      return res.status(200).json({
+        success: true,
+        message:
+          "Si el correo puede registrarse, recibirás un código de verificación en unos minutos.",
+        expiresIn: 10,
       });
     }
 
@@ -124,7 +155,7 @@ export async function requestRegistrationCode(req: Request, res: Response) {
     console.error("Error en requestRegistrationCode:", error);
     return res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
+      message: registrationServerErrorMessage(error),
     });
   }
 }
@@ -169,7 +200,8 @@ export async function verifyRegistration(req: Request, res: Response) {
       await pendingRegistrationService.deletePendingRegistration(normalizedEmail);
       return res.status(409).json({
         success: false,
-        message: "Ya existe una cuenta con este correo electrónico",
+        message:
+          "No fue posible completar el registro. Inicia sesión o solicita un nuevo código.",
       });
     }
 
@@ -216,7 +248,7 @@ export async function verifyRegistration(req: Request, res: Response) {
     console.error("Error en verifyRegistration:", error);
     return res.status(500).json({
       success: false,
-      message: "Error interno del servidor",
+      message: registrationServerErrorMessage(error),
     });
   }
 }

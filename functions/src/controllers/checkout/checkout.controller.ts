@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import checkoutAttemptService from "../../services/checkout/checkout-attempt.service";
 import { ApiError } from "../../utils/error-handler";
+import { sendPublicError } from "../../utils/public-error.util";
 
 const getAuthenticatedUid = (req: Request): string => {
   if (!req.user?.uid) {
@@ -43,16 +44,16 @@ export const startCheckout = async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_start",
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Error al iniciar checkout",
-      error: error instanceof Error ? error.message : "Error desconocido",
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al iniciar checkout",
+      fallbackCode: "CHECKOUT_START_FAILED",
+      logLabel: "checkout_start",
     });
   }
 };
@@ -71,16 +72,16 @@ export const getAttemptStatus = async (req: Request, res: Response) => {
     });
   } catch (error) {
     if (error instanceof ApiError) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_status",
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Error al consultar estado del checkout",
-      error: error instanceof Error ? error.message : "Error desconocido",
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al consultar estado del checkout",
+      fallbackCode: "CHECKOUT_STATUS_FAILED",
+      logLabel: "checkout_status",
     });
   }
 };

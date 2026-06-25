@@ -5,6 +5,14 @@ export const STRIPE_SECRETS = [
 
 export const AUTH_SECRETS = ["JWT_SECRET"] as const;
 
+/** Service account JSON for cross-project access to app-oficial-leon (Auth, Firestore). */
+export const APP_OFICIAL_SECRETS = ["SERVICE_ACCOUNT_APP_OFICIAL"] as const;
+
+/** Optional; falls back to JWT_SECRET for pending_registrations password encryption. */
+export const PENDING_REGISTRATION_SECRETS = [
+  "PENDING_REGISTRATION_SECRET",
+] as const;
+
 export const AI_API_SECRETS = [
   "GEMINI_API_KEY",
   "GOOGLE_API_KEY",
@@ -76,6 +84,8 @@ export const BREVO_SECRETS = [
 
 export const API_RUNTIME_SECRETS = [
   ...AUTH_SECRETS,
+  ...APP_OFICIAL_SECRETS,
+  ...PENDING_REGISTRATION_SECRETS,
   ...STRIPE_SECRETS,
   ...AI_API_SECRETS,
   ...FEDEX_SECRETS,

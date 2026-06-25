@@ -34,18 +34,17 @@ if (!appOficial) {
     process.env.APP_OFICIAL_STORAGE_BUCKET ||
     `${projectId}.firebasestorage.app`;
 
-  const config: any = {
+  const config: admin.AppOptions = {
     projectId,
     storageBucket,
   };
 
-  // Solo agregar credenciales si no estamos en Cloud Functions
-  if (
-    !isCloudFunction &&
-    serviceAccount &&
-    typeof admin.credential?.cert === "function"
-  ) {
+  if (serviceAccount && typeof admin.credential?.cert === "function") {
     config.credential = admin.credential.cert(serviceAccount);
+  } else if (isCloudFunction) {
+    console.warn(
+      "APP_OFICIAL: SERVICE_ACCOUNT_APP_OFICIAL no configurado; Firebase Auth de app-oficial puede fallar",
+    );
   }
 
   appOficial = admin.initializeApp(config, "APP_OFICIAL");
@@ -63,4 +62,5 @@ console.log("🔥 App oficial inicializada:", {
   appName: appOficial.name,
   projectId: appOficial.options.projectId,
   mode: isCloudFunction ? "cloud" : "local",
+  hasServiceAccount: Boolean(serviceAccount),
 });

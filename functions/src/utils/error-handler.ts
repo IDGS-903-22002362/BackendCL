@@ -4,23 +4,13 @@
  */
 
 import { Request, Response, NextFunction } from "express";
+import { ApiError } from "./api-error";
+import {
+  buildPublicErrorBody,
+  logSafeError,
+} from "./public-error.util";
 
-/**
- * Clase personalizada para errores de la API
- */
-export class ApiError extends Error {
-  statusCode: number;
-  isOperational: boolean;
-
-  constructor(statusCode: number, message: string, isOperational = true) {
-    super(message);
-    this.statusCode = statusCode;
-    this.isOperational = isOperational;
-
-    // Mantener el stack trace correcto
-    Error.captureStackTrace(this, this.constructor);
-  }
-}
+export { ApiError };
 
 /**
  * Middleware global de manejo de errores
@@ -28,7 +18,7 @@ export class ApiError extends Error {
  */
 export const errorHandler = (
   err: Error | ApiError,
-  _req: Request,
+  req: Request,
   res: Response,
   next: NextFunction
 ) => {
@@ -37,27 +27,15 @@ export const errorHandler = (
     return next(err);
   }
 
-  // Log del error
-  console.error("❌ Error capturado por errorHandler:");
-  console.error("Mensaje:", err.message);
-  console.error("Stack:", err.stack);
+  logSafeError("errorHandler", err, req.requestId);
 
-  // Determinar código de estado
-  const statusCode = err instanceof ApiError ? err.statusCode : 500;
+  const { statusCode, body } = buildPublicErrorBody(err, req.requestId, {
+    fallbackMessage: "Error interno del servidor",
+    fallbackCode:
+      err instanceof ApiError && err.code ? err.code : "INTERNAL_ERROR",
+  });
 
-  // Preparar respuesta
-  const response: any = {
-    success: false,
-    message: err.message || "Error interno del servidor",
-  };
-
-  // En desarrollo, incluir stack trace
-  if (process.env.NODE_ENV === "development") {
-    response.stack = err.stack;
-  }
-
-  // Enviar respuesta
-  res.status(statusCode).json(response);
+  return res.status(statusCode).json(body);
 };
 
 /**
@@ -80,9 +58,17 @@ export const notFoundHandler = (
   _res: Response,
   next: NextFunction
 ) => {
+  logSafeError(
+    "not_found",
+    new Error(`${req.method} ${req.originalUrl}`),
+    req.requestId,
+  );
+
   const error = new ApiError(
     404,
-    `Ruta no encontrada: ${req.method} ${req.originalUrl}`
+    "Recurso no encontrado",
+    true,
+    "NOT_FOUND",
   );
   next(error);
 };

@@ -1,4 +1,4 @@
-import { ApiError } from "../../utils/error-handler";
+import { ApiError } from "../../utils/api-error";
 
 export class PaymentApiError extends ApiError {
   readonly code: string;

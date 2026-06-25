@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import { PaymentApiError, isPaymentApiError } from "../../services/payments/payment-api-error";
 import paymentsService from "../../services/payments/payments.service";
 import { PaymentStatus } from "../../models/pago.model";
+import {
+  buildPublicErrorBody,
+  logSafeError,
+} from "../../utils/public-error.util";
 
 const getActorFromRequest = (req: Request) => ({
   uid: req.user?.uid || "",
@@ -129,25 +133,41 @@ const toStatusPayload = (
   };
 };
 
-const respondPaymentError = (res: Response, error: unknown): Response => {
+const respondPaymentError = (
+  res: Response,
+  req: Request,
+  error: unknown,
+): Response => {
+  logSafeError("payments_v2", error, req.requestId);
+
   if (isPaymentApiError(error)) {
-    return res.status(error.statusCode).json({
+    const { statusCode, body } = buildPublicErrorBody(error, req.requestId);
+
+    return res.status(statusCode).json({
       ok: false,
       error: {
-        code: error.code,
-        message: error.message,
-        details: error.details,
+        code: body.code,
+        message: body.message,
+        ...(error.details ? { details: error.details } : {}),
       },
+      ...(body.retryable !== undefined ? { retryable: body.retryable } : {}),
+      ...(req.requestId ? { requestId: req.requestId } : {}),
     });
   }
 
-  return res.status(500).json({
+  const { statusCode, body } = buildPublicErrorBody(error, req.requestId, {
+    fallbackMessage: "Error interno de pagos",
+    fallbackCode: "PAYMENT_INTERNAL_ERROR",
+  });
+
+  return res.status(statusCode).json({
     ok: false,
     error: {
-      code: "PAYMENT_INTERNAL_ERROR",
-      message:
-        error instanceof Error ? error.message : "Error interno de pagos",
+      code: body.code,
+      message: body.message,
     },
+    retryable: body.retryable,
+    ...(req.requestId ? { requestId: req.requestId } : {}),
   });
 };
 
@@ -170,7 +190,7 @@ export const createAplazoOnline = async (req: Request, res: Response) => {
       expiresAt: serializeDateLike(result.paymentAttempt.expiresAt),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -191,7 +211,7 @@ export const getPaymentStatus = async (req: Request, res: Response) => {
       ),
     );
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -220,7 +240,7 @@ export const webhookAplazo = async (req: Request, res: Response) => {
       eventLogId: result.eventLogId,
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -239,7 +259,7 @@ export const reconcileAplazoPayment = async (req: Request, res: Response) => {
       providerStatus: paymentAttempt.providerStatus,
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -259,7 +279,7 @@ export const cancelAplazoPayment = async (req: Request, res: Response) => {
       providerStatus: paymentAttempt.providerStatus,
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -282,7 +302,7 @@ export const refundAplazoPayment = async (req: Request, res: Response) => {
       refundState: paymentAttempt.refundState,
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -314,7 +334,7 @@ export const getAplazoRefundStatus = async (req: Request, res: Response) => {
       refunds: serializeRefunds(result.refunds),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -333,7 +353,7 @@ export const createAplazoRefundRequest = async (req: Request, res: Response) => 
       data: serializeRefundRequest(request),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -353,7 +373,7 @@ export const listAplazoRefundRequests = async (req: Request, res: Response) => {
       data: requests.map(serializeRefundRequest),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -369,7 +389,7 @@ export const getAplazoRefundRequest = async (req: Request, res: Response) => {
       data: serializeRefundRequest(request),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -394,7 +414,7 @@ export const listAdminAplazoRefundRequests = async (
       data: requests.map(serializeRefundRequest),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -417,7 +437,7 @@ export const approveAplazoRefundRequest = async (
       data: serializeRefundRequest(request),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
 
@@ -439,6 +459,6 @@ export const rejectAplazoRefundRequest = async (
       data: serializeRefundRequest(request),
     });
   } catch (error) {
-    return respondPaymentError(res, error);
+    return respondPaymentError(res, req, error);
   }
 };
