@@ -926,6 +926,12 @@ export class CarritoService {
     const direccionEnvio = this.normalizeDireccionEnvio(
       checkoutData.direccionEnvio,
     );
+
+    const codigoPromocion =
+      typeof checkoutData.codigoPromocion === "string"
+        ? checkoutData.codigoPromocion.trim().toUpperCase()
+        : undefined;
+
     const pricing = await checkoutPricingService.calculateCheckoutPricing({
       userId: usuarioId,
       cartId: carrito.id,
@@ -942,12 +948,8 @@ export class CarritoService {
       shippingQuoteId: checkoutData.shippingQuoteId,
       selectedShippingOptionId: checkoutData.selectedShippingOptionId,
       selectedServiceType: checkoutData.selectedServiceType,
+      ...(codigoPromocion ? { codigoPromocion } : {}),
     });
-
-    const codigoPromocion =
-      typeof checkoutData.codigoPromocion === "string"
-        ? checkoutData.codigoPromocion.trim().toUpperCase()
-        : undefined;
 
     const orderDraft: CrearOrdenDTO = {
       usuarioId,

@@ -139,11 +139,11 @@ function validarAlcanceCodigoPromocion(
   const lineaIds = data.lineaIds ?? [];
 
   if (data.aplicaA === "productos") {
-    if (productoIds.length !== 1) {
+    if (productoIds.length < 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["productoIds"],
-        message: "Selecciona exactamente un producto.",
+        message: "Selecciona al menos un producto.",
       });
     }
 

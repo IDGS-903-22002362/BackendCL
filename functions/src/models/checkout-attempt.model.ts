@@ -32,6 +32,13 @@ export interface CheckoutAttempt {
   metodoPago: string;
   fulfillmentMethod?: string;
   idempotencyKey: string;
+  /**
+   * Firma comparable del carrito + pricing al momento de crear el intento.
+   * Permite detectar cambios (items, cantidades, tallas, ofertas, código,
+   * envío o total) y evitar reutilizar una sesión de Stripe obsoleta.
+   * Campo opcional para mantener compatibilidad con documentos existentes.
+   */
+  cartSignature?: string;
   pagoId?: string;
   orderId?: string;
   stripeCheckoutSessionId?: string;
