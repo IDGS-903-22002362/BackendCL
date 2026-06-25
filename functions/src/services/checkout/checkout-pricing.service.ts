@@ -13,6 +13,13 @@ import {
 import { Producto } from "../../models/producto.model";
 import { checkoutShippingService, CheckoutShippingService } from "./checkout-shipping.service";
 import { normalizeTallaIds, completeInventarioPorTalla } from "../../utils/size-inventory.util";
+import { ofertasService, OfertasService } from "../ofertas.service";
+import {
+  ProductoOfertaBase,
+  seleccionarMejorOferta,
+} from "../../utils/ofertas-pricing.util";
+import { Oferta } from "../../models/ofertas.model";
+import { codigosPromocionService } from "../codigos-promocion.service";
 
 const CARRITOS_COLLECTION = "carritos";
 const PRODUCTOS_COLLECTION = "productos";
@@ -74,6 +81,7 @@ export class CheckoutPricingService {
   constructor(
     private readonly db: FirestoreLike = firestoreTienda as FirestoreLike,
     private readonly shippingService: CheckoutShippingService = checkoutShippingService,
+    private readonly offersService: OfertasService = ofertasService,
   ) {}
 
   async calculateCheckoutPricing(
@@ -118,12 +126,76 @@ export class CheckoutPricingService {
     });
 
     const shippingTotal = roundMoney(shipping.amount);
-    const total = roundMoney(subtotalFinal + shippingTotal);
+
+    // Aplicar código promocional en backend, replicando EXACTAMENTE la lógica de
+    // orden.service.createOrden (PASO 1.5): ofertas primero (ya aplicadas en
+    // buildItemSnapshots) y luego el código sobre el subtotal con ofertas. Esto
+    // garantiza que el monto cobrado por Stripe == total de la orden creada en el
+    // webhook y evita discrepancias entre pricing y createOrden.
+    const codigoPromocion =
+      typeof input.codigoPromocion === "string"
+        ? input.codigoPromocion.trim().toUpperCase()
+        : undefined;
+
+    let subtotalConCodigo = subtotalFinal;
+    let codigoDescuento = 0;
+    let codigoPromocionId: string | null = null;
+    let codigoPromocionTitulo: string | null = null;
+
+    if (codigoPromocion) {
+      // Mismo criterio que createOrden: el código no se combina con ofertas.
+      const tieneItemsConOferta = items.some(
+        (item) => item.ofertaAplicadaId != null && item.discountTotal > 0,
+      );
+
+      if (tieneItemsConOferta) {
+        throw new CheckoutFlowError(
+          "CHECKOUT_CODE_NOT_APPLICABLE",
+          "No se puede aplicar un código promocional cuando hay productos con oferta en el carrito.",
+          409,
+        );
+      }
+
+      const resultadoCodigo = await codigosPromocionService.validar({
+        codigo: codigoPromocion,
+        items: items.map((item) => ({
+          productoId: item.productId,
+          cantidad: item.quantity,
+          // Precio con ofertas aplicadas (igual que itemsParaCodigoPromocion en createOrden).
+          precioUnitario: item.unitPriceFinal,
+          ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+        })),
+      });
+
+      const codigoValido =
+        resultadoCodigo.valido !== false &&
+        Number(resultadoCodigo.descuentoTotal || 0) > 0 &&
+        Number(resultadoCodigo.subtotalFinal || 0) > 0 &&
+        Number(resultadoCodigo.subtotalFinal || 0) < subtotalFinal;
+
+      if (!codigoValido) {
+        throw new CheckoutFlowError(
+          "CHECKOUT_CODE_NOT_APPLICABLE",
+          resultadoCodigo.mensaje ||
+            "El código promocional no aplica para esta orden.",
+          409,
+        );
+      }
+
+      subtotalConCodigo = roundMoney(Number(resultadoCodigo.subtotalFinal));
+      codigoDescuento = roundMoney(Number(resultadoCodigo.descuentoTotal || 0));
+      codigoPromocionId = resultadoCodigo.codigoPromocionId ?? null;
+      codigoPromocionTitulo = resultadoCodigo.codigoTitulo ?? null;
+    }
+
+    const total = roundMoney(subtotalConCodigo + shippingTotal);
 
     if (
       total <= 0 ||
       subtotalFinal < 0 ||
+      subtotalConCodigo < 0 ||
       discountTotal < 0 ||
+      codigoDescuento < 0 ||
       shippingTotal < 0
     ) {
       throw new CheckoutFlowError(
@@ -137,9 +209,17 @@ export class CheckoutPricingService {
       currency,
       subtotalOriginal,
       subtotalFinal,
+      // `discountTotal` se mantiene SOLO con ofertas para no romper el contrato con
+      // createOrden, que suma aparte el descuento del código (data.discountTotal +
+      // descuentoCodigoPromocion). El descuento del código se expone en `codigoDescuento`.
       discountTotal,
       shippingTotal,
       total,
+      subtotalConCodigo,
+      codigoDescuento,
+      ...(codigoPromocion ? { codigoPromocion } : {}),
+      ...(codigoPromocionId ? { codigoPromocionId } : {}),
+      ...(codigoPromocionTitulo ? { codigoPromocionTitulo } : {}),
       items,
       shipping,
       warnings: shipping.warnings || [],
@@ -190,6 +270,7 @@ export class CheckoutPricingService {
     cartItems: ItemCarrito[],
   ): Promise<CheckoutItemPricingSnapshot[]> {
     const productsById = await this.loadProducts(cartItems);
+    const activeOffers = await this.loadActiveOffers();
     const requestedByVariant = new Map<string, number>();
 
     return cartItems.map((item) => {
@@ -231,9 +312,17 @@ export class CheckoutPricingService {
       requestedByVariant.set(variantKey, requestedTotal);
 
       const unitPriceOriginal = roundMoney(product.precioPublico);
-      const unitPriceFinal = unitPriceOriginal;
+      const bestOffer = seleccionarMejorOferta(
+        activeOffers,
+        this.toOfertaBase(item.productoId, product),
+        stockContext.tallaId,
+      );
+      const unitPriceFinal = roundMoney(
+        bestOffer?.precioFinal ?? unitPriceOriginal,
+      );
       const subtotalOriginal = roundMoney(unitPriceOriginal * item.cantidad);
-      const subtotalFinal = subtotalOriginal;
+      const subtotalFinal = roundMoney(unitPriceFinal * item.cantidad);
+      const discountTotal = roundMoney(subtotalOriginal - subtotalFinal);
       const logistics = resolveLogistics(product);
 
       return {
@@ -246,9 +335,9 @@ export class CheckoutPricingService {
         unitPriceFinal,
         subtotalOriginal,
         subtotalFinal,
-        discountTotal: 0,
-        ofertaAplicadaId: null,
-        ofertaTitulo: null,
+        discountTotal: discountTotal > 0 ? discountTotal : 0,
+        ofertaAplicadaId: bestOffer?.oferta.id ?? null,
+        ofertaTitulo: bestOffer?.oferta.titulo ?? null,
         weightKg: logistics.weightKg,
         lengthCm: logistics.lengthCm,
         widthCm: logistics.widthCm,
@@ -269,6 +358,38 @@ export class CheckoutPricingService {
         .filter((snapshot) => snapshot.exists)
         .map((snapshot) => [snapshot.id, snapshot.data() as Producto]),
     );
+  }
+
+  private async loadActiveOffers(): Promise<Oferta[]> {
+    try {
+      return await this.offersService.listarOfertasActivas();
+    } catch (error) {
+      console.error(
+        "[checkout-pricing] No se pudieron cargar las ofertas activas:",
+        error,
+      );
+      return [];
+    }
+  }
+
+  private toOfertaBase(
+    productId: string,
+    product: Producto,
+  ): ProductoOfertaBase {
+    const record = product as unknown as Record<string, unknown>;
+    const toStringArray = (value: unknown): string[] | undefined =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : undefined;
+
+    return {
+      id: productId,
+      precioPublico: product.precioPublico,
+      categoriaId: product.categoriaId ?? null,
+      categoriaIds: toStringArray(record.categoriaIds),
+      lineaId: product.lineaId ?? null,
+      lineaIds: toStringArray(record.lineaIds),
+    };
   }
 
   private resolveStockContext(
