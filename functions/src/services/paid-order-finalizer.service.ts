@@ -1,7 +1,13 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { firestoreTienda } from "../config/firebase";
-import { Orden, FulfillmentMethod } from "../models/orden.model";
+import {
+  EstadoOrden,
+  Orden,
+  PaymentState,
+  FulfillmentMethod,
+} from "../models/orden.model";
 import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
+import { buildPaidOrderStatePatch } from "../utils/build-paid-order-patch.util";
 import logger from "../utils/logger";
 import { getFedexConfig } from "../modules/shipping/fedex/fedex.config";
 import {
@@ -194,6 +200,44 @@ class PaidOrderFinalizerService {
     }
   }
 
+  /**
+   * Marca la orden como pagada y lista para preparación (idempotente).
+   * Cierra el gap del flujo checkout-attempt donde createOrden inicia en PENDIENTE.
+   */
+  async applyPaidOrderStatePatch(orderId: string): Promise<boolean> {
+    const orderRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(orderId);
+    const orderDoc = await orderRef.get();
+    if (!orderDoc.exists) {
+      return false;
+    }
+
+    const order = orderDoc.data() as Orden;
+    const paymentStatus = String(order.paymentStatus || "").toUpperCase();
+    if (
+      paymentStatus === PaymentState.PAGADO &&
+      order.estado === EstadoOrden.CONFIRMADA
+    ) {
+      return false;
+    }
+
+    await orderRef.set(
+      {
+        estado: EstadoOrden.CONFIRMADA,
+        ...buildPaidOrderStatePatch(order),
+        updatedAt: Timestamp.now(),
+      },
+      { merge: true },
+    );
+
+    paidOrderFinalizerLogger.info("paid_order_state_patch_applied", {
+      orderId,
+      priorPaymentStatus: order.paymentStatus,
+      priorEstado: order.estado,
+    });
+
+    return true;
+  }
+
   async finalizePaidOrder(input: FinalizePaidOrderInput): Promise<void> {
     const orderRef = firestoreTienda.collection(ORDENES_COLLECTION).doc(input.orderId);
     const orderDoc = await orderRef.get();
@@ -205,6 +249,8 @@ class PaidOrderFinalizerService {
 
     if (!input.paymentConfirmed) {
       await this.assertPaymentConfirmed(input);
+    } else {
+      await this.applyPaidOrderStatePatch(input.orderId);
     }
 
     const { default: ordenService } = await import("./orden.service");

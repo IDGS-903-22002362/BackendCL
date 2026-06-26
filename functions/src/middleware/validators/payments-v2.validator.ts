@@ -119,3 +119,14 @@ export const aplazoReturnQuerySchema = z
       path: ["paymentAttemptId"],
     },
   );
+
+export const stripeAdminReconcileSchema = z
+  .object({
+    sessionId: z.string().trim().min(1).max(200).optional(),
+    checkoutAttemptId: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict()
+  .refine((value) => Boolean(value.sessionId || value.checkoutAttemptId), {
+    message: "Se requiere sessionId o checkoutAttemptId",
+    path: ["sessionId"],
+  });

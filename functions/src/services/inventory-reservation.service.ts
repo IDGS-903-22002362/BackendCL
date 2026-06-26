@@ -9,10 +9,12 @@ import {
 import { Orden } from "../models/orden.model";
 import { COLECCION_PAGOS, EstadoPago, PaymentStatus } from "../models/pago.model";
 import { InventarioPorTallaExtended } from "../models/producto.model";
+import type { CheckoutUnavailableItemDetail } from "../models/checkout-unavailable-item.model";
 import {
   buildFirestoreInventoryPatch,
   computeDisponible,
   getAvailableForVariant,
+  getPhysicalForVariant,
   normalizeGlobalBuckets,
   normalizeSizeBuckets,
   projectLegacyFromProductData,
@@ -41,10 +43,15 @@ export const INVENTORY_STOCK_UNAVAILABLE_MESSAGE =
 
 export class InventoryStockUnavailableError extends Error {
   readonly code = "CHECKOUT_STOCK_UNAVAILABLE";
+  readonly unavailableItems?: CheckoutUnavailableItemDetail[];
 
-  constructor(message: string = INVENTORY_STOCK_UNAVAILABLE_MESSAGE) {
+  constructor(
+    message: string = INVENTORY_STOCK_UNAVAILABLE_MESSAGE,
+    unavailableItems?: CheckoutUnavailableItemDetail[],
+  ) {
     super(message);
     this.name = "InventoryStockUnavailableError";
+    this.unavailableItems = unavailableItems;
   }
 }
 
@@ -256,7 +263,31 @@ class InventoryReservationService {
           entry.tallaId,
         );
         if (available < entry.item.cantidad) {
-          throw new InventoryStockUnavailableError();
+          const productName = String(
+            productState.data.descripcion ??
+              productState.data.clave ??
+              "Producto",
+          );
+          const stockFisico = getPhysicalForVariant(
+            productState.data,
+            entry.tallaId,
+          );
+          throw new InventoryStockUnavailableError(
+            `Stock insuficiente para "${productName}".`,
+            [
+              {
+                productId: entry.item.productoId,
+                productName,
+                tallaId: entry.tallaId ?? undefined,
+                available,
+                requested: entry.item.cantidad,
+                reason:
+                  available === 0 && stockFisico > 0
+                    ? "reserved_by_other"
+                    : "out_of_stock",
+              },
+            ],
+          );
         }
 
         this.applyReservationIncrement(
@@ -1032,6 +1063,9 @@ class InventoryReservationService {
         const { default: checkoutAttemptService } = await import(
           "./checkout/checkout-attempt.service"
         );
+        const { CheckoutAttemptStatus } = await import(
+          "../models/checkout-attempt.model"
+        );
         const reconciliation =
           await checkoutAttemptService.reconcileStripeBeforeRelease(
             reserva.checkoutAttemptId,
@@ -1045,6 +1079,25 @@ class InventoryReservationService {
           motivo: "Reserva expirada por tiempo",
           targetStatus: EstadoReservaInventario.EXPIRADA,
         });
+
+        const { default: checkoutAttemptRepository } = await import(
+          "./checkout/checkout-attempt.repository"
+        );
+        const attempt = await checkoutAttemptRepository.getById(
+          reserva.checkoutAttemptId,
+        );
+        if (
+          attempt &&
+          attempt.status !== CheckoutAttemptStatus.FINALIZED &&
+          attempt.status !== CheckoutAttemptStatus.EXPIRED &&
+          attempt.status !== CheckoutAttemptStatus.CANCELED
+        ) {
+          await checkoutAttemptRepository.update(reserva.checkoutAttemptId, {
+            status: CheckoutAttemptStatus.EXPIRED,
+            failureCode: "reservation_ttl_expired",
+            failureMessage: "La reserva de inventario expiró por tiempo",
+          });
+        }
       }
     }
 
@@ -1130,7 +1183,79 @@ class InventoryReservationService {
 
   /**
    * Reservas activas cuyo checkoutAttempt ya no está en estado pendiente o no existe.
+   * Repara liberando inventario y sincronizando el intento cuando aplica.
    */
+  async repairOrphanActiveReservations(limit = 100): Promise<{
+    detected: number;
+    repaired: number;
+  }> {
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("estado", "==", EstadoReservaInventario.ACTIVA)
+      .limit(limit)
+      .get();
+
+    if (snapshot.empty) {
+      return { detected: 0, repaired: 0 };
+    }
+
+    const { default: checkoutAttemptRepository } = await import(
+      "./checkout/checkout-attempt.repository"
+    );
+    const { default: checkoutAttemptService } = await import(
+      "./checkout/checkout-attempt.service"
+    );
+    const { CheckoutAttemptStatus } = await import(
+      "../models/checkout-attempt.model"
+    );
+    const pendingStatuses = new Set([
+      CheckoutAttemptStatus.CREATED,
+      CheckoutAttemptStatus.PAYMENT_PENDING,
+      CheckoutAttemptStatus.PROCESSING,
+    ]);
+
+    const processedAttempts = new Set<string>();
+    let detected = 0;
+    let repaired = 0;
+
+    for (const doc of snapshot.docs) {
+      const reserva = doc.data() as ReservaInventario;
+      const attemptId = reserva.checkoutAttemptId?.trim();
+      if (!attemptId || processedAttempts.has(attemptId)) {
+        continue;
+      }
+
+      const attempt = await checkoutAttemptRepository.getById(attemptId);
+      if (attempt && pendingStatuses.has(attempt.status)) {
+        continue;
+      }
+
+      detected += 1;
+      processedAttempts.add(attemptId);
+
+      inventoryReservationLogger.warn("inventory_orphan_active_reservation", {
+        reservationId: doc.id,
+        checkoutAttemptId: attemptId,
+        attemptStatus: attempt?.status ?? "missing",
+        productoId: reserva.productoId,
+      });
+
+      await checkoutAttemptService.releaseAttempt(
+        attemptId,
+        "Reparación de reserva huérfana",
+        {
+          status: CheckoutAttemptStatus.EXPIRED,
+          failureCode: "orphan_reservation_repaired",
+          failureMessage:
+            "Reserva activa sin intento de checkout pendiente asociado",
+        },
+      );
+      repaired += 1;
+    }
+
+    return { detected, repaired };
+  }
+
   async countOrphanActiveReservations(limit = 100): Promise<number> {
     const snapshot = await firestoreTienda
       .collection(RESERVAS_INVENTARIO_COLLECTION)
@@ -1165,12 +1290,6 @@ class InventoryReservationService {
       const attempt = await checkoutAttemptRepository.getById(attemptId);
       if (!attempt || !pendingStatuses.has(attempt.status)) {
         orphanCount += 1;
-        inventoryReservationLogger.warn("inventory_orphan_active_reservation", {
-          reservationId: doc.id,
-          checkoutAttemptId: attemptId,
-          attemptStatus: attempt?.status ?? "missing",
-          productoId: reserva.productoId,
-        });
       }
     }
 

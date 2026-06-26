@@ -141,6 +141,20 @@ export class CheckoutAttemptRepository {
     return snap.docs.map((doc) => doc.id);
   }
 
+  async findByStripeCheckoutSessionId(
+    sessionId: string,
+  ): Promise<CheckoutAttempt | null> {
+    const snap = await this.collection
+      .where("stripeCheckoutSessionId", "==", sessionId)
+      .limit(1)
+      .get();
+    if (snap.empty) {
+      return null;
+    }
+    const doc = snap.docs[0];
+    return { id: doc.id, ...(doc.data() as CheckoutAttempt) };
+  }
+
   async tryFinalize(
     id: string,
     operationId: string,

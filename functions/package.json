@@ -18,6 +18,8 @@
     "test": "jest --runInBand",
     "migrate:size-inventory": "ts-node-dev --transpile-only src/scripts/migrate-size-inventory.ts",
     "backfill:search-text": "npm run build && node lib/scripts/backfill-product-search-text.js",
+    "repair:stuck-paid-orders": "npm run build && node lib/scripts/repair-stuck-paid-order-state.js",
+    "audit:stripe-payments": "npm run build && node lib/scripts/audit-stripe-payment-health.js",
     "test:stripe:smoke": "node scripts/stripe-smoke-test.mjs",
     "logs": "firebase functions:log"
   },

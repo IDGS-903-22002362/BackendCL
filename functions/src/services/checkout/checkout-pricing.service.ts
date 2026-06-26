@@ -20,7 +20,8 @@ import {
 } from "../../utils/ofertas-pricing.util";
 import { Oferta } from "../../models/ofertas.model";
 import { codigosPromocionService } from "../codigos-promocion.service";
-import { getAvailableForVariant } from "../../utils/inventory-stock.util";
+import { getAvailableForVariant, getPhysicalForVariant } from "../../utils/inventory-stock.util";
+import type { CheckoutUnavailableItemDetail } from "../../models/checkout-unavailable-item.model";
 
 const CARRITOS_COLLECTION = "carritos";
 const PRODUCTOS_COLLECTION = "productos";
@@ -267,49 +268,132 @@ export class CheckoutPricingService {
     return { id: doc.id, ...(doc.data() as Carrito) };
   }
 
-  private async buildItemSnapshots(
+  private collectUnavailableCartItems(
     cartItems: ItemCarrito[],
-  ): Promise<CheckoutItemPricingSnapshot[]> {
-    const productsById = await this.loadProducts(cartItems);
-    const activeOffers = await this.loadActiveOffers();
-    const requestedByVariant = new Map<string, number>();
+    productsById: Map<string, Producto>,
+  ): CheckoutUnavailableItemDetail[] {
+    const requestedByVariant = new Map<
+      string,
+      {
+        productId: string;
+        productName: string;
+        tallaId?: string;
+        available: number;
+        requested: number;
+        stockFisico: number;
+        inactive: boolean;
+      }
+    >();
 
-    return cartItems.map((item) => {
+    for (const item of cartItems) {
       const product = productsById.get(item.productoId);
       if (!product) {
-        throw new CheckoutFlowError(
-          "CHECKOUT_PRODUCT_NOT_FOUND",
-          `El producto con ID "${item.productoId}" no existe en el catalogo.`,
-          404,
-        );
+        const variantKey = `${item.productoId}::__GLOBAL__`;
+        const current = requestedByVariant.get(variantKey);
+        requestedByVariant.set(variantKey, {
+          productId: item.productoId,
+          productName: "Producto no disponible",
+          available: 0,
+          requested: (current?.requested ?? 0) + item.cantidad,
+          stockFisico: 0,
+          inactive: true,
+        });
+        continue;
       }
 
       if (!product.activo) {
-        throw new CheckoutFlowError(
-          "CHECKOUT_PRODUCT_INACTIVE",
-          `El producto "${product.descripcion}" no esta disponible.`,
-          400,
-        );
+        const variantKey = `${item.productoId}::${item.tallaId?.trim() || "__GLOBAL__"}`;
+        const current = requestedByVariant.get(variantKey);
+        requestedByVariant.set(variantKey, {
+          productId: item.productoId,
+          productName: product.descripcion || "Producto",
+          tallaId: item.tallaId?.trim() || undefined,
+          available: 0,
+          requested: (current?.requested ?? 0) + item.cantidad,
+          stockFisico: 0,
+          inactive: true,
+        });
+        continue;
       }
 
       const stockContext = this.resolveStockContext(product, item);
       const variantKey = `${item.productoId}::${stockContext.tallaId || "__GLOBAL__"}`;
-      const requestedTotal = (requestedByVariant.get(variantKey) || 0) + item.cantidad;
+      const productData = product as unknown as Record<string, unknown>;
+      const current = requestedByVariant.get(variantKey);
+      requestedByVariant.set(variantKey, {
+        productId: item.productoId,
+        productName: product.descripcion || "Producto",
+        tallaId: stockContext.tallaId,
+        available: stockContext.available,
+        requested: (current?.requested ?? 0) + item.cantidad,
+        stockFisico: getPhysicalForVariant(productData, stockContext.tallaId),
+        inactive: false,
+      });
+    }
 
-      if (stockContext.available < requestedTotal) {
-        throw new CheckoutFlowError(
-          "CHECKOUT_STOCK_UNAVAILABLE",
-          `Stock insuficiente para "${product.descripcion}".`,
-          409,
-          {
-            productId: item.productoId,
-            tallaId: stockContext.tallaId,
-            available: stockContext.available,
-            requested: requestedTotal,
-          },
-        );
+    const unavailable: CheckoutUnavailableItemDetail[] = [];
+    for (const entry of requestedByVariant.values()) {
+      if (entry.inactive) {
+        unavailable.push({
+          productId: entry.productId,
+          productName: entry.productName,
+          tallaId: entry.tallaId,
+          available: entry.available,
+          requested: entry.requested,
+          reason: "inactive",
+        });
+        continue;
       }
 
+      if (entry.available < entry.requested) {
+        unavailable.push({
+          productId: entry.productId,
+          productName: entry.productName,
+          tallaId: entry.tallaId,
+          available: entry.available,
+          requested: entry.requested,
+          reason:
+            entry.available === 0 && entry.stockFisico > 0
+              ? "reserved_by_other"
+              : "out_of_stock",
+        });
+      }
+    }
+
+    return unavailable;
+  }
+
+  private async buildItemSnapshots(
+    cartItems: ItemCarrito[],
+  ): Promise<CheckoutItemPricingSnapshot[]> {
+    const productsById = await this.loadProducts(cartItems);
+    const unavailableItems = this.collectUnavailableCartItems(
+      cartItems,
+      productsById,
+    );
+
+    if (unavailableItems.length > 0) {
+      const message =
+        unavailableItems.length === 1
+          ? `Stock insuficiente para "${unavailableItems[0].productName}".`
+          : `No puedes continuar: ${unavailableItems.length} productos sin stock suficiente.`;
+      throw new CheckoutFlowError(
+        "CHECKOUT_STOCK_UNAVAILABLE",
+        message,
+        409,
+        { unavailableItems },
+      );
+    }
+
+    const activeOffers = await this.loadActiveOffers();
+    const requestedByVariant = new Map<string, number>();
+
+    return cartItems.map((item) => {
+      const product = productsById.get(item.productoId)!;
+      const stockContext = this.resolveStockContext(product, item);
+      const variantKey = `${item.productoId}::${stockContext.tallaId || "__GLOBAL__"}`;
+      const requestedTotal =
+        (requestedByVariant.get(variantKey) || 0) + item.cantidad;
       requestedByVariant.set(variantKey, requestedTotal);
 
       const unitPriceOriginal = roundMoney(product.precioPublico);

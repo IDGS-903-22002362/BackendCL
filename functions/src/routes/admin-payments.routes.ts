@@ -13,6 +13,7 @@ import {
   listAdminAplazoRefundRequestsQuerySchema,
   paymentAttemptStatusParamSchema,
   rejectAplazoRefundRequestSchema,
+  stripeAdminReconcileSchema,
 } from "../middleware/validators/payments-v2.validator";
 import {
   paymentAuthMiddleware,
@@ -134,6 +135,23 @@ router.post(
   paymentStaffMiddleware,
   validateParams(paymentAttemptStatusParamSchema),
   paymentsController.reconcileAplazoPayment,
+);
+
+/**
+ * @swagger
+ * /api/admin/payments/stripe/reconcile:
+ *   post:
+ *     summary: Reconciliar pago Stripe atascado por sessionId o checkoutAttemptId
+ *     tags: [Payments]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.post(
+  "/stripe/reconcile",
+  paymentAuthMiddleware,
+  paymentStaffMiddleware,
+  validateBody(stripeAdminReconcileSchema),
+  paymentsController.reconcileStripeCheckout,
 );
 
 /**

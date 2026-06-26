@@ -167,3 +167,32 @@ export const getAvailableForVariant = (
       ?.cantidad ?? 0
   );
 };
+
+export const getPhysicalForVariant = (
+  data: Record<string, unknown>,
+  tallaId?: string | null,
+): number => {
+  const projection = projectLegacyFromProductData(data);
+  if (projection.inventarioGlobal) {
+    return projection.inventarioGlobal.fisica;
+  }
+
+  const normalizedTallaId = tallaId?.trim();
+  if (!normalizedTallaId) {
+    return 0;
+  }
+
+  const row = projection.inventarioPorTalla.find(
+    (entry) => entry.tallaId === normalizedTallaId,
+  );
+  if (!row) {
+    return 0;
+  }
+
+  const buckets = normalizeSizeBuckets(
+    normalizedTallaId,
+    row,
+    normalizeQty(row.cantidad),
+  );
+  return buckets.fisica;
+};

@@ -12,7 +12,7 @@ export const expireInventoryReservations = functions.pubsub
     const stalePaymentPending =
       await checkoutAttemptService.reconcileStalePaymentPendingAttempts(50);
     const orphanReservations =
-      await inventoryReservationService.countOrphanActiveReservations(100);
+      await inventoryReservationService.repairOrphanActiveReservations(100);
     const reconciled =
       await inventoryReservationService.reconcilePaidOrdersWithoutSale(25);
 
@@ -21,7 +21,8 @@ export const expireInventoryReservations = functions.pubsub
         `(checkout: ${expiredReservations.checkoutAttempts}, órdenes: ${expiredReservations.orders}), ` +
         `intentos checkout expirados: ${expiredAttempts}, ` +
         `payment_pending obsoletos: ${stalePaymentPending}, ` +
-        `reservas huérfanas detectadas: ${orphanReservations}, ` +
+        `reservas huérfanas detectadas: ${orphanReservations.detected}, ` +
+        `reservas huérfanas reparadas: ${orphanReservations.repaired}, ` +
         `órdenes reconciliadas: ${reconciled}`,
     );
     return null;

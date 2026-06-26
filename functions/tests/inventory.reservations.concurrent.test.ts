@@ -43,6 +43,7 @@ jest.mock("../src/services/checkout/checkout-attempt.service", () => ({
     reconcileStripeBeforeRelease: jest.fn().mockResolvedValue({
       action: "release",
     }),
+    releaseAttempt: jest.fn().mockResolvedValue(undefined),
   },
 }));
 

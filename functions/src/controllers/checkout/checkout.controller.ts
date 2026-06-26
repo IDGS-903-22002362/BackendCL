@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import checkoutAttemptService from "../../services/checkout/checkout-attempt.service";
 import { ApiError } from "../../utils/error-handler";
+import { mapCheckoutErrorToApiError } from "../../utils/checkout-error.util";
 import { sendPublicError } from "../../utils/public-error.util";
 
 const getAuthenticatedUid = (req: Request): string => {
@@ -43,6 +44,14 @@ export const startCheckout = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error) {
+    const mapped = mapCheckoutErrorToApiError(error);
+    if (mapped instanceof ApiError) {
+      return sendPublicError(res, mapped, req.requestId, {
+        fallbackCode: mapped.code ?? `HTTP_${mapped.statusCode}`,
+        logLabel: "checkout_start",
+      });
+    }
+
     if (error instanceof ApiError) {
       return sendPublicError(res, error, req.requestId, {
         fallbackCode: error.code ?? `HTTP_${error.statusCode}`,

@@ -462,3 +462,31 @@ export const rejectAplazoRefundRequest = async (
     return respondPaymentError(res, req, error);
   }
 };
+
+export const reconcileStripeCheckout = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autorizado. Se requiere autenticación.",
+      });
+    }
+
+    const { default: checkoutAttemptService } = await import(
+      "../../services/checkout/checkout-attempt.service"
+    );
+
+    const result = await checkoutAttemptService.adminReconcileStripePayment({
+      sessionId: req.body?.sessionId,
+      checkoutAttemptId: req.body?.checkoutAttemptId,
+      requestedByUid: req.user.uid,
+    });
+
+    return res.status(200).json({
+      ok: true,
+      data: result,
+    });
+  } catch (error) {
+    return respondPaymentError(res, req, error);
+  }
+};

@@ -42,6 +42,11 @@ import {
   normalizeTallaIds,
 } from "../utils/size-inventory.util";
 import { checkoutPricingService } from "./checkout/checkout-pricing.service";
+import {
+  getAvailableForVariant,
+  getPhysicalForVariant,
+} from "../utils/inventory-stock.util";
+import type { CartItemStockStatus } from "../models/checkout-unavailable-item.model";
 
 /**
  * Nombre de la colección en Firestore
@@ -103,6 +108,59 @@ export class CarritoService {
       available: inventarioTalla?.cantidad ?? 0,
       tallaId: tallaIdNormalizada,
       usesInventoryBySize: true,
+    };
+  }
+
+  private resolveCartItemAvailability(
+    prodData: Record<string, unknown> | undefined,
+    item: ItemCarrito,
+  ): {
+    disponible: number;
+    stockFisico: number;
+    stockStatus: CartItemStockStatus;
+    purchasable: boolean;
+  } {
+    if (!prodData) {
+      return {
+        disponible: 0,
+        stockFisico: 0,
+        stockStatus: "out_of_stock",
+        purchasable: false,
+      };
+    }
+
+    const activo = prodData.activo !== false;
+    let disponible = 0;
+    let tallaForPhysical: string | null | undefined = item.tallaId;
+
+    try {
+      const stock = this.resolveStockContext(
+        prodData as Record<string, any>,
+        item.tallaId,
+      );
+      disponible = getAvailableForVariant(prodData, stock.tallaId ?? null);
+      tallaForPhysical = stock.tallaId;
+    } catch {
+      disponible = 0;
+    }
+
+    const stockFisico = getPhysicalForVariant(prodData, tallaForPhysical ?? null);
+    let stockStatus: CartItemStockStatus = "available";
+
+    if (!activo) {
+      stockStatus = "out_of_stock";
+    } else if (disponible < item.cantidad) {
+      stockStatus =
+        disponible === 0 && stockFisico > 0
+          ? "temporarily_unavailable"
+          : "out_of_stock";
+    }
+
+    return {
+      disponible,
+      stockFisico,
+      stockStatus,
+      purchasable: activo && disponible >= item.cantidad,
     };
   }
 
@@ -281,8 +339,10 @@ export class CarritoService {
         const prodData = productMap.get(item.productoId);
 
         if (!prodData) {
+          const availability = this.resolveCartItemAvailability(undefined, item);
           return {
             ...item,
+            ...availability,
             producto: {
               clave: "N/A",
               descripcion: "Producto no disponible",
@@ -294,13 +354,19 @@ export class CarritoService {
           };
         }
 
+        const availability = this.resolveCartItemAvailability(prodData, item);
+
         return {
           ...item,
+          ...availability,
           producto: {
             clave: prodData.clave || "N/A",
             descripcion: prodData.descripcion || "Sin descripción",
             imagenes: prodData.imagenes || [],
-            existencias: prodData.existencias || 0,
+            existencias: availability.disponible,
+            stockFisico: availability.stockFisico,
+            stockStatus: availability.stockStatus,
+            purchasable: availability.purchasable,
             precioPublico: prodData.precioPublico || 0,
             activo: prodData.activo ?? false,
           },

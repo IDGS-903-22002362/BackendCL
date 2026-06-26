@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { ApiError } from "./api-error";
 import { PaymentApiError } from "../services/payments/payment-api-error";
+import type { PublicErrorDetails } from "../models/checkout-unavailable-item.model";
 
 export type PublicFieldError = {
   field: string;
@@ -13,6 +14,7 @@ export type PublicErrorBody = {
   code: string;
   message: string;
   fieldErrors?: PublicFieldError[];
+  details?: PublicErrorDetails;
   retryable?: boolean;
   requestId?: string;
 };
@@ -87,6 +89,7 @@ const resolveOperationalError = (
   code: string;
   message: string;
   fieldErrors?: PublicFieldError[];
+  details?: PublicErrorDetails;
   retryable: boolean;
 } | null => {
   if (error instanceof PaymentApiError) {
@@ -105,9 +108,10 @@ const resolveOperationalError = (
   if (error instanceof ApiError && error.isOperational) {
     return {
       statusCode: error.statusCode,
-      code: options.fallbackCode ?? `HTTP_${error.statusCode}`,
+      code: error.code ?? options.fallbackCode ?? `HTTP_${error.statusCode}`,
       message: sanitizePublicMessage(error.message, options.fallbackMessage),
       fieldErrors: options.fieldErrors,
+      ...(error.details ? { details: error.details } : {}),
       retryable: options.retryable ?? isRetryableStatus(error.statusCode),
     };
   }
@@ -134,6 +138,7 @@ export const buildPublicErrorBody = (
         ...(operational.fieldErrors?.length
           ? { fieldErrors: operational.fieldErrors }
           : {}),
+        ...(operational.details ? { details: operational.details } : {}),
         retryable: operational.retryable,
         ...(requestId ? { requestId } : {}),
       },

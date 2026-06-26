@@ -4,12 +4,9 @@ import { admin } from "../config/firebase.admin";
 import { firestoreApp } from "../config/app.firebase";
 import {
   EstadoOrden,
-  FulfillmentMethod,
-  FulfillmentStatus,
   MetodoPago,
   Orden,
   PaymentState,
-  PreparationStatus,
   CrearOrdenDTO,
 } from "../models/orden.model";
 import {
@@ -45,11 +42,7 @@ import {
   shippingRefundGuardService,
   ShippingRefundGuardError,
 } from "./shipping-refund-guard.service";
-import {
-  MANUAL_FEDEX_METHOD,
-  MANUAL_FEDEX_PROVIDER,
-  MANUAL_FEDEX_STATUS,
-} from "../config/manual-shipping.config";
+import { buildPaidOrderStatePatch } from "../utils/build-paid-order-patch.util";
 import { CheckoutPricingSnapshot } from "../models/checkout-pricing.model";
 
 const ORDENES_COLLECTION = "ordenes";
@@ -203,6 +196,8 @@ type AuthUser = {
 type PagoConsultaResult = {
   id: string;
   estado: EstadoPago;
+  status?: PaymentStatus | string;
+  ordenId?: string;
   monto: number;
   currency: string;
   metodoPago: MetodoPago;
@@ -555,32 +550,7 @@ class PagoService {
   }
 
   private buildManualFedexPaidOrderPatch(order?: Orden): Record<string, unknown> {
-    const shipping = order?.shipping as Record<string, any> | undefined;
-    const isManualFedexOrder =
-      order?.fulfillmentMethod !== FulfillmentMethod.PICKUP &&
-      (shipping?.provider === MANUAL_FEDEX_PROVIDER ||
-        shipping?.shippingMethod === MANUAL_FEDEX_METHOD);
-
-    // Estados comunes al confirmarse el pago (domicilio y pickup): el pago
-    // queda PAGADO y la orden pasa a pendiente de preparacion. No se genera
-    // guia ni se marca como enviado (eso lo hace el admin manualmente).
-    const commonPaidPatch: Record<string, unknown> = {
-      paymentStatus: PaymentState.PAGADO,
-      preparationStatus: PreparationStatus.PENDING_PREPARATION,
-    };
-
-    if (!isManualFedexOrder) {
-      return commonPaidPatch;
-    }
-
-    return {
-      ...commonPaidPatch,
-      fulfillmentStatus: FulfillmentStatus.PREPARING,
-      shipping: {
-        ...(shipping || {}),
-        status: MANUAL_FEDEX_STATUS,
-      },
-    };
+    return buildPaidOrderStatePatch(order);
   }
 
   private buildOrderPricingSnapshot(order: Orden): PaymentPricingSnapshot {
@@ -1688,6 +1658,29 @@ async createStripeCheckoutSession(
     };
   }
 
+  async retrieveStripeCheckoutSessionPaymentStatus(sessionId: string): Promise<{
+    sessionId: string;
+    paymentStatus: string;
+    status: string;
+    paymentIntentId?: string;
+  }> {
+    const stripe = getStripeClient();
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["payment_intent"],
+    });
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id;
+
+    return {
+      sessionId: session.id,
+      paymentStatus: session.payment_status || "unpaid",
+      status: session.status || "unknown",
+      paymentIntentId,
+    };
+  }
+
   async getStripeCheckoutSessionForAttempt(
     sessionId: string,
     userId: string,
@@ -1958,6 +1951,14 @@ async createStripeCheckoutSession(
         reason: result.reason,
       });
 
+      if (result.outcome === "unmatched") {
+        console.error("stripe_webhook_unmatched", {
+          eventId: result.eventId,
+          eventType: result.eventType,
+          reason: result.reason,
+        });
+      }
+
       return result;
     } catch (error) {
       const errorMessage = parseWebhookErrorMessage(error);
@@ -2218,6 +2219,8 @@ async createStripeCheckoutSession(
     const result: PagoConsultaResult = {
       id: pagoDoc.id,
       estado: pago.estado,
+      status: pago.status,
+      ordenId: pago.ordenId,
       monto: pago.monto,
       currency: pago.currency,
       metodoPago: pago.metodoPago,
