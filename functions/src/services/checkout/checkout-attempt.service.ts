@@ -510,7 +510,7 @@ export class CheckoutAttemptService {
       throw new ApiError(404, "CheckoutAttempt no encontrado al finalizar pago");
     }
 
-    if (attempt.orderId && attempt.status === CheckoutAttemptStatus.FINALIZED) {
+    if (attempt.orderId) {
       await paidOrderFinalizerService.applyPaidOrderStatePatch(attempt.orderId);
       return attempt.orderId;
     }
@@ -519,11 +519,19 @@ export class CheckoutAttemptService {
       attempt.id!,
       input.eventId,
     );
-    if (!lock.acquired && lock.attempt.orderId) {
-      await paidOrderFinalizerService.applyPaidOrderStatePatch(
-        lock.attempt.orderId,
+    if (!lock.acquired) {
+      const existingOrderId =
+        lock.attempt.orderId ||
+        (await this.waitForAttemptOrderId(attempt.id!, 20_000));
+      if (existingOrderId) {
+        await paidOrderFinalizerService.applyPaidOrderStatePatch(existingOrderId);
+        await pagoService.linkPaymentToOrder(input.pagoId, existingOrderId);
+        return existingOrderId;
+      }
+      throw new ApiError(
+        409,
+        "El pago ya se está finalizando. Intenta de nuevo en unos segundos.",
       );
-      return lock.attempt.orderId;
     }
 
     const hasAttemptReservations =
@@ -569,6 +577,21 @@ export class CheckoutAttemptService {
     });
 
     return orden.id!;
+  }
+
+  private async waitForAttemptOrderId(
+    attemptId: string,
+    timeoutMs: number,
+  ): Promise<string | undefined> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const fresh = await checkoutAttemptRepository.getById(attemptId);
+      if (fresh?.orderId) {
+        return fresh.orderId;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return undefined;
   }
 
   async abandonAttemptForUser(
@@ -790,6 +813,19 @@ export class CheckoutAttemptService {
         await paidOrderFinalizerService.applyPaidOrderStatePatch(attempt.orderId);
       }
       return { action: "finalized", orderId: attempt.orderId };
+    }
+
+    if (
+      attempt.status === CheckoutAttemptStatus.PAID ||
+      (attempt as CheckoutAttempt & { finalizationLocked?: boolean })
+        .finalizationLocked === true
+    ) {
+      const orderId = await this.waitForAttemptOrderId(attemptId, 20_000);
+      if (orderId) {
+        await paidOrderFinalizerService.applyPaidOrderStatePatch(orderId);
+        return { action: "finalized", orderId };
+      }
+      return { action: "release" };
     }
 
     if (!attempt.stripeCheckoutSessionId || !attempt.pagoId) {

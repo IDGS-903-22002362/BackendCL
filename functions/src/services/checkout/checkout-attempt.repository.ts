@@ -166,19 +166,27 @@ export class CheckoutAttemptRepository {
         throw new Error(`CheckoutAttempt ${id} no encontrado`);
       }
       const attempt = { id: snap.id, ...(snap.data() as CheckoutAttempt) };
+      const data = snap.data() as Record<string, unknown>;
+
+      if (attempt.orderId) {
+        return { acquired: false, attempt };
+      }
+
+      if (attempt.status === CheckoutAttemptStatus.FINALIZED) {
+        return { acquired: false, attempt };
+      }
+
+      // Un solo finalizador por intento (evita órdenes duplicadas por webhooks paralelos).
       if (
-        attempt.status === CheckoutAttemptStatus.FINALIZED &&
-        attempt.orderId
+        attempt.status === CheckoutAttemptStatus.PAID ||
+        data.finalizationLocked === true
       ) {
         return { acquired: false, attempt };
       }
-      const lockField = `finalization_${operationId}`;
-      const data = snap.data() as Record<string, unknown>;
-      if (data[lockField]) {
-        return { acquired: false, attempt };
-      }
+
       tx.update(ref, {
-        [lockField]: true,
+        finalizationLocked: true,
+        finalizationOperationId: operationId,
         status: CheckoutAttemptStatus.PAID,
         updatedAt: admin.firestore.Timestamp.now(),
       });

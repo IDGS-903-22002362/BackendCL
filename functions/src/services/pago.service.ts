@@ -2817,6 +2817,7 @@ async createStripeCheckoutSession(
         eventId: event.id,
         eventType: event.type,
         pagoId: pagoMatch.pagoId,
+        ordenId: initialPagoData.ordenId || undefined,
         reason: "checkout_attempt_payment_already_finalized",
       };
     }
@@ -2829,15 +2830,25 @@ async createStripeCheckoutSession(
     });
 
     const now = admin.firestore.Timestamp.now();
-    const { default: checkoutAttemptService } = await import(
-      "./checkout/checkout-attempt.service"
+    const { default: checkoutAttemptRepository } = await import(
+      "./checkout/checkout-attempt.repository"
     );
+    const attempt = await checkoutAttemptRepository.getById(checkoutAttemptId);
 
-    const orderId = await checkoutAttemptService.finalizePaidFromWebhook({
-      checkoutAttemptId,
-      pagoId: pagoMatch.pagoId,
-      eventId: event.id,
-    });
+    let orderId = attempt?.orderId || initialPagoData.ordenId || "";
+
+    // La creación de orden la hace checkout.session.completed (o reconcile).
+    // Este evento solo sincroniza el pago para evitar órdenes duplicadas.
+    if (!orderId) {
+      const { default: checkoutAttemptService } = await import(
+        "./checkout/checkout-attempt.service"
+      );
+      const reconciliation =
+        await checkoutAttemptService.reconcileStripeBeforeRelease(
+          checkoutAttemptId,
+        );
+      orderId = reconciliation.orderId || "";
+    }
 
     await pagoMatch.pagoRef.set(
       {
@@ -2845,6 +2856,7 @@ async createStripeCheckoutSession(
         status: PaymentStatus.PAID,
         providerStatus: paymentIntent.status,
         paymentIntentId: paymentIntent.id,
+        ...(orderId ? { ordenId: orderId } : {}),
         stripeCustomerId:
           typeof paymentIntent.customer === "string"
             ? paymentIntent.customer
@@ -2863,9 +2875,10 @@ async createStripeCheckoutSession(
 
     console.log("stripe_checkout_attempt_paid_via_payment_intent", {
       checkoutAttemptId,
-      orderId,
+      orderId: orderId || null,
       pagoId: pagoMatch.pagoId,
       eventId: event.id,
+      deferredOrderCreation: !orderId,
     });
 
     return {
@@ -2873,8 +2886,10 @@ async createStripeCheckoutSession(
       eventId: event.id,
       eventType: event.type,
       pagoId: pagoMatch.pagoId,
-      ordenId: orderId,
-      reason: "checkout_attempt_finalized_via_payment_intent",
+      ordenId: orderId || undefined,
+      reason: orderId
+        ? "checkout_attempt_pago_synced"
+        : "checkout_attempt_awaiting_session_webhook",
     };
   }
 
