@@ -673,7 +673,8 @@ class InventoryService {
         entrante: row.entrante ?? 0,
       })),
       stockMinimoGlobal,
-      bajoStock: projection.existencias < stockMinimoGlobal,
+      bajoStock: fisica < stockMinimoGlobal,
+      reservadaEnCheckout: reservada > 0,
     };
   }
 

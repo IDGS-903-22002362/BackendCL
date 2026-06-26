@@ -63,6 +63,8 @@ export interface CatalogProductCardDTO {
   imagenPrincipal: string | null;
   imagenes?: string[];
   stockTotal: number;
+  /** Stock físico en almacén (puede ser > stockTotal si hay reservas activas). */
+  stockFisico: number;
   disponible: boolean;
   destacado: boolean;
 }

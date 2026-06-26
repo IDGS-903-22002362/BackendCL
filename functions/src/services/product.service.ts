@@ -37,6 +37,7 @@ import {
   buildFirestoreInventoryPatch,
   normalizeGlobalBuckets,
   normalizeSizeBuckets,
+  projectLegacyFromProductData,
 } from "../utils/inventory-stock.util";
 import stockAlertService from "./stock-alert.service";
 import {
@@ -895,6 +896,21 @@ export class ProductService {
     return Math.max(0, Math.floor(Number(product.existencias || 0)));
   }
 
+  private getProductStockFisico(product: Producto): number {
+    const raw = product as unknown as Record<string, unknown>;
+    const projection = projectLegacyFromProductData(raw);
+    if (projection.inventarioGlobal) {
+      return projection.inventarioGlobal.fisica;
+    }
+    if (projection.inventarioPorTalla.length > 0) {
+      return projection.inventarioPorTalla.reduce(
+        (total, row) => total + (row.fisica ?? row.cantidad ?? 0),
+        0,
+      );
+    }
+    return this.getProductStockTotal(product);
+  }
+
   private isProductAvailableForCatalog(product: Producto): boolean {
     return this.getProductStockTotal(product) > 0;
   }
@@ -1084,6 +1100,7 @@ export class ProductService {
   ): CatalogProductCardDTO {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
     const stockTotal = this.getProductStockTotal(product);
+    const stockFisico = this.getProductStockFisico(product);
     const disponible = this.isProductAvailableForCatalog(product);
     const {
       tieneOferta,
@@ -1118,6 +1135,7 @@ export class ProductService {
         ? product.imagenes.filter(Boolean)
         : [],
       stockTotal,
+      stockFisico,
       disponible,
       destacado: product.destacado === true,
     };

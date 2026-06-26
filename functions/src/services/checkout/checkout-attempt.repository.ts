@@ -92,6 +92,39 @@ export class CheckoutAttemptRepository {
     return attempt;
   }
 
+  async findPaymentPendingByUser(
+    userId: string,
+    limit = 10,
+  ): Promise<CheckoutAttempt[]> {
+    const snap = await this.collection
+      .where("userId", "==", userId)
+      .where("status", "==", CheckoutAttemptStatus.PAYMENT_PENDING)
+      .limit(limit)
+      .get();
+
+    return snap.docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as CheckoutAttempt),
+    }));
+  }
+
+  /** Intentos PAYMENT_PENDING sin actividad reciente (reconciliación backend). */
+  async findStalePaymentPendingIds(
+    staleMinutes: number,
+    limit = 50,
+  ): Promise<string[]> {
+    const threshold = Timestamp.fromDate(
+      new Date(Date.now() - staleMinutes * 60 * 1000),
+    );
+    const snap = await this.collection
+      .where("status", "==", CheckoutAttemptStatus.PAYMENT_PENDING)
+      .where("updatedAt", "<=", threshold)
+      .limit(limit)
+      .get();
+
+    return snap.docs.map((doc) => doc.id);
+  }
+
   /** Devuelve IDs de intentos vencidos sin mutar estado (releaseAttempt marca terminal). */
   async findDueAttemptIds(limit = 100): Promise<string[]> {
     const now = Timestamp.now();

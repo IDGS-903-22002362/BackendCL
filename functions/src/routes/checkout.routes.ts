@@ -26,6 +26,12 @@ router.post(
   checkoutController.startCheckout,
 );
 
+router.post(
+  "/attempts/reconcile-pending",
+  authMiddleware,
+  checkoutController.reconcilePendingAttempts,
+);
+
 router.get(
   "/attempts/:attemptId/status",
   authMiddleware,

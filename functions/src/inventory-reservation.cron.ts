@@ -9,13 +9,20 @@ export const expireInventoryReservations = functions.pubsub
     const expiredReservations =
       await inventoryReservationService.expireDueReservations(200);
     const expiredAttempts = await checkoutAttemptService.expireStaleAttempts();
+    const stalePaymentPending =
+      await checkoutAttemptService.reconcileStalePaymentPendingAttempts(50);
+    const orphanReservations =
+      await inventoryReservationService.countOrphanActiveReservations(100);
     const reconciled =
       await inventoryReservationService.reconcilePaidOrdersWithoutSale(25);
 
     console.log(
       `[inventory-cron] reservas vencidas: ${expiredReservations.reservations} ` +
         `(checkout: ${expiredReservations.checkoutAttempts}, órdenes: ${expiredReservations.orders}), ` +
-        `intentos checkout expirados: ${expiredAttempts}, órdenes reconciliadas: ${reconciled}`,
+        `intentos checkout expirados: ${expiredAttempts}, ` +
+        `payment_pending obsoletos: ${stalePaymentPending}, ` +
+        `reservas huérfanas detectadas: ${orphanReservations}, ` +
+        `órdenes reconciliadas: ${reconciled}`,
     );
     return null;
   });

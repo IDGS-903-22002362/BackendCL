@@ -12,6 +12,12 @@ export const INVENTORY_RESERVATION_TTL_MINUTES = parsePositiveInt(
   30,
 );
 
+/** Minutos sin actividad antes de reconciliar intentos PAYMENT_PENDING obsoletos. */
+export const CHECKOUT_STALE_PAYMENT_PENDING_MINUTES = parsePositiveInt(
+  process.env.CHECKOUT_STALE_PAYMENT_PENDING_MINUTES,
+  10,
+);
+
 /** Diferencia máxima (unidades) que un empleado puede ajustar sin aprobación admin. */
 export const INVENTORY_EMPLOYEE_ADJUSTMENT_LIMIT = parsePositiveInt(
   process.env.INVENTORY_EMPLOYEE_ADJUSTMENT_LIMIT,

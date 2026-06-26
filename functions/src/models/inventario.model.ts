@@ -243,6 +243,8 @@ export interface DashboardInventarioItem {
   }>;
   stockMinimoGlobal: number;
   bajoStock: boolean;
+  /** true cuando hay unidades bloqueadas en checkout (no es venta). */
+  reservadaEnCheckout: boolean;
 }
 
 export interface DiagnosticoInventarioProducto {

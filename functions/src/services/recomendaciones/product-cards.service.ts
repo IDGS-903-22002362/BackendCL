@@ -7,6 +7,7 @@ import {
   readStoredOfferSnapshot,
 } from "../product-offer-snapshot.service";
 import { isProductoElegible } from "./utils/product-eligibility.util";
+import { projectLegacyFromProductData } from "../../utils/inventory-stock.util";
 
 const PRODUCTOS_COLLECTION = "productos";
 const CATEGORIAS_COLLECTION = "categorias";
@@ -58,6 +59,22 @@ class ProductCardsService {
     return { categorias, lineas };
   }
 
+  private getProductStockFisico(product: Producto, stockDisponible: number): number {
+    const projection = projectLegacyFromProductData(
+      product as unknown as Record<string, unknown>,
+    );
+    if (projection.inventarioGlobal) {
+      return projection.inventarioGlobal.fisica;
+    }
+    if (projection.inventarioPorTalla.length > 0) {
+      return projection.inventarioPorTalla.reduce(
+        (total, row) => total + (row.fisica ?? row.cantidad ?? 0),
+        0,
+      );
+    }
+    return stockDisponible;
+  }
+
   private toCatalogCard(
     product: Producto,
     labels: { categorias: Map<string, string>; lineas: Map<string, string> },
@@ -71,6 +88,7 @@ class ProductCardsService {
   ): CatalogProductCardDTO {
     const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
     const stockTotal = Math.max(0, Math.floor(Number(product.existencias || 0)));
+    const stockFisico = this.getProductStockFisico(product, stockTotal);
 
     return {
       id: product.id || "",
@@ -96,6 +114,7 @@ class ProductCardsService {
         ? product.imagenes.filter(Boolean)
         : [],
       stockTotal,
+      stockFisico,
       disponible:
         typeof product.disponible === "boolean"
           ? product.disponible

@@ -12,6 +12,7 @@ import { ApiError } from "../../utils/error-handler";
 import logger from "../../utils/logger";
 import carritoService from "../carrito.service";
 import checkoutAttemptRepository from "./checkout-attempt.repository";
+import { CHECKOUT_STALE_PAYMENT_PENDING_MINUTES } from "../../config/inventory.config";
 import inventoryReservationService, {
   InventoryStockUnavailableError,
 } from "../inventory-reservation.service";
@@ -595,6 +596,12 @@ export class CheckoutAttemptService {
       );
     }
 
+    checkoutLogger.info("checkout_attempt_abandon_started", {
+      checkoutAttemptId: attemptId,
+      userId,
+      priorStatus: attempt.status,
+    });
+
     if (
       attempt.status === CheckoutAttemptStatus.FINALIZED ||
       attempt.status === CheckoutAttemptStatus.PAID ||
@@ -608,35 +615,17 @@ export class CheckoutAttemptService {
       };
     }
 
-    if (attempt.stripeCheckoutSessionId) {
-      try {
-        const session = await pagoService.getStripeCheckoutSessionForAttempt(
-          attempt.stripeCheckoutSessionId,
-          userId,
-        );
-        if (
-          session.paymentStatus === "paid" ||
-          session.status === "complete"
-        ) {
-          return {
-            attemptId,
-            status: attempt.status,
-            orderId: attempt.orderId,
-          };
-        }
-        if (session.status === "open" && session.paymentStatus !== "paid") {
-          await pagoService.expireStripeCheckoutSessionIfOpen(
-            attempt.stripeCheckoutSessionId,
-          );
-        }
-      } catch (error) {
-        checkoutLogger.warn("checkout_attempt_abandon_stripe_lookup_failed", {
-          checkoutAttemptId: attemptId,
-          stripeSessionId: attempt.stripeCheckoutSessionId,
-          errorMessage:
-            error instanceof Error ? error.message : String(error),
-        });
-      }
+    const reconciliation = await this.reconcileStripeBeforeRelease(attemptId);
+    if (reconciliation.action === "finalized") {
+      checkoutLogger.info("checkout_attempt_abandon_finalized_paid", {
+        checkoutAttemptId: attemptId,
+        orderId: reconciliation.orderId,
+      });
+      return {
+        attemptId,
+        status: CheckoutAttemptStatus.FINALIZED,
+        orderId: reconciliation.orderId,
+      };
     }
 
     const hasActiveReservations =
@@ -665,6 +654,11 @@ export class CheckoutAttemptService {
           "El usuario volvió desde Stripe sin completar el pago",
       },
     );
+
+    checkoutLogger.info("checkout_attempt_abandoned", {
+      checkoutAttemptId: attemptId,
+      userId,
+    });
 
     return {
       attemptId,
@@ -842,6 +836,103 @@ export class CheckoutAttemptService {
     }
 
     return { action: "release" };
+  }
+
+  async reconcilePendingAttemptsForUser(userId: string): Promise<{
+    reconciled: number;
+    finalized: string[];
+    released: string[];
+  }> {
+    const attempts =
+      await checkoutAttemptRepository.findPaymentPendingByUser(userId);
+    const finalized: string[] = [];
+    const released: string[] = [];
+
+    for (const attempt of attempts) {
+      if (!attempt.id) {
+        continue;
+      }
+
+      const reconciliation = await this.reconcileStripeBeforeRelease(attempt.id);
+      if (reconciliation.action === "finalized") {
+        finalized.push(attempt.id);
+        continue;
+      }
+
+      const hasActiveReservations =
+        await inventoryReservationService.checkoutAttemptHasActiveReservations(
+          attempt.id,
+        );
+      if (!hasActiveReservations) {
+        continue;
+      }
+
+      await this.releaseAttempt(attempt.id, "Reconciliación de intento pendiente", {
+        status: CheckoutAttemptStatus.CANCELED,
+        failureCode: "pending_reconciled",
+        failureMessage:
+          "Intento de pago pendiente reconciliado al volver al sitio",
+      });
+      released.push(attempt.id);
+    }
+
+    checkoutLogger.info("checkout_pending_attempts_reconciled", {
+      userId,
+      finalizedCount: finalized.length,
+      releasedCount: released.length,
+    });
+
+    return {
+      reconciled: finalized.length + released.length,
+      finalized,
+      released,
+    };
+  }
+
+  async reconcileStalePaymentPendingAttempts(limit = 50): Promise<number> {
+    const staleIds =
+      await checkoutAttemptRepository.findStalePaymentPendingIds(
+        CHECKOUT_STALE_PAYMENT_PENDING_MINUTES,
+        limit,
+      );
+    let processed = 0;
+
+    for (const attemptId of staleIds) {
+      const reconciliation = await this.reconcileStripeBeforeRelease(attemptId);
+      if (reconciliation.action === "finalized") {
+        processed += 1;
+        continue;
+      }
+
+      const hasActiveReservations =
+        await inventoryReservationService.checkoutAttemptHasActiveReservations(
+          attemptId,
+        );
+      if (!hasActiveReservations) {
+        continue;
+      }
+
+      await this.releaseAttempt(
+        attemptId,
+        "Intento payment_pending obsoleto reconciliado por cron",
+        {
+          status: CheckoutAttemptStatus.EXPIRED,
+          failureCode: "stale_payment_pending",
+          failureMessage:
+            "El intento de pago quedó inactivo y la reserva fue liberada",
+        },
+      );
+      processed += 1;
+    }
+
+    if (processed > 0) {
+      checkoutLogger.info("checkout_stale_payment_pending_reconciled", {
+        count: processed,
+        staleMinutes: CHECKOUT_STALE_PAYMENT_PENDING_MINUTES,
+      });
+    }
+
+    return processed;
   }
 
   async expireStaleAttempts(): Promise<number> {

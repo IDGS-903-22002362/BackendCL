@@ -18,7 +18,12 @@ import {
   projectLegacyFromProductData,
 } from "../utils/inventory-stock.util";
 import { normalizeTallaIds } from "../utils/size-inventory.util";
+import { logger } from "../utils/logger";
 import inventoryService from "./inventory.service";
+
+const inventoryReservationLogger = logger.child({
+  component: "inventory-reservation-service",
+});
 
 const PRODUCTOS_COLLECTION = "productos";
 const RESERVAS_INVENTARIO_COLLECTION = "reservasInventario";
@@ -477,6 +482,15 @@ class InventoryReservationService {
           updatedAt: now,
           motivo: input.motivo,
         });
+      });
+    }
+
+    if (!snapshot.empty) {
+      inventoryReservationLogger.info("checkout_attempt_reservations_released", {
+        checkoutAttemptId: input.checkoutAttemptId,
+        count: snapshot.size,
+        motivo: input.motivo,
+        targetStatus,
       });
     }
   }
@@ -1112,6 +1126,55 @@ class InventoryReservationService {
     }
 
     return reconciled;
+  }
+
+  /**
+   * Reservas activas cuyo checkoutAttempt ya no está en estado pendiente o no existe.
+   */
+  async countOrphanActiveReservations(limit = 100): Promise<number> {
+    const snapshot = await firestoreTienda
+      .collection(RESERVAS_INVENTARIO_COLLECTION)
+      .where("estado", "==", EstadoReservaInventario.ACTIVA)
+      .limit(limit)
+      .get();
+
+    if (snapshot.empty) {
+      return 0;
+    }
+
+    const { default: checkoutAttemptRepository } = await import(
+      "./checkout/checkout-attempt.repository"
+    );
+    const { CheckoutAttemptStatus } = await import(
+      "../models/checkout-attempt.model"
+    );
+    const pendingStatuses = new Set([
+      CheckoutAttemptStatus.CREATED,
+      CheckoutAttemptStatus.PAYMENT_PENDING,
+      CheckoutAttemptStatus.PROCESSING,
+    ]);
+
+    let orphanCount = 0;
+    for (const doc of snapshot.docs) {
+      const reserva = doc.data() as ReservaInventario;
+      const attemptId = reserva.checkoutAttemptId?.trim();
+      if (!attemptId) {
+        continue;
+      }
+
+      const attempt = await checkoutAttemptRepository.getById(attemptId);
+      if (!attempt || !pendingStatuses.has(attempt.status)) {
+        orphanCount += 1;
+        inventoryReservationLogger.warn("inventory_orphan_active_reservation", {
+          reservationId: doc.id,
+          checkoutAttemptId: attemptId,
+          attemptStatus: attempt?.status ?? "missing",
+          productoId: reserva.productoId,
+        });
+      }
+    }
+
+    return orphanCount;
   }
 }
 

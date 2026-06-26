@@ -117,6 +117,33 @@ export const abandonAttempt = async (req: Request, res: Response) => {
   }
 };
 
+export const reconcilePendingAttempts = async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthenticatedUid(req);
+    const result =
+      await checkoutAttemptService.reconcilePendingAttemptsForUser(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Intentos de pago pendientes reconciliados",
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_reconcile_pending",
+      });
+    }
+
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al reconciliar intentos de pago pendientes",
+      fallbackCode: "CHECKOUT_RECONCILE_PENDING_FAILED",
+      logLabel: "checkout_reconcile_pending",
+    });
+  }
+};
+
 export const cancelAttempt = async (req: Request, res: Response) => {
   try {
     const userId = getAuthenticatedUid(req);
