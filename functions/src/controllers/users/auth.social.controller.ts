@@ -6,7 +6,7 @@ import pointsService from "../../services/puntos.service";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { UsuarioApp, RolUsuario } from "../../models/usuario.model";
-import { syncFirebaseAdminClaims } from "../../utils/middlewares";
+import { isAdminRole, syncFirebaseAdminClaims } from "../../utils/middlewares";
 
 const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
   if (!fechaNacimiento) return null;
@@ -361,8 +361,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       });
     }
 
-    const isAdminUser =
-      usuario.rol === RolUsuario.ADMIN || usuario.rol === RolUsuario.EMPLEADO;
+    const isAdminUser = isAdminRole(usuario.rol);
 
     const jwtPayload = {
       uid: usuario.uid,

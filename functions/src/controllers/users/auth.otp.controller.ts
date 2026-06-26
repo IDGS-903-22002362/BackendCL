@@ -4,7 +4,7 @@ import { sendVerificationEmail } from "../../lib/brevo/client";
 import otpService from "../../lib/firebase/otp-service";
 import jwt from "jsonwebtoken";
 import { RolUsuario } from "../../models/usuario.model";
-import { syncFirebaseAdminClaims } from "../../utils/middlewares";
+import { isAdminRole, syncFirebaseAdminClaims } from "../../utils/middlewares";
 
 export async function requestVerificationCode(req: Request, res: Response) {
     try {
@@ -132,7 +132,7 @@ export async function verifyAndLogin(req: Request, res: Response) {
             });
         }
 
-        const isAdminUser = rol === RolUsuario.ADMIN || rol === RolUsuario.EMPLEADO;
+        const isAdminUser = isAdminRole(rol);
 
         // Generar JWT para la sesión
         const jwtSecret = process.env.JWT_SECRET;
