@@ -166,8 +166,11 @@ export const buildEmbeddedCheckoutSessionBaseParams =
 export const buildStripeCheckoutSessionExpiresAt = (
   ttlMinutes: number,
 ): number => {
+  /** Stripe exige al menos 30 minutos entre creación y expires_at. */
+  const stripeMinimumMinutes = 30;
   const safeTtl = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : 30;
-  return Math.floor(Date.now() / 1000) + safeTtl * 60;
+  const effectiveTtl = Math.max(safeTtl, stripeMinimumMinutes);
+  return Math.floor(Date.now() / 1000) + effectiveTtl * 60;
 };
 
 export const buildStripeIdempotencyKey = (

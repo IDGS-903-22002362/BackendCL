@@ -339,8 +339,8 @@ export class CheckoutAttemptService {
       );
 
       const stripeIdempotencyKey = body.retryPayment
-        ? `${idempotencyKey}:retry:${Date.now()}`
-        : idempotencyKey;
+        ? `${idempotencyKey}:retry:${attempt.id}:${Date.now()}`
+        : `${idempotencyKey}:${attempt.id}`;
 
       const session = await pagoService.createStripeCheckoutSessionForAttempt({
         checkoutAttemptId: attempt.id!,
@@ -797,9 +797,8 @@ export class CheckoutAttemptService {
     }
 
     try {
-      const session = await pagoService.getStripeCheckoutSessionForAttempt(
+      const session = await pagoService.retrieveStripeCheckoutSessionPaymentStatus(
         attempt.stripeCheckoutSessionId,
-        attempt.userId,
       );
 
       if (

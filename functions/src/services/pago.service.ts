@@ -1565,34 +1565,47 @@ async createStripeCheckoutSession(
 
     const hostedCheckoutBase = buildHostedCheckoutSessionBaseParams(currency);
 
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        customer: stripeCustomerId,
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency,
-              unit_amount: amount,
-              product_data: {
-                name: "Compra Club León",
-                description: "Checkout seguro",
-                metadata: {
-                  checkoutAttemptId: input.checkoutAttemptId,
-                  cartId: input.cartId,
-                  fulfillmentMethod: paymentMetadata.fulfillmentMethod,
-                },
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
+      mode: "payment",
+      customer: stripeCustomerId,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency,
+            unit_amount: amount,
+            product_data: {
+              name: "Compra Club León",
+              description: "Checkout seguro",
+              metadata: {
+                checkoutAttemptId: input.checkoutAttemptId,
+                cartId: input.cartId,
+                fulfillmentMethod: paymentMetadata.fulfillmentMethod,
               },
             },
           },
-        ],
-        success_url: input.successUrl,
-        cancel_url: input.cancelUrl,
-        expires_at: buildStripeCheckoutSessionExpiresAt(
-          INVENTORY_RESERVATION_TTL_MINUTES,
-        ),
-        ...hostedCheckoutBase,
+        },
+      ],
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+      expires_at: buildStripeCheckoutSessionExpiresAt(
+        INVENTORY_RESERVATION_TTL_MINUTES,
+      ),
+      ...hostedCheckoutBase,
+      metadata: {
+        checkoutAttemptId: input.checkoutAttemptId,
+        userId: input.userId,
+        pagoId: pagoRef.id,
+        cartId: input.cartId,
+        fulfillmentMethod: paymentMetadata.fulfillmentMethod,
+        pickupLocationId: paymentMetadata.pickupLocationId,
+        shippingTotal: paymentMetadata.shippingTotal,
+        discountTotal: paymentMetadata.discountTotal,
+        reservationId: input.reservationId || "",
+        paymentAttemptId:
+          input.paymentAttemptId || input.checkoutAttemptId,
+      },
+      payment_intent_data: {
         metadata: {
           checkoutAttemptId: input.checkoutAttemptId,
           userId: input.userId,
@@ -1606,24 +1619,33 @@ async createStripeCheckoutSession(
           paymentAttemptId:
             input.paymentAttemptId || input.checkoutAttemptId,
         },
-        payment_intent_data: {
-          metadata: {
-            checkoutAttemptId: input.checkoutAttemptId,
-            userId: input.userId,
-            pagoId: pagoRef.id,
-            cartId: input.cartId,
-            fulfillmentMethod: paymentMetadata.fulfillmentMethod,
-            pickupLocationId: paymentMetadata.pickupLocationId,
-            shippingTotal: paymentMetadata.shippingTotal,
-            discountTotal: paymentMetadata.discountTotal,
-            reservationId: input.reservationId || "",
-            paymentAttemptId:
-              input.paymentAttemptId || input.checkoutAttemptId,
-          },
-        },
       },
-      { idempotencyKey: input.idempotencyKey },
-    );
+    };
+
+    let stripeIdempotencyKey = input.idempotencyKey;
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await stripe.checkout.sessions.create(sessionParams, {
+        idempotencyKey: stripeIdempotencyKey,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error || "");
+      const isIdempotencyConflict =
+        /idempotent/i.test(message) || /same parameters/i.test(message);
+      if (!isIdempotencyConflict) {
+        throw error;
+      }
+      stripeIdempotencyKey = `${input.idempotencyKey}:recover:${Date.now()}`;
+      session = await stripe.checkout.sessions.create(sessionParams, {
+        idempotencyKey: stripeIdempotencyKey,
+      });
+    }
+
+    await pagoRef.update({
+      idempotencyKey: stripeIdempotencyKey,
+      updatedAt: admin.firestore.Timestamp.now(),
+    });
 
     if (!session.url) {
       throw new ApiError(
