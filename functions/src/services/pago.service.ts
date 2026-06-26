@@ -36,6 +36,7 @@ import {
   isStripeMissingResourceError,
 } from "../lib/stripe";
 import { INVENTORY_RESERVATION_TTL_MINUTES } from "../config/inventory.config";
+import { CheckoutAttemptStatus } from "../models/checkout-attempt.model";
 import pickupOrderService from "./pickup-order.service";
 import paidOrderFinalizerService from "./paid-order-finalizer.service";
 import ordenService from "./orden.service";
@@ -131,6 +132,8 @@ export type CreateStripeCheckoutSessionForAttemptInput = {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey: string;
+  reservationId?: string;
+  paymentAttemptId?: string;
 };
 
 export type CreateStripeCheckoutSessionInput = {
@@ -1629,6 +1632,9 @@ async createStripeCheckoutSession(
           pickupLocationId: paymentMetadata.pickupLocationId,
           shippingTotal: paymentMetadata.shippingTotal,
           discountTotal: paymentMetadata.discountTotal,
+          reservationId: input.reservationId || "",
+          paymentAttemptId:
+            input.paymentAttemptId || input.checkoutAttemptId,
         },
         payment_intent_data: {
           metadata: {
@@ -1640,6 +1646,9 @@ async createStripeCheckoutSession(
             pickupLocationId: paymentMetadata.pickupLocationId,
             shippingTotal: paymentMetadata.shippingTotal,
             discountTotal: paymentMetadata.discountTotal,
+            reservationId: input.reservationId || "",
+            paymentAttemptId:
+              input.paymentAttemptId || input.checkoutAttemptId,
           },
         },
       },
@@ -1736,6 +1745,31 @@ async createStripeCheckoutSession(
       {
         ordenId,
         updatedAt: admin.firestore.Timestamp.now(),
+      },
+      { merge: true },
+    );
+  }
+
+  async completeCheckoutAttemptPayment(input: {
+    pagoId: string;
+    checkoutSessionId?: string;
+    paymentIntentId?: string;
+    eventId: string;
+  }): Promise<void> {
+    const now = admin.firestore.Timestamp.now();
+    await firestoreTienda.collection(COLECCION_PAGOS).doc(input.pagoId).set(
+      {
+        estado: EstadoPago.COMPLETADO,
+        status: PaymentStatus.PAID,
+        providerStatus: "paid",
+        checkoutSessionId: input.checkoutSessionId,
+        paymentIntentId: input.paymentIntentId,
+        fechaPago: now,
+        rawEventId: input.eventId,
+        webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+          input.eventId,
+        ),
+        updatedAt: now,
       },
       { merge: true },
     );
@@ -2837,15 +2871,32 @@ async createStripeCheckoutSession(
       event.type === "checkout.session.expired" ||
       event.type === "checkout.session.async_payment_failed"
     ) {
+      const stripe = getStripeClient();
+      const freshSession = await stripe.checkout.sessions.retrieve(session.id);
+
+      if (freshSession.payment_status === "paid") {
+        return this.handleCheckoutAttemptSessionEvent(
+          { ...event, type: "checkout.session.completed" },
+          freshSession,
+          pagoMatch,
+          checkoutAttemptId,
+        );
+      }
+
+      if (freshSession.status === "open") {
+        await this.expireStripeCheckoutSessionIfOpen(session.id);
+      }
+
       await checkoutAttemptService.releaseAttempt(
         checkoutAttemptId,
         `Webhook Stripe: ${event.type}`,
         {
-          status:
-            event.type === "checkout.session.expired"
-              ? undefined
-              : undefined,
+          status: CheckoutAttemptStatus.EXPIRED,
           failureCode: event.type,
+          failureMessage:
+            event.type === "checkout.session.expired"
+              ? "La sesión de Stripe expiró sin completar el pago"
+              : "El pago asíncrono falló en Stripe",
         },
       );
       await pagoMatch.pagoRef.set(
@@ -2855,6 +2906,12 @@ async createStripeCheckoutSession(
             event.type === "checkout.session.expired"
               ? PaymentStatus.EXPIRED
               : PaymentStatus.FAILED,
+          providerStatus: freshSession.status || session.status || "expired",
+          checkoutSessionId: session.id,
+          rawEventId: event.id,
+          webhookEventIdsProcesados: admin.firestore.FieldValue.arrayUnion(
+            event.id,
+          ),
           updatedAt: now,
         },
         { merge: true },

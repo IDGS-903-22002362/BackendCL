@@ -40,4 +40,11 @@ router.post(
   checkoutController.cancelAttempt,
 );
 
+router.post(
+  "/attempts/:attemptId/abandon",
+  authMiddleware,
+  validateParams(attemptIdParamSchema),
+  checkoutController.abandonAttempt,
+);
+
 export default router;

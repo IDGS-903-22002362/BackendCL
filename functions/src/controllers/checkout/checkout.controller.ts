@@ -86,6 +86,37 @@ export const getAttemptStatus = async (req: Request, res: Response) => {
   }
 };
 
+export const abandonAttempt = async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthenticatedUid(req);
+    const result = await checkoutAttemptService.abandonAttemptForUser(
+      req.params.attemptId,
+      userId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.alreadyAbandoned
+        ? "El intento de checkout ya estaba abandonado"
+        : "Intento de checkout abandonado",
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_abandon",
+      });
+    }
+
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al abandonar el intento de checkout",
+      fallbackCode: "CHECKOUT_ABANDON_FAILED",
+      logLabel: "checkout_abandon",
+    });
+  }
+};
+
 export const cancelAttempt = async (req: Request, res: Response) => {
   try {
     const userId = getAuthenticatedUid(req);

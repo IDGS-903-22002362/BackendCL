@@ -14,6 +14,7 @@ jest.mock("../src/config/firebase", () => ({
     collection: (name: string) => fakeFirestore.collection(name),
     runTransaction: (cb: (tx: FakeTransaction) => Promise<unknown>) =>
       fakeFirestore.runTransaction(cb),
+    batch: () => fakeFirestore.batch(),
   },
 }));
 
@@ -33,6 +34,15 @@ jest.mock("../src/services/inventory.service", () => ({
   default: {
     orderHasSaleMovements: jest.fn().mockResolvedValue(false),
     registerMovement: jest.fn(),
+  },
+}));
+
+jest.mock("../src/services/checkout/checkout-attempt.service", () => ({
+  __esModule: true,
+  default: {
+    reconcileStripeBeforeRelease: jest.fn().mockResolvedValue({
+      action: "release",
+    }),
   },
 }));
 
@@ -136,7 +146,36 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
       };
     },
     async runTransaction(cb: (tx: FakeTransaction) => Promise<unknown>) {
+      const snapshotBefore = () =>
+        JSON.stringify(
+          Object.fromEntries(
+            Array.from(collections.entries()).map(([name, docs]) => [
+              name,
+              Object.fromEntries(
+                Array.from(docs.entries()).map(([id, data]) => [id, { ...data }]),
+              ),
+            ]),
+          ),
+        );
+
+      const restoreSnapshot = (snapshot: string) => {
+        const restored = JSON.parse(snapshot) as Record<
+          string,
+          Record<string, DocData>
+        >;
+        collections.clear();
+        Object.entries(restored).forEach(([name, docs]) => {
+          collections.set(
+            name,
+            new Map(
+              Object.entries(docs).map(([id, data]) => [id, { ...data }]),
+            ),
+          );
+        });
+      };
+
       const run = async () => {
+        const before = snapshotBefore();
         const tx: FakeTransaction = {
           get: async (docRef) => docRef.get(),
           update: (docRef, patch) => {
@@ -146,7 +185,13 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
             void docRef.set(data);
           },
         };
-        return cb(tx);
+
+        try {
+          return await cb(tx);
+        } catch (error) {
+          restoreSnapshot(before);
+          throw error;
+        }
       };
 
       const result = lock.then(run, run);
@@ -156,13 +201,31 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
       );
       return result;
     },
+    batch() {
+      const ops: Array<() => Promise<void>> = [];
+      return {
+        update(
+          docRef: { update: (patch: DocData) => Promise<void> },
+          patch: DocData,
+        ) {
+          ops.push(() => docRef.update(patch));
+        },
+        async commit() {
+          for (const op of ops) {
+            await op();
+          }
+        },
+      };
+    },
     getCollectionData(name: string): Record<string, DocData> {
       return Object.fromEntries(getCollection(name).entries());
     },
   };
 }
 
-import inventoryReservationService from "../src/services/inventory-reservation.service";
+import inventoryReservationService, {
+  InventoryStockUnavailableError,
+} from "../src/services/inventory-reservation.service";
 import { EstadoReservaInventario } from "../src/models/inventario.model";
 
 describe("Reservas concurrentes de inventario", () => {
@@ -197,6 +260,160 @@ describe("Reservas concurrentes de inventario", () => {
       reservasInventario: {},
       movimientosInventario: {},
     });
+  });
+
+  it("22 reservas concurrentes de checkout obtienen exactamente 1 unidad", async () => {
+    const concurrency = 22;
+    const attempts = Array.from({ length: concurrency }, (_, index) => {
+      return inventoryReservationService.reserveForCheckoutAttempt({
+        checkoutAttemptId: `attempt_${index}`,
+        usuarioId: `user_${index}`,
+        idempotencyPrefix: "checkout-attempt",
+        items: [{ productoId: "prod_last", cantidad: 1 }],
+      });
+    });
+
+    const results = await Promise.allSettled(attempts);
+    const fulfilled = results.filter((item) => item.status === "fulfilled");
+    const rejected = results.filter((item) => item.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(concurrency - 1);
+    rejected.forEach((item) => {
+      const reason = (item as PromiseRejectedResult).reason;
+      expect(reason).toBeInstanceOf(InventoryStockUnavailableError);
+    });
+
+    const reservas = Object.values(
+      fakeFirestore.getCollectionData("reservasInventario"),
+    ).filter((item) => item.estado === EstadoReservaInventario.ACTIVA);
+    expect(reservas).toHaveLength(1);
+
+    const producto = fakeFirestore.getCollectionData("productos").prod_last as {
+      inventarioGlobal: { fisica: number; reservada: number; disponible: number };
+    };
+    expect(producto.inventarioGlobal).toMatchObject({
+      fisica: 1,
+      reservada: 1,
+      disponible: 0,
+    });
+
+    const ordenes = fakeFirestore.getCollectionData("ordenes");
+    expect(Object.keys(ordenes)).toHaveLength(2);
+  });
+
+  it("tras confirmar pago simulado: fisica=0 y reservada=0", async () => {
+    fakeFirestore = createFakeFirestore({
+      ordenes: {
+        orden_webhook: {
+          usuarioId: "user_webhook",
+          items: [{ productoId: "prod_last", cantidad: 1 }],
+        },
+      },
+      productos: {
+        prod_last: {
+          existencias: 1,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 1,
+            reservada: 0,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 1,
+          },
+        },
+      },
+      reservasInventario: {},
+      movimientosInventario: {},
+    });
+
+    await inventoryReservationService.reserveForCheckoutAttempt({
+      checkoutAttemptId: "attempt_webhook",
+      usuarioId: "user_webhook",
+      idempotencyPrefix: "checkout-attempt",
+      items: [{ productoId: "prod_last", cantidad: 1 }],
+    });
+
+    const reservaEntries = Object.entries(
+      fakeFirestore.getCollectionData("reservasInventario"),
+    );
+    expect(reservaEntries).toHaveLength(1);
+    await fakeFirestore
+      .collection("reservasInventario")
+      .doc(reservaEntries[0][0])
+      .update({ ordenId: "orden_webhook" });
+
+    await inventoryReservationService.confirmOrderReservations(
+      "orden_webhook",
+      "user_webhook",
+    );
+
+    const producto = fakeFirestore.getCollectionData("productos").prod_last as {
+      inventarioGlobal: { fisica: number; reservada: number; disponible: number };
+    };
+    expect(producto.inventarioGlobal).toMatchObject({
+      fisica: 0,
+      reservada: 0,
+      disponible: 0,
+    });
+
+    const ventas = Object.values(
+      fakeFirestore.getCollectionData("movimientosInventario"),
+    ).filter((item) => item.tipo === "venta");
+    expect(ventas).toHaveLength(1);
+  });
+
+  it("cancelación del ganador libera reserva sin crear pedido", async () => {
+    fakeFirestore = createFakeFirestore({
+      productos: {
+        prod_last: {
+          existencias: 1,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 1,
+            reservada: 0,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 1,
+          },
+        },
+      },
+      reservasInventario: {},
+      movimientosInventario: {},
+      ordenes: {},
+    });
+
+    await inventoryReservationService.reserveForCheckoutAttempt({
+      checkoutAttemptId: "attempt_cancel",
+      usuarioId: "user_cancel",
+      idempotencyPrefix: "checkout-attempt",
+      items: [{ productoId: "prod_last", cantidad: 1 }],
+    });
+
+    await inventoryReservationService.releaseCheckoutAttemptReservations({
+      checkoutAttemptId: "attempt_cancel",
+      motivo: "Checkout abandonado",
+      usuarioId: "user_cancel",
+    });
+
+    const producto = fakeFirestore.getCollectionData("productos").prod_last as {
+      inventarioGlobal: { fisica: number; reservada: number; disponible: number };
+    };
+    expect(producto.inventarioGlobal).toMatchObject({
+      fisica: 1,
+      reservada: 0,
+      disponible: 1,
+    });
+
+    const ordenes = fakeFirestore.getCollectionData("ordenes");
+    expect(Object.keys(ordenes)).toHaveLength(0);
+
+    const ventas = Object.values(
+      fakeFirestore.getCollectionData("movimientosInventario"),
+    ).filter((item) => item.tipo === "venta");
+    expect(ventas).toHaveLength(0);
   });
 
   it("solo una reserva concurrente obtiene la última unidad", async () => {
@@ -349,5 +566,115 @@ describe("Reservas concurrentes de inventario", () => {
     const reserva = fakeFirestore.getCollectionData("reservasInventario")
       .reserva_release;
     expect(reserva.estado).toBe(EstadoReservaInventario.LIBERADA);
+  });
+
+  it("reserva checkout multi-ítem es atómica: falla si un ítem no tiene stock", async () => {
+    fakeFirestore = createFakeFirestore({
+      productos: {
+        prod_ok: {
+          existencias: 5,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 5,
+            reservada: 0,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 5,
+          },
+        },
+        prod_fail: {
+          existencias: 0,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 0,
+            reservada: 0,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 0,
+          },
+        },
+      },
+      reservasInventario: {},
+      movimientosInventario: {},
+    });
+
+    await expect(
+      inventoryReservationService.reserveForCheckoutAttempt({
+        checkoutAttemptId: "attempt_multi",
+        usuarioId: "user_multi",
+        idempotencyPrefix: "checkout-attempt",
+        items: [
+          { productoId: "prod_ok", cantidad: 2 },
+          { productoId: "prod_fail", cantidad: 1 },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(InventoryStockUnavailableError);
+
+    const reservas = Object.values(
+      fakeFirestore.getCollectionData("reservasInventario"),
+    ).filter((item) => item.estado === EstadoReservaInventario.ACTIVA);
+    expect(reservas).toHaveLength(0);
+
+    const productoOk = fakeFirestore.getCollectionData("productos")
+      .prod_ok as {
+      inventarioGlobal: { reservada: number; disponible: number };
+    };
+    expect(productoOk.inventarioGlobal).toMatchObject({
+      reservada: 0,
+      disponible: 5,
+    });
+  });
+
+  it("expira reservas vencidas ligadas a checkoutAttemptId", async () => {
+    fakeFirestore = createFakeFirestore({
+      productos: {
+        prod_checkout: {
+          existencias: 3,
+          tallaIds: [],
+          inventarioPorTalla: [],
+          inventarioGlobal: {
+            fisica: 3,
+            reservada: 1,
+            noDisponible: 0,
+            entrante: 0,
+            disponible: 2,
+          },
+        },
+      },
+      reservasInventario: {
+        reserva_checkout: {
+          checkoutAttemptId: "attempt_expired",
+          productoId: "prod_checkout",
+          tallaId: null,
+          cantidad: 1,
+          estado: EstadoReservaInventario.ACTIVA,
+          expiraEn: new Date("2026-06-22T11:00:00.000Z"),
+        },
+      },
+      movimientosInventario: {},
+    });
+
+    const result = await inventoryReservationService.expireDueReservations(50);
+
+    expect(result).toMatchObject({
+      checkoutAttempts: 1,
+      orders: 0,
+      reservations: 1,
+    });
+
+    const producto = fakeFirestore.getCollectionData("productos")
+      .prod_checkout as {
+      inventarioGlobal: { reservada: number; disponible: number };
+    };
+    expect(producto.inventarioGlobal).toMatchObject({
+      reservada: 0,
+      disponible: 3,
+    });
+
+    const reserva = fakeFirestore.getCollectionData("reservasInventario")
+      .reserva_checkout;
+    expect(reserva.estado).toBe(EstadoReservaInventario.EXPIRADA);
   });
 });

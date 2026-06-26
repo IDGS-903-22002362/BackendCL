@@ -12,7 +12,9 @@ import { ApiError } from "../../utils/error-handler";
 import logger from "../../utils/logger";
 import carritoService from "../carrito.service";
 import checkoutAttemptRepository from "./checkout-attempt.repository";
-import inventoryReservationService from "../inventory-reservation.service";
+import inventoryReservationService, {
+  InventoryStockUnavailableError,
+} from "../inventory-reservation.service";
 import ordenService from "../orden.service";
 import pagoService from "../pago.service";
 import paidOrderFinalizerService from "../paid-order-finalizer.service";
@@ -43,6 +45,27 @@ const ACTIVE_ATTEMPT_STATUSES = new Set<CheckoutAttemptStatus>([
   CheckoutAttemptStatus.PAYMENT_PENDING,
   CheckoutAttemptStatus.PROCESSING,
 ]);
+
+function mapCheckoutStartError(error: unknown): never {
+  if (error instanceof ApiError) {
+    throw error;
+  }
+  if (error instanceof InventoryStockUnavailableError) {
+    throw new ApiError(409, error.message, true, error.code);
+  }
+  if (
+    error instanceof Error &&
+    /Stock insuficiente/i.test(error.message)
+  ) {
+    throw new ApiError(
+      409,
+      "No hay suficiente stock disponible para completar tu compra. Intenta con menos unidades u otro producto.",
+      true,
+      "CHECKOUT_STOCK_UNAVAILABLE",
+    );
+  }
+  throw error;
+}
 
 function roundMoney(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -296,7 +319,7 @@ export class CheckoutAttemptService {
       input;
 
     try {
-      await inventoryReservationService.reserveForCheckoutAttempt({
+      const reservas = await inventoryReservationService.reserveForCheckoutAttempt({
         checkoutAttemptId: attempt.id!,
         items: orderDraft.items.map((item) => ({
           productoId: item.productoId,
@@ -306,6 +329,11 @@ export class CheckoutAttemptService {
         usuarioId: userId,
         idempotencyPrefix: "checkout-attempt",
       });
+
+      const reservationId =
+        reservas.find((reserva) => reserva.id)?.id ??
+        reservas[0]?.id ??
+        "";
 
       const successUrl = body.successUrl?.trim();
       const cancelUrl = body.cancelUrl?.trim();
@@ -331,6 +359,8 @@ export class CheckoutAttemptService {
         successUrl: resolvedSuccessUrl,
         cancelUrl,
         idempotencyKey: stripeIdempotencyKey,
+        reservationId,
+        paymentAttemptId: attempt.id!,
       });
 
       await checkoutAttemptRepository.update(attempt.id!, {
@@ -361,13 +391,18 @@ export class CheckoutAttemptService {
         userId,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
-      await this.releaseAttempt(attempt.id!, "Fallo al iniciar pago", {
-        status: CheckoutAttemptStatus.FAILED,
-        failureCode: "payment_start_failed",
-        failureMessage:
-          error instanceof Error ? error.message : "Error al iniciar pago",
-      });
-      throw error;
+      const isStockConflict =
+        error instanceof InventoryStockUnavailableError ||
+        (error instanceof Error && /Stock insuficiente/i.test(error.message));
+      if (!isStockConflict) {
+        await this.releaseAttempt(attempt.id!, "Fallo al iniciar pago", {
+          status: CheckoutAttemptStatus.FAILED,
+          failureCode: "payment_start_failed",
+          failureMessage:
+            error instanceof Error ? error.message : "Error al iniciar pago",
+        });
+      }
+      mapCheckoutStartError(error);
     }
   }
 
@@ -540,6 +575,103 @@ export class CheckoutAttemptService {
     return orden.id!;
   }
 
+  async abandonAttemptForUser(
+    attemptId: string,
+    userId: string,
+  ): Promise<{
+    attemptId: string;
+    status: CheckoutAttemptStatus;
+    orderId?: string;
+    alreadyAbandoned?: boolean;
+  }> {
+    const attempt = await checkoutAttemptRepository.getById(attemptId);
+    if (!attempt) {
+      throw new ApiError(404, "Intento de checkout no encontrado");
+    }
+    if (attempt.userId !== userId) {
+      throw new ApiError(
+        403,
+        "No tienes permisos para abandonar este intento",
+      );
+    }
+
+    if (
+      attempt.status === CheckoutAttemptStatus.FINALIZED ||
+      attempt.status === CheckoutAttemptStatus.PAID ||
+      attempt.status === CheckoutAttemptStatus.PROCESSING ||
+      attempt.orderId
+    ) {
+      return {
+        attemptId,
+        status: attempt.status,
+        orderId: attempt.orderId,
+      };
+    }
+
+    if (attempt.stripeCheckoutSessionId) {
+      try {
+        const session = await pagoService.getStripeCheckoutSessionForAttempt(
+          attempt.stripeCheckoutSessionId,
+          userId,
+        );
+        if (
+          session.paymentStatus === "paid" ||
+          session.status === "complete"
+        ) {
+          return {
+            attemptId,
+            status: attempt.status,
+            orderId: attempt.orderId,
+          };
+        }
+        if (session.status === "open" && session.paymentStatus !== "paid") {
+          await pagoService.expireStripeCheckoutSessionIfOpen(
+            attempt.stripeCheckoutSessionId,
+          );
+        }
+      } catch (error) {
+        checkoutLogger.warn("checkout_attempt_abandon_stripe_lookup_failed", {
+          checkoutAttemptId: attemptId,
+          stripeSessionId: attempt.stripeCheckoutSessionId,
+          errorMessage:
+            error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const hasActiveReservations =
+      await inventoryReservationService.checkoutAttemptHasActiveReservations(
+        attemptId,
+      );
+
+    if (
+      TERMINAL_CHECKOUT_ATTEMPT_STATUSES.has(attempt.status) &&
+      !hasActiveReservations
+    ) {
+      return {
+        attemptId,
+        status: attempt.status,
+        alreadyAbandoned: true,
+      };
+    }
+
+    await this.releaseAttempt(
+      attemptId,
+      "Checkout abandonado al cancelar pago en Stripe",
+      {
+        status: CheckoutAttemptStatus.CANCELED,
+        failureCode: "payment_abandoned",
+        failureMessage:
+          "El usuario volvió desde Stripe sin completar el pago",
+      },
+    );
+
+    return {
+      attemptId,
+      status: CheckoutAttemptStatus.CANCELED,
+    };
+  }
+
   async cancelAttemptForUser(
     attemptId: string,
     userId: string,
@@ -648,16 +780,88 @@ export class CheckoutAttemptService {
     });
   }
 
+  /**
+   * Consulta Stripe antes de liberar reservas vencidas o abandonadas.
+   * Si el pago ya quedó confirmado, finaliza la orden sin liberar stock.
+   */
+  async reconcileStripeBeforeRelease(attemptId: string): Promise<{
+    action: "finalized" | "expired_session" | "release";
+    orderId?: string;
+  }> {
+    const attempt = await checkoutAttemptRepository.getById(attemptId);
+    if (!attempt) {
+      return { action: "release" };
+    }
+
+    if (
+      attempt.status === CheckoutAttemptStatus.FINALIZED ||
+      attempt.orderId
+    ) {
+      return { action: "finalized", orderId: attempt.orderId };
+    }
+
+    if (!attempt.stripeCheckoutSessionId || !attempt.pagoId) {
+      return { action: "release" };
+    }
+
+    try {
+      const session = await pagoService.getStripeCheckoutSessionForAttempt(
+        attempt.stripeCheckoutSessionId,
+        attempt.userId,
+      );
+
+      if (
+        session.paymentStatus === "paid" ||
+        session.status === "complete"
+      ) {
+        const eventId = `reconcile:${attemptId}`;
+        const orderId = await this.finalizePaidFromWebhook({
+          checkoutAttemptId: attemptId,
+          pagoId: attempt.pagoId,
+          eventId,
+        });
+        await pagoService.completeCheckoutAttemptPayment({
+          pagoId: attempt.pagoId,
+          checkoutSessionId: attempt.stripeCheckoutSessionId,
+          eventId,
+        });
+        return { action: "finalized", orderId };
+      }
+
+      if (session.status === "open" && session.paymentStatus !== "paid") {
+        await pagoService.expireStripeCheckoutSessionIfOpen(
+          attempt.stripeCheckoutSessionId,
+        );
+        return { action: "expired_session" };
+      }
+    } catch (error) {
+      checkoutLogger.warn("checkout_attempt_stripe_reconcile_failed", {
+        checkoutAttemptId: attemptId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return { action: "release" };
+  }
+
   async expireStaleAttempts(): Promise<number> {
     const expiredIds = await checkoutAttemptRepository.findDueAttemptIds();
+    let released = 0;
     for (const attemptId of expiredIds) {
+      const reconciliation =
+        await this.reconcileStripeBeforeRelease(attemptId);
+      if (reconciliation.action === "finalized") {
+        continue;
+      }
+
       await this.releaseAttempt(attemptId, "Intento de checkout expirado", {
         status: CheckoutAttemptStatus.EXPIRED,
         failureCode: "attempt_expired",
         failureMessage: "El intento de checkout expiró",
       });
+      released += 1;
     }
-    return expiredIds.length;
+    return released;
   }
 }
 
