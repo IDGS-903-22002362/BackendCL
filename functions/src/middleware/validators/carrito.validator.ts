@@ -158,6 +158,14 @@ export const updateItemCarritoSchema = z
         MAX_CANTIDAD_POR_ITEM,
         `La cantidad máxima por producto es ${MAX_CANTIDAD_POR_ITEM}`,
       ),
+
+    tallaId: z
+      .string({
+        invalid_type_error: "El ID de talla debe ser una cadena de texto",
+      })
+      .trim()
+      .min(1, "El ID de talla no puede estar vacío")
+      .optional(),
   })
   .strict();
 

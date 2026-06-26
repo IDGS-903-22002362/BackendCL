@@ -140,7 +140,7 @@ export const updateItem = async (req: Request, res: Response) => {
     }
 
     const { productoId } = req.params;
-    const { cantidad } = req.body;
+    const { cantidad, tallaId } = req.body;
 
     // Obtener carrito
     const carrito = await carritoService.getOrCreateCart(
@@ -149,7 +149,12 @@ export const updateItem = async (req: Request, res: Response) => {
     );
 
     // Actualizar cantidad
-    await carritoService.updateItemQuantity(carrito.id!, productoId, cantidad);
+    await carritoService.updateItemQuantity(
+      carrito.id!,
+      productoId,
+      cantidad,
+      tallaId,
+    );
 
     // Obtener carrito populado para la respuesta
     const carritoPopulado = await carritoService.getCartPopulado(carrito.id!);
@@ -208,6 +213,8 @@ export const removeItem = async (req: Request, res: Response) => {
     }
 
     const { productoId } = req.params;
+    const tallaId =
+      typeof req.body?.tallaId === "string" ? req.body.tallaId : undefined;
 
     // Obtener carrito
     const carrito = await carritoService.getOrCreateCart(
@@ -216,7 +223,7 @@ export const removeItem = async (req: Request, res: Response) => {
     );
 
     // Eliminar item
-    await carritoService.removeItem(carrito.id!, productoId);
+    await carritoService.removeItem(carrito.id!, productoId, tallaId);
 
     // Obtener carrito populado para la respuesta
     const carritoPopulado = await carritoService.getCartPopulado(carrito.id!);
