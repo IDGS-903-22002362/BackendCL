@@ -61,7 +61,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     success: false,
     code: "LEGACY_STRIPE_PAYMENT_INTENT_DISABLED",
     message:
-      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Embedded Checkout.",
+      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Hosted Checkout.",
   });
 };
 
@@ -94,7 +94,7 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
     success: false,
     code: "LEGACY_STRIPE_CHECKOUT_SESSION_DISABLED",
     message:
-      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Embedded Checkout.",
+      "Este flujo de pago fue retirado. Usa POST /api/checkout/attempts para iniciar el pago con Stripe Hosted Checkout.",
   });
 };
 

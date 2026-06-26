@@ -128,11 +128,11 @@ export type StripeIdempotencyInput = {
 };
 
 /**
- * Opciones compartidas para Embedded Checkout con métodos dinámicos de Stripe.
+ * Opciones compartidas para Stripe Hosted Checkout con métodos dinámicos.
  * No fija payment_method_types: Apple Pay, Google Pay, Link y tarjetas los
  * controla el Dashboard + contexto del cliente (MXN, monto, navegador).
  */
-export const buildEmbeddedCheckoutSessionBaseParams = (
+export const buildHostedCheckoutSessionBaseParams = (
   currency: string,
 ): Pick<
   Stripe.Checkout.SessionCreateParams,
@@ -157,6 +157,17 @@ export const buildEmbeddedCheckoutSessionBaseParams = (
   }
 
   return params;
+};
+
+/** @deprecated Usa buildHostedCheckoutSessionBaseParams */
+export const buildEmbeddedCheckoutSessionBaseParams =
+  buildHostedCheckoutSessionBaseParams;
+
+export const buildStripeCheckoutSessionExpiresAt = (
+  ttlMinutes: number,
+): number => {
+  const safeTtl = Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : 30;
+  return Math.floor(Date.now() / 1000) + safeTtl * 60;
 };
 
 export const buildStripeIdempotencyKey = (

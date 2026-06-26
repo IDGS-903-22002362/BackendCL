@@ -35,6 +35,7 @@ type CheckoutBody = {
   notas?: string;
   successUrl?: string;
   cancelUrl?: string;
+  retryPayment?: boolean;
 };
 
 const ACTIVE_ATTEMPT_STATUSES = new Set<CheckoutAttemptStatus>([
@@ -126,28 +127,45 @@ export class CheckoutAttemptService {
       await checkoutAttemptRepository.findByIdempotencyKey(idempotencyKey);
     if (existingByKey && ACTIVE_ATTEMPT_STATUSES.has(existingByKey.status)) {
       if (this.resolveAttemptSignature(existingByKey) === currentSignature) {
-        checkoutLogger.info("checkout_attempt_reuse_idempotency", {
+        if (body.retryPayment) {
+          return this.refreshPaymentSessionForRetry(existingByKey, {
+            userId,
+            cartId,
+            orderDraft,
+            pricing,
+            body,
+            idempotencyKey,
+          });
+        }
+        const rehydrated = await this.tryRehydrateAttemptSession(
+          existingByKey,
+          false,
+        );
+        if (rehydrated) {
+          checkoutLogger.info("checkout_attempt_reuse_idempotency", {
+            checkoutAttemptId: existingByKey.id,
+            userId,
+            cartId,
+          });
+          return rehydrated;
+        }
+      } else {
+        checkoutLogger.info("checkout_attempt_invalidate_idempotency", {
           checkoutAttemptId: existingByKey.id,
           userId,
           cartId,
         });
-        return this.rehydrateAttemptSession(existingByKey, false);
+        await this.releaseAttempt(
+          existingByKey.id!,
+          "Carrito cambió; se recrea el intento de checkout",
+          {
+            status: CheckoutAttemptStatus.CANCELED,
+            failureCode: "cart_changed",
+            failureMessage:
+              "El carrito cambió respecto al intento previo; se generó uno nuevo",
+          },
+        );
       }
-      checkoutLogger.info("checkout_attempt_invalidate_idempotency", {
-        checkoutAttemptId: existingByKey.id,
-        userId,
-        cartId,
-      });
-      await this.releaseAttempt(
-        existingByKey.id!,
-        "Carrito cambió; se recrea el intento de checkout",
-        {
-          status: CheckoutAttemptStatus.CANCELED,
-          failureCode: "cart_changed",
-          failureMessage:
-            "El carrito cambió respecto al intento previo; se generó uno nuevo",
-        },
-      );
     }
 
     // 2) Reuso por usuario+carrito: solo si el carrito/pricing es idéntico.
@@ -159,28 +177,45 @@ export class CheckoutAttemptService {
         this.resolveAttemptSignature(activeAttempt) === currentSignature;
       const canInvalidate = ACTIVE_ATTEMPT_STATUSES.has(activeAttempt.status);
       if (sameCart || !canInvalidate) {
-        checkoutLogger.info("checkout_attempt_reuse_active", {
+        if (body.retryPayment) {
+          return this.refreshPaymentSessionForRetry(activeAttempt, {
+            userId,
+            cartId,
+            orderDraft,
+            pricing,
+            body,
+            idempotencyKey,
+          });
+        }
+        const rehydrated = await this.tryRehydrateAttemptSession(
+          activeAttempt,
+          false,
+        );
+        if (rehydrated) {
+          checkoutLogger.info("checkout_attempt_reuse_active", {
+            checkoutAttemptId: activeAttempt.id,
+            userId,
+            cartId,
+          });
+          return rehydrated;
+        }
+      } else {
+        checkoutLogger.info("checkout_attempt_invalidate_active", {
           checkoutAttemptId: activeAttempt.id,
           userId,
           cartId,
         });
-        return this.rehydrateAttemptSession(activeAttempt, false);
+        await this.releaseAttempt(
+          activeAttempt.id!,
+          "Carrito cambió; se recrea el intento de checkout",
+          {
+            status: CheckoutAttemptStatus.CANCELED,
+            failureCode: "cart_changed",
+            failureMessage:
+              "El carrito cambió respecto al intento previo; se generó uno nuevo",
+          },
+        );
       }
-      checkoutLogger.info("checkout_attempt_invalidate_active", {
-        checkoutAttemptId: activeAttempt.id,
-        userId,
-        cartId,
-      });
-      await this.releaseAttempt(
-        activeAttempt.id!,
-        "Carrito cambió; se recrea el intento de checkout",
-        {
-          status: CheckoutAttemptStatus.CANCELED,
-          failureCode: "cart_changed",
-          failureMessage:
-            "El carrito cambió respecto al intento previo; se generó uno nuevo",
-        },
-      );
     }
 
     const attempt = await checkoutAttemptRepository.create({
@@ -203,6 +238,62 @@ export class CheckoutAttemptService {
       cartId,
       total: pricing.total,
     });
+
+    return this.createPaymentSessionForAttempt({
+      attempt,
+      userId,
+      cartId,
+      orderDraft,
+      pricing,
+      body,
+      idempotencyKey,
+    });
+  }
+
+  private async refreshPaymentSessionForRetry(
+    attempt: CheckoutAttempt,
+    input: {
+      userId: string;
+      cartId: string;
+      orderDraft: CrearOrdenDTO;
+      pricing: CheckoutPricingSnapshot;
+      body: CheckoutBody;
+      idempotencyKey: string;
+    },
+  ): Promise<StartCheckoutAttemptResult> {
+    if (!attempt.id) {
+      throw new ApiError(409, "Intento de checkout inválido");
+    }
+
+    if (attempt.stripeCheckoutSessionId) {
+      await pagoService.expireStripeCheckoutSessionIfOpen(
+        attempt.stripeCheckoutSessionId,
+      );
+    }
+
+    checkoutLogger.info("checkout_attempt_retry_payment", {
+      checkoutAttemptId: attempt.id,
+      userId: input.userId,
+      cartId: input.cartId,
+    });
+
+    return this.createPaymentSessionForAttempt({
+      attempt,
+      ...input,
+    });
+  }
+
+  private async createPaymentSessionForAttempt(input: {
+    attempt: Awaited<ReturnType<typeof checkoutAttemptRepository.create>>;
+    userId: string;
+    cartId: string;
+    orderDraft: CrearOrdenDTO;
+    pricing: CheckoutPricingSnapshot;
+    body: CheckoutBody;
+    idempotencyKey: string;
+  }): Promise<StartCheckoutAttemptResult> {
+    const { attempt, userId, cartId, orderDraft, pricing, body, idempotencyKey } =
+      input;
 
     try {
       await inventoryReservationService.reserveForCheckoutAttempt({
@@ -227,6 +318,10 @@ export class CheckoutAttemptService {
         attempt.id!,
       );
 
+      const stripeIdempotencyKey = body.retryPayment
+        ? `${idempotencyKey}:retry:${Date.now()}`
+        : idempotencyKey;
+
       const session = await pagoService.createStripeCheckoutSessionForAttempt({
         checkoutAttemptId: attempt.id!,
         userId,
@@ -235,7 +330,7 @@ export class CheckoutAttemptService {
         cartId,
         successUrl: resolvedSuccessUrl,
         cancelUrl,
-        idempotencyKey,
+        idempotencyKey: stripeIdempotencyKey,
       });
 
       await checkoutAttemptRepository.update(attempt.id!, {
@@ -253,7 +348,7 @@ export class CheckoutAttemptService {
       return {
         attemptId: attempt.id!,
         status: CheckoutAttemptStatus.PAYMENT_PENDING,
-        clientSecret: session.clientSecret,
+        url: session.url,
         sessionId: session.sessionId,
         pagoId: session.pagoId,
         total: pricing.total,
@@ -288,36 +383,55 @@ export class CheckoutAttemptService {
     return computeCartSignature(attempt.orderDraft, attempt.pricingSnapshot);
   }
 
-  private async rehydrateAttemptSession(
+  private async tryRehydrateAttemptSession(
     attempt: Awaited<ReturnType<typeof checkoutAttemptRepository.getById>>,
     created: boolean,
-  ): Promise<StartCheckoutAttemptResult> {
-    if (!attempt?.id) {
-      throw new ApiError(409, "Intento de checkout invalido");
+  ): Promise<StartCheckoutAttemptResult | null> {
+    if (!attempt?.id || !attempt.pagoId || !attempt.stripeCheckoutSessionId) {
+      return null;
     }
 
-    if (!attempt.pagoId || !attempt.stripeCheckoutSessionId) {
-      throw new ApiError(
-        409,
-        "El intento de checkout activo no tiene sesion de pago reutilizable",
+    try {
+      const session = await pagoService.getStripeCheckoutSessionForAttempt(
+        attempt.stripeCheckoutSessionId,
+        attempt.userId,
       );
+
+      if (session.status !== "open" || !session.url) {
+        throw new ApiError(
+          409,
+          "La sesión de pago ya no está disponible para reutilizar",
+        );
+      }
+
+      return {
+        attemptId: attempt.id,
+        status: attempt.status,
+        url: session.url,
+        sessionId: session.sessionId,
+        pagoId: attempt.pagoId,
+        total: attempt.total,
+        currency: attempt.currency,
+        created,
+      };
+    } catch (error) {
+      checkoutLogger.warn("checkout_attempt_rehydrate_failed", {
+        checkoutAttemptId: attempt.id,
+        stripeSessionId: attempt.stripeCheckoutSessionId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      await this.releaseAttempt(
+        attempt.id,
+        "Sesión Stripe no reutilizable; se crea un intento nuevo",
+        {
+          status: CheckoutAttemptStatus.EXPIRED,
+          failureCode: "checkout_session_not_reusable",
+          failureMessage:
+            "La sesión de pago expiró o ya no está disponible",
+        },
+      );
+      return null;
     }
-
-    const session = await pagoService.getStripeCheckoutSessionForAttempt(
-      attempt.stripeCheckoutSessionId,
-      attempt.userId,
-    );
-
-    return {
-      attemptId: attempt.id,
-      status: attempt.status,
-      clientSecret: session.clientSecret,
-      sessionId: session.sessionId,
-      pagoId: attempt.pagoId,
-      total: attempt.total,
-      currency: attempt.currency,
-      created,
-    };
   }
 
   async getStatusForUser(

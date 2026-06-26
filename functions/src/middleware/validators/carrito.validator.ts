@@ -298,7 +298,7 @@ export const checkoutCarritoSchema = checkoutCarritoBaseObject.superRefine(
 );
 
 /**
- * URL de retorno de Stripe Embedded Checkout.
+ * URL de retorno de Stripe Hosted Checkout.
  *
  * No se usa `z.string().url()` porque el frontend inserta placeholders como
  * `{CHECKOUT_ATTEMPT_ID}` y `{CHECKOUT_SESSION_ID}` que el backend reemplaza
@@ -315,7 +315,7 @@ const checkoutReturnUrlSchema = z
   .max(2048, "La URL de retorno es demasiado larga");
 
 /**
- * Schema para iniciar un intento de checkout con Stripe Embedded Checkout.
+ * Schema para iniciar un intento de checkout con Stripe Hosted Checkout.
  * POST /api/checkout/attempts
  *
  * Incluye todos los campos del checkout de carrito más `successUrl` y
@@ -325,6 +325,7 @@ export const startCheckoutAttemptSchema = checkoutCarritoBaseObject
   .extend({
     successUrl: checkoutReturnUrlSchema,
     cancelUrl: checkoutReturnUrlSchema,
+    retryPayment: z.boolean().optional(),
   })
   .strict()
   .superRefine(checkoutCarritoRefinement);

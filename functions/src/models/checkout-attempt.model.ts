@@ -54,6 +54,7 @@ export interface CheckoutAttempt {
 export interface StartCheckoutAttemptResult {
   attemptId: string;
   status: CheckoutAttemptStatus;
+  url?: string;
   clientSecret?: string;
   sessionId?: string;
   pagoId?: string;

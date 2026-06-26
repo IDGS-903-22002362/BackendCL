@@ -23,7 +23,8 @@ import {
 import { RolUsuario } from "../models/usuario.model";
 import { ApiError } from "../utils/error-handler";
 import {
-  buildEmbeddedCheckoutSessionBaseParams,
+  buildHostedCheckoutSessionBaseParams,
+  buildStripeCheckoutSessionExpiresAt,
   buildStripeIdempotencyKey,
   buildStripePaymentIntentCardOptions,
   getAppUrl,
@@ -34,6 +35,7 @@ import {
   getStripeWebhookSecret,
   isStripeMissingResourceError,
 } from "../lib/stripe";
+import { INVENTORY_RESERVATION_TTL_MINUTES } from "../config/inventory.config";
 import pickupOrderService from "./pickup-order.service";
 import paidOrderFinalizerService from "./paid-order-finalizer.service";
 import ordenService from "./orden.service";
@@ -141,8 +143,8 @@ export type CreateStripeCheckoutSessionInput = {
 
 export type CreateStripeCheckoutSessionResult = {
   sessionId: string;
-  clientSecret: string;
-  url?: string | null;
+  url: string;
+  clientSecret?: string | null;
   pagoId: string;
   stripeCustomerId?: string;
   created: boolean;
@@ -1224,7 +1226,7 @@ async createStripeCheckoutSession(
   input: CreateStripeCheckoutSessionInput,
 ): Promise<CreateStripeCheckoutSessionResult> {
   const stripe = getStripeClient();
-  const { orderId, userId, successUrl, idempotencyKey } = input;
+  const { orderId, userId, successUrl, cancelUrl, idempotencyKey } = input;
   const currency = getStripeCurrency();
 
   const { ordenDoc, ordenData, amount } = await this.getOrderForPayment(
@@ -1254,11 +1256,15 @@ async createStripeCheckoutSession(
           activePago.checkoutSessionId,
         );
 
-        if (existingSession.client_secret) {
+        if (
+          existingSession.status === "open" &&
+          typeof existingSession.url === "string" &&
+          existingSession.url.length > 0
+        ) {
           return {
             sessionId: existingSession.id,
-            clientSecret: existingSession.client_secret,
             url: existingSession.url,
+            clientSecret: existingSession.client_secret,
             pagoId: activePagoDoc.id,
             stripeCustomerId: activePago.stripeCustomerId || stripeCustomerId,
             created: false,
@@ -1268,9 +1274,9 @@ async createStripeCheckoutSession(
         await activePagoDoc.ref.set(
           {
             estado: EstadoPago.FALLIDO,
-            failureCode: "stripe_checkout_session_without_client_secret",
+            failureCode: "stripe_checkout_session_not_reusable",
             failureMessage:
-              "La sesion existente de Stripe no tiene client_secret para Embedded Checkout",
+              "La sesión existente de Stripe no está abierta o no tiene URL",
             updatedAt: admin.firestore.Timestamp.now(),
           },
           { merge: true },
@@ -1308,11 +1314,15 @@ async createStripeCheckoutSession(
           existingPago.checkoutSessionId,
         );
 
-        if (existingSession.client_secret) {
+        if (
+          existingSession.status === "open" &&
+          typeof existingSession.url === "string" &&
+          existingSession.url.length > 0
+        ) {
           return {
             sessionId: existingSession.id,
-            clientSecret: existingSession.client_secret,
             url: existingSession.url,
+            clientSecret: existingSession.client_secret,
             pagoId: existingDoc.id,
             stripeCustomerId: existingPago.stripeCustomerId || stripeCustomerId,
             created: false,
@@ -1322,9 +1332,9 @@ async createStripeCheckoutSession(
         await existingDoc.ref.set(
           {
             estado: EstadoPago.FALLIDO,
-            failureCode: "stripe_checkout_session_without_client_secret",
+            failureCode: "stripe_checkout_session_not_reusable",
             failureMessage:
-              "La sesion existente de Stripe no tiene client_secret para Embedded Checkout",
+              "La sesión existente de Stripe no está abierta o no tiene URL",
             updatedAt: admin.firestore.Timestamp.now(),
           },
           { merge: true },
@@ -1402,15 +1412,20 @@ async createStripeCheckoutSession(
       },
     ];
 
-    const embeddedCheckoutBase = buildEmbeddedCheckoutSessionBaseParams(currency);
+    const embeddedCheckoutBase = buildHostedCheckoutSessionBaseParams(currency);
 
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
-        ui_mode: "embedded",
         customer: stripeCustomerId,
         line_items: lineItems,
-        return_url: resolvedSuccessUrl,
+        success_url: resolvedSuccessUrl,
+        cancel_url:
+          cancelUrl ||
+          `${baseUrl}/checkout?payment_canceled=1`,
+        expires_at: buildStripeCheckoutSessionExpiresAt(
+          INVENTORY_RESERVATION_TTL_MINUTES,
+        ),
         ...embeddedCheckoutBase,
         metadata: {
           ordenId: orderId,
@@ -1444,13 +1459,13 @@ async createStripeCheckoutSession(
       { idempotencyKey: resolvedIdempotencyKey },
     );
 
-    if (!session.client_secret) {
+    if (!session.url) {
       await pagoRef.set(
         {
           estado: EstadoPago.FALLIDO,
-          failureCode: "stripe_embedded_checkout_without_client_secret",
+          failureCode: "stripe_hosted_checkout_without_url",
           failureMessage:
-            "Stripe no devolvio client_secret para Embedded Checkout",
+            "Stripe no devolvió URL para Hosted Checkout",
           updatedAt: admin.firestore.Timestamp.now(),
         },
         { merge: true },
@@ -1458,7 +1473,7 @@ async createStripeCheckoutSession(
 
       throw new ApiError(
         502,
-        "Stripe no devolvio client secret para Embedded Checkout",
+        "Stripe no devolvió URL para Hosted Checkout",
       );
     }
 
@@ -1487,8 +1502,8 @@ async createStripeCheckoutSession(
 
     return {
       sessionId: session.id,
-      clientSecret: session.client_secret,
       url: session.url,
+      clientSecret: session.client_secret,
       pagoId: pagoRef.id,
       stripeCustomerId,
       created: true,
@@ -1529,11 +1544,15 @@ async createStripeCheckoutSession(
         const existingSession = await stripe.checkout.sessions.retrieve(
           existingPago.checkoutSessionId,
         );
-        if (existingSession.client_secret) {
+        if (
+          existingSession.status === "open" &&
+          typeof existingSession.url === "string" &&
+          existingSession.url.length > 0
+        ) {
           return {
             sessionId: existingSession.id,
-            clientSecret: existingSession.client_secret,
             url: existingSession.url,
+            clientSecret: existingSession.client_secret,
             pagoId: existingDoc.id,
             stripeCustomerId:
               existingPago.stripeCustomerId || stripeCustomerId,
@@ -1571,12 +1590,11 @@ async createStripeCheckoutSession(
       updatedAt: now,
     } satisfies Omit<Pago, "id">);
 
-    const embeddedCheckoutBase = buildEmbeddedCheckoutSessionBaseParams(currency);
+    const hostedCheckoutBase = buildHostedCheckoutSessionBaseParams(currency);
 
     const session = await stripe.checkout.sessions.create(
       {
         mode: "payment",
-        ui_mode: "embedded",
         customer: stripeCustomerId,
         line_items: [
           {
@@ -1596,8 +1614,12 @@ async createStripeCheckoutSession(
             },
           },
         ],
-        return_url: input.successUrl,
-        ...embeddedCheckoutBase,
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+        expires_at: buildStripeCheckoutSessionExpiresAt(
+          INVENTORY_RESERVATION_TTL_MINUTES,
+        ),
+        ...hostedCheckoutBase,
         metadata: {
           checkoutAttemptId: input.checkoutAttemptId,
           userId: input.userId,
@@ -1624,10 +1646,10 @@ async createStripeCheckoutSession(
       { idempotencyKey: input.idempotencyKey },
     );
 
-    if (!session.client_secret) {
+    if (!session.url) {
       throw new ApiError(
         502,
-        "Stripe no devolvio client secret para Embedded Checkout",
+        "Stripe no devolvió URL para Hosted Checkout",
       );
     }
 
@@ -1649,8 +1671,8 @@ async createStripeCheckoutSession(
 
     return {
       sessionId: session.id,
-      clientSecret: session.client_secret,
       url: session.url,
+      clientSecret: session.client_secret,
       pagoId: pagoRef.id,
       stripeCustomerId,
       created: true,
@@ -1660,7 +1682,12 @@ async createStripeCheckoutSession(
   async getStripeCheckoutSessionForAttempt(
     sessionId: string,
     userId: string,
-  ): Promise<{ sessionId: string; clientSecret: string }> {
+  ): Promise<{
+    sessionId: string;
+    url: string;
+    status: string;
+    paymentStatus: string;
+  }> {
     const stripe = getStripeClient();
     const pagoMatch = await this.findPagoByField("checkoutSessionId", sessionId);
     if (!pagoMatch) {
@@ -1672,10 +1699,15 @@ async createStripeCheckoutSession(
       throw new ApiError(403, "No tienes permisos para esta sesión de pago");
     }
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    if (!session.client_secret) {
-      throw new ApiError(409, "La sesión de Stripe no tiene client_secret");
+    if (!session.url) {
+      throw new ApiError(409, "La sesión de Stripe no tiene URL de checkout");
     }
-    return { sessionId: session.id, clientSecret: session.client_secret };
+    return {
+      sessionId: session.id,
+      url: session.url,
+      status: session.status || "unknown",
+      paymentStatus: session.payment_status || "unpaid",
+    };
   }
 
   async expireStripeCheckoutSessionIfOpen(sessionId: string): Promise<void> {
