@@ -42,7 +42,7 @@ import {
 import stockAlertService from "./stock-alert.service";
 import {
   productOfferSnapshotService,
-  readStoredOfferSnapshot,
+  type ProductOfferSnapshotFields,
 } from "./product-offer-snapshot.service";
 import { ofertasService } from "./ofertas.service";
 import { seleccionarMejorOferta } from "../utils/ofertas-pricing.util";
@@ -1067,29 +1067,42 @@ export class ProductService {
       };
     }
 
-    const offerSnapshot = readStoredOfferSnapshot(product);
-    const snapshotTieneOferta =
-      offerSnapshot?.tieneOfertaActiva === true &&
-      typeof offerSnapshot.precioOferta === "number" &&
-      offerSnapshot.precioOferta > 0 &&
-      offerSnapshot.precioOferta < precioOriginal;
+    // Sin ofertas activas cargadas: no usar snapshot denormalizado (puede quedar
+    // desfasado tras desactivar ofertas o cambiar precios).
+    return sinOferta;
+  }
 
-    if (!snapshotTieneOferta || !offerSnapshot) {
-      return sinOferta;
+  /**
+   * Recalcula campos de oferta expuestos al storefront público.
+   * Evita servir precioOferta/tieneOfertaActiva congelados en Firestore.
+   */
+  async resolvePublicProductOfferFields(
+    product: Producto,
+  ): Promise<ProductOfferSnapshotFields> {
+    const precioOriginal = Math.max(0, Number(product.precioPublico || 0));
+    const ofertasActivas = await this.loadActiveOffersForCatalog();
+    const resolved = this.resolveCatalogCardOffer(
+      product,
+      precioOriginal,
+      ofertasActivas,
+    );
+
+    if (!resolved.tieneOferta) {
+      return {
+        tieneOfertaActiva: false,
+        precioOferta: null,
+        porcentajeDescuento: 0,
+        ofertaAplicadaId: null,
+        ofertaTitulo: null,
+      };
     }
 
-    const precioFinal = offerSnapshot.precioOferta as number;
-    const descuentoTotal = Math.max(0, precioOriginal - precioFinal);
-
     return {
-      tieneOferta: true,
-      precioFinal,
-      descuentoTotal,
-      porcentajeDescuento:
-        offerSnapshot.porcentajeDescuento ||
-        Math.round((descuentoTotal / precioOriginal) * 100),
-      ofertaAplicadaId: offerSnapshot.ofertaAplicadaId ?? null,
-      ofertaTitulo: offerSnapshot.ofertaTitulo ?? null,
+      tieneOfertaActiva: true,
+      precioOferta: resolved.precioFinal,
+      porcentajeDescuento: resolved.porcentajeDescuento,
+      ofertaAplicadaId: resolved.ofertaAplicadaId,
+      ofertaTitulo: resolved.ofertaTitulo,
     };
   }
 
@@ -1145,7 +1158,7 @@ export class ProductService {
     product: Producto,
     filters: CatalogCursor["filters"],
     legacyOfertasActivas?: Oferta[] | null,
-    options?: { skipOfferFilter?: boolean },
+    options?: { skipOfferFilter?: boolean; requireActiveOffer?: boolean },
   ): boolean {
     if (filters.category && product.categoriaId !== filters.category) {
       return false;
@@ -1180,24 +1193,23 @@ export class ProductService {
       return false;
     }
 
-    if (filters.onlyOffers && !options?.skipOfferFilter) {
-      if (product.tieneOfertaActiva === true) {
-        // Indexed snapshot marks this product as on offer.
-      } else if (product.tieneOfertaActiva === false) {
+    if (
+      (filters.onlyOffers || options?.requireActiveOffer) &&
+      !options?.skipOfferFilter
+    ) {
+      if (!legacyOfertasActivas) {
         return false;
-      } else if (legacyOfertasActivas) {
-        const mejorOferta = seleccionarMejorOferta(legacyOfertasActivas, {
-          id: product.id || "",
-          precioPublico: product.precioPublico,
-          categoriaId: product.categoriaId,
-          lineaId: product.lineaId,
-          tallaIds: product.tallaIds ?? [],
-        });
+      }
 
-        if (!mejorOferta) {
-          return false;
-        }
-      } else {
+      const mejorOferta = seleccionarMejorOferta(legacyOfertasActivas, {
+        id: product.id || "",
+        precioPublico: product.precioPublico,
+        categoriaId: product.categoriaId,
+        lineaId: product.lineaId,
+        tallaIds: product.tallaIds ?? [],
+      });
+
+      if (!mejorOferta) {
         return false;
       }
     }
@@ -1272,8 +1284,10 @@ export class ProductService {
     const maxScanDocs = 1000;
     const labels = await this.loadCatalogLabels();
     const catalogOfertasActivas = await this.loadActiveOffersForCatalog();
+    let legacyOfertasActivas: Oferta[] | null = filters.onlyOffers
+      ? (catalogOfertasActivas ?? [])
+      : null;
     let baseQuery = this.buildCatalogFirestoreQuery(filters, sortConfig);
-    let legacyOfertasActivas: Oferta[] | null = null;
 
     let startAfterValue:
       | string
@@ -1369,9 +1383,14 @@ export class ProductService {
 
     const hasMore = matched.length > pageLimit;
     const pageProducts = matched.slice(0, pageLimit);
-    const items = pageProducts.map((product) =>
+    let items = pageProducts.map((product) =>
       this.toCatalogCard(product, labels, catalogOfertasActivas),
     );
+
+    if (filters.onlyOffers) {
+      items = items.filter((item) => item.tieneOferta);
+    }
+
     const cursorProduct = pageProducts[pageProducts.length - 1];
 
     return {
@@ -1433,19 +1452,26 @@ export class ProductService {
       )
       .filter((product) => product.activo === true);
 
-    const skipOfferFilter = filters.onlyOffers && sort.startsWith("ofertas_");
-
     const filteredProducts = products.filter((product) =>
-      this.matchesCatalogFilters(product, filters, null, {
-        skipOfferFilter,
-      }),
+      this.matchesCatalogFilters(
+        product,
+        filters,
+        catalogOfertasActivas ?? [],
+        {
+          requireActiveOffer: this.isOfertasCatalogSort(sort),
+        },
+      ),
     );
 
     const pageProducts = filteredProducts.slice(offset, offset + query.limit);
     const hasMore = offset + query.limit < filteredProducts.length;
-    const items = pageProducts.map((product) =>
+    let items = pageProducts.map((product) =>
       this.toCatalogCard(product, labels, catalogOfertasActivas),
     );
+
+    if (filters.onlyOffers || this.isOfertasCatalogSort(sort)) {
+      items = items.filter((item) => item.tieneOferta);
+    }
     const lastProduct = pageProducts[pageProducts.length - 1];
 
     return {

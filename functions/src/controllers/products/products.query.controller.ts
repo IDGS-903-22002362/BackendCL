@@ -85,6 +85,10 @@ export const getById = async (req: Request, res: Response) => {
       });
     }
 
+    const offerFields = await productService.resolvePublicProductOfferFields(
+      producto,
+    );
+
     const userId = typeof req.user?.uid === "string" ? req.user.uid : undefined;
     const userContext = userId
       ? await Promise.all([
@@ -98,6 +102,7 @@ export const getById = async (req: Request, res: Response) => {
       success: true,
       data: {
         ...producto,
+        ...offerFields,
         ...(userContext
           ? {
               ratingEligibility: userContext[0],

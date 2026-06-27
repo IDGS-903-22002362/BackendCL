@@ -410,7 +410,7 @@ export class CheckoutShippingService {
     if (packages.length === 0) {
       throw new CheckoutFlowError(
         "FEDEX_RATE_UNAVAILABLE",
-        "No hay productos fisicos para cotizar envio FedEx.",
+        "No hay productos fisicos para cotizar envio.",
         422,
       );
     }
