@@ -9,6 +9,15 @@ import * as command from "../controllers/galeria/galeria.command.controller";
 import * as query from "../controllers/galeria/galeria.query.controller";
 import { authMiddleware } from "../utils/middlewares";
 import { handleMultipart } from "../middleware/multipart-handler";
+import { verifyRole } from "../middleware/validation.middleware";
+import { RolUsuario } from "../models/usuario.model";
+
+const GALERIA_STAFF_ROLES = [
+  RolUsuario.ADMIN,
+  RolUsuario.EMPLEADO,
+  RolUsuario.EMPLEADO_CLUB,
+  RolUsuario.SUPER_ADMIN,
+];
 
 const router = Router();
 
@@ -75,7 +84,7 @@ router.get("/", query.getAll);
  *       401:
  *         description: Usuario no autenticado
  */
-router.post("/", authMiddleware, command.create);
+router.post("/", authMiddleware, verifyRole(GALERIA_STAFF_ROLES), command.create);
 
 // ==========================================
 // RUTAS CON ID
@@ -150,6 +159,7 @@ router.post(
         allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"]
     }),
     authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
     command.uploadImages
 );
 
@@ -195,6 +205,7 @@ router.post(
         allowedMimeTypes: ["video/mp4", "video/quicktime", "video/x-msvideo"]
     }),
     authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
     command.uploadVideos
 );
 
@@ -211,6 +222,7 @@ router.post(
 router.post(
     "/:galeriaId/media/metadata",
     authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
     command.addMediaMetadata
 );
 
@@ -226,6 +238,7 @@ router.post(
 router.delete(
     "/:id/imagenes",
     authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
     command.deleteImage
 );
 
@@ -241,6 +254,7 @@ router.delete(
 router.delete(
     "/:id/videos",
     authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
     command.deleteVideo
 );
 
@@ -266,8 +280,8 @@ router.delete(
  *       404:
  *         description: Galería no encontrada
  */
-router.delete("/:id", authMiddleware, command.deleteGallery);
+router.delete("/:id", authMiddleware, verifyRole(GALERIA_STAFF_ROLES), command.deleteGallery);
 
-router.put('/:id/reactivar', authMiddleware, command.reactivate);
+router.put('/:id/reactivar', authMiddleware, verifyRole(GALERIA_STAFF_ROLES), command.reactivate);
 
 export default router;

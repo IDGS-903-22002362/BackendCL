@@ -4,6 +4,10 @@
   },
   "firestore": [
     {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    },
+    {
       "database": "tiendacl",
       "rules": "firestore.rules",
       "indexes": "firestore.indexes.json"

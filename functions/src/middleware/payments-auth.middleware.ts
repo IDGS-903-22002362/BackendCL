@@ -105,7 +105,11 @@ export const paymentStaffMiddleware = (
   }
 
   const role = req.user.rol as RolUsuario;
-  if (role !== RolUsuario.ADMIN && role !== RolUsuario.EMPLEADO) {
+  if (
+    role !== RolUsuario.ADMIN &&
+    role !== RolUsuario.EMPLEADO &&
+    role !== RolUsuario.SUPER_ADMIN
+  ) {
     respondAuthError(
       res,
       403,

@@ -1342,6 +1342,16 @@ export class AplazoProvider implements PaymentProvider {
     headers: Record<string, string | string[] | undefined>,
   ): void {
     if (!contract.webhookSecret) {
+      const isProduction =
+        process.env.NODE_ENV === "production" ||
+        Boolean(process.env.K_SERVICE || process.env.FUNCTION_NAME);
+      if (isProduction) {
+        throw new PaymentApiError(
+          503,
+          "PAYMENT_WEBHOOK_MISCONFIGURED",
+          "Webhook Aplazo no configurado en producción",
+        );
+      }
       return;
     }
 

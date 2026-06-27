@@ -22,6 +22,21 @@ import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
 import { RolUsuario } from "../models/usuario.model";
 import { assignPointsBySale } from "../controllers/users/users.points.controller";
+import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
+
+const promoPointsRateLimiter = createSimpleRateLimiter({
+  keyPrefix: "user:promo-points",
+  windowMs: 24 * 60 * 60 * 1000,
+  maxRequests: 1,
+  resolveKey: (req) => `uid:${req.user?.uid ?? "anonymous"}`,
+});
+
+const emailLookupRateLimiter = createSimpleRateLimiter({
+  keyPrefix: "user:email-lookup",
+  windowMs: 60 * 1000,
+  maxRequests: 10,
+});
+
 const router = Router();
 
 // ==========================================
@@ -377,7 +392,7 @@ router.get("/buscar/:termino", authMiddleware, requireAdmin, queryController.sea
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  */
-router.get("/exists/email", commandController.checkEmail);
+router.get("/exists/email", emailLookupRateLimiter, commandController.checkEmail);
 
 /**
  * @swagger
@@ -516,24 +531,6 @@ router.put("/:id", authMiddleware, requireAdmin, commandController.update);
  *         $ref: '#/components/responses/500ServerError'
  */
 router.delete("/:id", authMiddleware, requireAdmin, commandController.remove);
-
-/**
- * POST /api/usuarios/:id/imagenes
- * Sube im?genes
-
-router.post(
-    "/:id/imagenes",
-    upload.array("imagenes", 5),
-    commandController.uploadImages
-);
- */
-
-/**
- * DELETE /api/usuarios/:id/imagenes
- * Elimina una imagen
-
-router.delete("/:id/imagenes", commandController.deleteImage);
- */
 
 /**
  * @swagger
@@ -718,7 +715,12 @@ router.post(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.post("/me/puntos/sumar", authMiddleware, commandController.sumarPuntos);
+router.post(
+  "/me/puntos/sumar",
+  authMiddleware,
+  promoPointsRateLimiter,
+  commandController.sumarPuntos,
+);
 
 
 /**

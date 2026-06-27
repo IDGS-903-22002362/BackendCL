@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
 import pointsService from "../../services/puntos.service";
 import { admin } from "../../config/firebase.admin";
+import { getAppCheck } from "firebase-admin/app-check";
 
 /**
  * Controller: Users Command (Escritura)
@@ -57,23 +58,66 @@ export const create = async (req: Request, res: Response) => {
     }
 };
 export const checkEmail = async (req: Request, res: Response) => {
+    const startedAt = Date.now();
+    const ensureMinDelay = async () => {
+        const elapsed = Date.now() - startedAt;
+        const minMs = 320;
+        if (elapsed < minMs) {
+            await new Promise((resolve) => setTimeout(resolve, minMs - elapsed));
+        }
+    };
+
     try {
-        const { email } = req.query;
+        const rawEmail = req.query.email;
+        const email =
+            typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
 
         if (!email) {
+            await ensureMinDelay();
             return res.status(400).json({
                 success: false,
                 message: "Email requerido",
             });
         }
 
-        const exists = await userAppService.existsByEmail(email as string);
+        const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailPattern.test(email)) {
+            await ensureMinDelay();
+            return res.status(400).json({
+                success: false,
+                message: "Email invalido",
+            });
+        }
+
+        const exists = await userAppService.existsByEmail(email);
+        const appCheckToken = req.header("X-Firebase-AppCheck");
+        let appCheckValid = false;
+
+        if (appCheckToken) {
+            try {
+                await getAppCheck(admin.app()).verifyToken(appCheckToken);
+                appCheckValid = true;
+            } catch {
+                appCheckValid = false;
+            }
+        }
+
+        await ensureMinDelay();
+
+        if (!appCheckValid) {
+            return res.status(200).json({
+                success: true,
+                message:
+                    "Verificacion completada. Continua con el registro si el correo es valido.",
+            });
+        }
 
         return res.status(200).json({
             success: true,
             exists,
         });
     } catch (error) {
+        await ensureMinDelay();
         return res.status(500).json({
             success: false,
             message: "Error al verificar email",

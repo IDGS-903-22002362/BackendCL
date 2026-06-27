@@ -1,5 +1,7 @@
 ﻿import { Request, Response, NextFunction } from "express";
 import { optionalAppCheckMiddleware } from "../src/utils/middlewares";
+import { paymentStaffMiddleware } from "../src/middleware/payments-auth.middleware";
+import { RolUsuario } from "../src/models/usuario.model";
 
 jest.mock("firebase-admin/app-check", () => ({
   getAppCheck: () => ({
@@ -87,5 +89,83 @@ describe("optionalAppCheckMiddleware", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(401);
+  });
+
+  it("omite App Check en lookup de email (anti-enumeracion interna)", async () => {
+    process.env.APP_CHECK_ENFORCED = "true";
+
+    const req = {
+      path: "/usuarios/exists/email",
+      originalUrl: "/usuarios/exists/email?email=test@example.com",
+      method: "GET",
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as Request;
+    const res = createMockResponse();
+    const next = jest.fn() as NextFunction;
+
+    await optionalAppCheckMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("firebase rules static validation", () => {
+  const fs = require("fs") as typeof import("fs");
+  const path = require("path") as typeof import("path");
+
+  const firestoreRules = fs.readFileSync(
+    path.resolve(__dirname, "../../firestore.rules"),
+    "utf8",
+  );
+  const storageRules = fs.readFileSync(
+    path.resolve(__dirname, "../../storage.rules"),
+    "utf8",
+  );
+
+  it("firestore denies default access", () => {
+    expect(firestoreRules).toMatch(/allow read, write: if false/);
+    expect(firestoreRules).not.toMatch(/allow read: if true/);
+  });
+
+  it("storage denies all client access", () => {
+    expect(storageRules).toMatch(/allow read,\s*write: if false/);
+  });
+});
+
+describe("paymentStaffMiddleware", () => {
+  const createStaffMockResponse = () => {
+    const res: Record<string, jest.Mock> = {
+      status: jest.fn(),
+      json: jest.fn(),
+    };
+    res.status.mockReturnValue(res);
+    return res;
+  };
+
+  it("allows SUPER_ADMIN in addition to ADMIN and EMPLEADO", () => {
+    const req = {
+      user: { uid: "sa1", rol: RolUsuario.SUPER_ADMIN },
+    } as Parameters<typeof paymentStaffMiddleware>[0];
+    const res = createStaffMockResponse();
+    const next = jest.fn();
+
+    paymentStaffMiddleware(req, res as never, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("rejects CLIENTE", () => {
+    const req = {
+      user: { uid: "c1", rol: RolUsuario.CLIENTE },
+    } as Parameters<typeof paymentStaffMiddleware>[0];
+    const res = createStaffMockResponse();
+    const next = jest.fn();
+
+    paymentStaffMiddleware(req, res as never, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
   });
 });
