@@ -1,11 +1,22 @@
-import * as functions from "firebase-functions/v1";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import inventoryReservationService from "./services/inventory-reservation.service";
 import checkoutAttemptService from "./services/checkout/checkout-attempt.service";
+import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 
-export const expireInventoryReservations = functions.pubsub
-  .schedule("every 5 minutes")
-  .timeZone("America/Mexico_City")
-  .onRun(async () => {
+/**
+ * Expira reservas de inventario, intentos de checkout obsoletos y reconcilia
+ * inconsistencias entre reservas, intentos y órdenes pagadas.
+ */
+export const expireInventoryReservations = onSchedule(
+  {
+    schedule: "every 5 minutes",
+    timeZone: "America/Mexico_City",
+    region: process.env.GCP_REGION || "us-central1",
+    timeoutSeconds: 300,
+    memory: "512MiB",
+    secrets: [...API_RUNTIME_SECRETS],
+  },
+  async () => {
     const expiredReservations =
       await inventoryReservationService.expireDueReservations(200);
     const expiredAttempts = await checkoutAttemptService.expireStaleAttempts();
@@ -25,5 +36,5 @@ export const expireInventoryReservations = functions.pubsub
         `reservas huérfanas reparadas: ${orphanReservations.repaired}, ` +
         `órdenes reconciliadas: ${reconciled}`,
     );
-    return null;
-  });
+  },
+);

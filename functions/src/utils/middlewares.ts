@@ -124,6 +124,8 @@ const APP_CHECK_SKIP_PATH_PREFIXES = [
   "/api/stripe/webhook",
   "/api/pagos/webhook",
   "/api/webhooks/aplazo",
+  "/api/usuarios/exists/email",
+  "/usuarios/exists/email",
   "/health",
   "/api/health",
 ];
@@ -131,9 +133,13 @@ const APP_CHECK_SKIP_PATH_PREFIXES = [
 function shouldSkipAppCheck(req: Request): boolean {
   const path = req.path || "";
   const originalUrl = req.originalUrl || "";
+  const normalizedPaths = [path, originalUrl.split("?")[0] ?? ""];
 
-  return APP_CHECK_SKIP_PATH_PREFIXES.some(
-    (prefix) => path.startsWith(prefix) || originalUrl.startsWith(prefix),
+  return APP_CHECK_SKIP_PATH_PREFIXES.some((prefix) =>
+    normalizedPaths.some(
+      (candidate) =>
+        candidate === prefix || candidate.startsWith(`${prefix}/`) || candidate.endsWith(prefix),
+    ),
   );
 }
 

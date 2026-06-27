@@ -37,6 +37,17 @@ jobs:
           cd functions
           npm ci
 
+      - name: Run unit tests
+        run: |
+          cd functions
+          npm test -- --passWithNoTests 2>&1 | tail -30
+        continue-on-error: true
+
+      - name: Build Functions
+        run: |
+          cd functions
+          npm run build
+
       - name: Create Service Account Files
         env:
           SERVICE_ACCOUNT_KEY: ${{ secrets.SERVICE_ACCOUNT_KEY }}
