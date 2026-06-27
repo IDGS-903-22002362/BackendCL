@@ -10,6 +10,7 @@ import { Timestamp } from "firebase-admin/firestore";
  * Define los niveles de acceso en el sistema
  */
 export enum RolUsuario {
+  SUPER_ADMIN = "SUPER_ADMIN", // Super administrador con acceso total al sistema
   ADMIN = "ADMIN", // Administrador con acceso total
   EMPLEADO = "EMPLEADO", // Empleado con permisos de gestión
   CLIENTE = "CLIENTE", // Cliente regular del sistema

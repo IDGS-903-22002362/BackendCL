@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import jwt from 'jsonwebtoken';
 import { firestoreApp } from "../../config/app.firebase";
 import { RolUsuario } from "../../models/usuario.model";
+import { isAdminRole } from "../../utils/middlewares";
 import pointsService from "../../services/puntos.service";
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -52,9 +53,7 @@ export const refreshToken = async (req: Request, res: Response) => {
         }
 
         // Generar nuevo token con datos actualizados
-        const isAdminUser =
-            userData.rol === RolUsuario.ADMIN ||
-            userData.rol === RolUsuario.EMPLEADO;
+        const isAdminUser = isAdminRole(userData.rol as RolUsuario);
 
         const newPayload = {
             uid: userData.uid,

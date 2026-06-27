@@ -79,9 +79,14 @@ export const authMiddleware = async (
 };
 
 const ADMIN_ROLES = new Set<RolUsuario>([
+  RolUsuario.SUPER_ADMIN,
   RolUsuario.ADMIN,
   RolUsuario.EMPLEADO,
 ]);
+
+export function isAdminRole(rol: RolUsuario | string | undefined): boolean {
+  return ADMIN_ROLES.has(rol as RolUsuario);
+}
 
 export async function syncFirebaseAdminClaims(
   uid: string,
@@ -221,22 +226,11 @@ export const requireAdmin = async (
   }
 
   const userRole = req.user.rol as RolUsuario;
-  const isAdminRole =
-    userRole === RolUsuario.ADMIN || userRole === RolUsuario.EMPLEADO;
 
-  if (!isAdminRole) {
+  if (!isAdminRole(userRole)) {
     res.status(403).json({
       success: false,
       message: "Acceso denegado. Se requieren permisos de administrador.",
-    });
-    return;
-  }
-
-  const jwtAdminClaim = (req.user as { admin?: boolean }).admin;
-  if (jwtAdminClaim !== true) {
-    res.status(403).json({
-      success: false,
-      message: "Acceso denegado. Custom claim admin requerido.",
     });
     return;
   }
