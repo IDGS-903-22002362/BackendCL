@@ -77,8 +77,8 @@ describe("optionalAppCheckMiddleware", () => {
     process.env.APP_CHECK_ENFORCED = "true";
 
     const req = {
-      path: "/api/checkout/attempts",
-      originalUrl: "/api/checkout/attempts",
+      path: "/notificaciones/subscribe",
+      originalUrl: "/api/notificaciones/subscribe",
       method: "POST",
       header: jest.fn().mockReturnValue(undefined),
     } as unknown as Request;
@@ -97,6 +97,80 @@ describe("optionalAppCheckMiddleware", () => {
     const req = {
       path: "/usuarios/exists/email",
       originalUrl: "/usuarios/exists/email?email=test@example.com",
+      method: "GET",
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as Request;
+    const res = createMockResponse();
+    const next = jest.fn() as NextFunction;
+
+    await optionalAppCheckMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("permite GET publico de catalogo sin token cuando APP_CHECK_ENFORCED=true", async () => {
+    process.env.APP_CHECK_ENFORCED = "true";
+
+    const req = {
+      path: "/productos",
+      originalUrl: "/api/productos",
+      method: "GET",
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as Request;
+    const res = createMockResponse();
+    const next = jest.fn() as NextFunction;
+
+    await optionalAppCheckMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("omite App Check cuando hay Authorization Bearer", async () => {
+    process.env.APP_CHECK_ENFORCED = "true";
+
+    const req = {
+      path: "/inventario/resumen-operativo",
+      originalUrl: "/api/inventario/resumen-operativo",
+      method: "GET",
+      header: jest.fn((name: string) =>
+        name.toLowerCase() === "authorization" ? "Bearer jwt-token" : undefined,
+      ),
+    } as unknown as Request;
+    const res = createMockResponse();
+    const next = jest.fn() as NextFunction;
+
+    await optionalAppCheckMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("permite POST publico de ofertas calcular-precios sin token", async () => {
+    process.env.APP_CHECK_ENFORCED = "true";
+
+    const req = {
+      path: "/ofertas/calcular-precios",
+      originalUrl: "/api/ofertas/calcular-precios",
+      method: "POST",
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as Request;
+    const res = createMockResponse();
+    const next = jest.fn() as NextFunction;
+
+    await optionalAppCheckMiddleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("permite GET de tallas sin token", async () => {
+    process.env.APP_CHECK_ENFORCED = "true";
+
+    const req = {
+      path: "/tallas",
+      originalUrl: "/api/tallas",
       method: "GET",
       header: jest.fn().mockReturnValue(undefined),
     } as unknown as Request;
