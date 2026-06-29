@@ -122,25 +122,146 @@ export const blockDebugInProduction = (
 
 const APP_CHECK_SKIP_PATH_PREFIXES = [
   "/api/stripe/webhook",
+  "/stripe/webhook",
   "/api/pagos/webhook",
+  "/pagos/webhook",
   "/api/webhooks/aplazo",
+  "/webhooks/aplazo",
   "/api/usuarios/exists/email",
   "/usuarios/exists/email",
   "/health",
   "/api/health",
+  "/api-docs",
+  "/api-docs/",
 ];
 
-function shouldSkipAppCheck(req: Request): boolean {
-  const path = req.path || "";
-  const originalUrl = req.originalUrl || "";
-  const normalizedPaths = [path, originalUrl.split("?")[0] ?? ""];
+/** Rutas de catálogo/tienda: GET público (SSR Next.js no puede emitir token App Check). */
+const PUBLIC_STOREFRONT_READ_PREFIXES = [
+  "/api/productos",
+  "/productos",
+  "/api/lineas",
+  "/lineas",
+  "/api/categorias",
+  "/categorias",
+  "/api/tallas",
+  "/tallas",
+  "/api/banners",
+  "/banners",
+  "/api/recomendaciones",
+  "/recomendaciones",
+  "/api/noticias",
+  "/noticias",
+  "/api/beneficios",
+  "/beneficios",
+  "/api/liga-mx",
+  "/liga-mx",
+  "/api/pickup-locations",
+  "/pickup-locations",
+  "/api/plantilla",
+  "/plantilla",
+  "/api/galeria",
+  "/galeria",
+];
 
-  return APP_CHECK_SKIP_PATH_PREFIXES.some((prefix) =>
-    normalizedPaths.some(
-      (candidate) =>
-        candidate === prefix || candidate.startsWith(`${prefix}/`) || candidate.endsWith(prefix),
-    ),
+/** Cálculo de ofertas en catálogo (POST público sin auth). */
+const PUBLIC_STOREFRONT_ALL_METHODS_PREFIXES = [
+  "/api/ofertas",
+  "/ofertas",
+];
+
+const AUTH_AND_CHECKOUT_PREFIXES = [
+  "/api/auth",
+  "/auth",
+  "/api/carrito",
+  "/carrito",
+  "/api/checkout",
+  "/checkout",
+  "/api/codigos-promocion",
+  "/codigos-promocion",
+  "/api/contacto",
+  "/contacto",
+  "/api/shipping",
+  "/shipping",
+  "/api/favoritos",
+  "/favoritos",
+  "/api/payments",
+  "/payments",
+];
+
+function getNormalizedRequestPaths(req: Request): string[] {
+  const path = req.path || "";
+  const originalPath = (req.originalUrl || "").split("?")[0] ?? "";
+  return Array.from(new Set([path, originalPath].filter(Boolean)));
+}
+
+function pathMatchesPrefix(candidate: string, prefix: string): boolean {
+  return (
+    candidate === prefix ||
+    candidate.startsWith(`${prefix}/`) ||
+    candidate.endsWith(prefix)
   );
+}
+
+function pathsMatchAnyPrefix(paths: string[], prefixes: string[]): boolean {
+  return prefixes.some((prefix) =>
+    paths.some((candidate) => pathMatchesPrefix(candidate, prefix)),
+  );
+}
+
+function hasBearerAuthorization(req: Request): boolean {
+  const authHeader = req.header("Authorization") || req.header("authorization");
+  return Boolean(authHeader?.startsWith("Bearer "));
+}
+
+function isPublicStorefrontAllMethods(req: Request): boolean {
+  return pathsMatchAnyPrefix(
+    getNormalizedRequestPaths(req),
+    PUBLIC_STOREFRONT_ALL_METHODS_PREFIXES,
+  );
+}
+
+function isPublicStorefrontRead(req: Request): boolean {
+  const method = (req.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return false;
+  }
+
+  return pathsMatchAnyPrefix(
+    getNormalizedRequestPaths(req),
+    PUBLIC_STOREFRONT_READ_PREFIXES,
+  );
+}
+
+export async function verifyClientAppCheckToken(token: string): Promise<void> {
+  const appOficial = admin.app("APP_OFICIAL");
+  await getAppCheck(appOficial).verifyToken(token);
+}
+
+function shouldSkipAppCheck(req: Request): boolean {
+  const paths = getNormalizedRequestPaths(req);
+
+  if (pathsMatchAnyPrefix(paths, APP_CHECK_SKIP_PATH_PREFIXES)) {
+    return true;
+  }
+
+  if (pathsMatchAnyPrefix(paths, AUTH_AND_CHECKOUT_PREFIXES)) {
+    return true;
+  }
+
+  if (isPublicStorefrontAllMethods(req)) {
+    return true;
+  }
+
+  if (isPublicStorefrontRead(req)) {
+    return true;
+  }
+
+  // JWT de sesión ya autentica al cliente (admin, empleado, usuario).
+  if (hasBearerAuthorization(req)) {
+    return true;
+  }
+
+  return false;
 }
 
 export const optionalAppCheckMiddleware = async (
@@ -171,7 +292,7 @@ export const optionalAppCheckMiddleware = async (
   }
 
   try {
-    await getAppCheck(admin.app()).verifyToken(token);
+    await verifyClientAppCheckToken(token);
     next();
   } catch (error) {
     if (enforced) {

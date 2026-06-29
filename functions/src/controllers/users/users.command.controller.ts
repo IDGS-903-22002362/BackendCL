@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import userAppService from "../../services/user.service";
 import pointsService from "../../services/puntos.service";
 import { admin } from "../../config/firebase.admin";
-import { getAppCheck } from "firebase-admin/app-check";
+import { verifyClientAppCheckToken } from "../../utils/middlewares";
 
 /**
  * Controller: Users Command (Escritura)
@@ -95,7 +95,7 @@ export const checkEmail = async (req: Request, res: Response) => {
 
         if (appCheckToken) {
             try {
-                await getAppCheck(admin.app()).verifyToken(appCheckToken);
+                await verifyClientAppCheckToken(appCheckToken);
                 appCheckValid = true;
             } catch {
                 appCheckValid = false;
