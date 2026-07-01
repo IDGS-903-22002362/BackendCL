@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-07-01T17:20:33.684Z",
+  "dryRun": false,
+  "usersAnalyzed": 29,
+  "usersWithoutPuntosActuales": 0,
+  "walletsExisting": 29,
+  "walletsToCreate": 0,
+  "legacyMovementsFound": 44,
+  "movementsToMigrate": 0,
+  "movementsSkippedExisting": 44,
+  "legacyBalanceTotal": 6525,
+  "errors": []
+}

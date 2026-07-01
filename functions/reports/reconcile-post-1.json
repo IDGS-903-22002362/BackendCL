@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-07-01T17:18:42.854Z",
+  "dryRun": true,
+  "usersAnalyzed": 29,
+  "usersWithoutPuntosActuales": 0,
+  "walletsExisting": 29,
+  "walletsMissing": 0,
+  "criticalDifferences": 4,
+  "duplicateExternalTransactionIds": [],
+  "memberDiffs": [
+    {
+      "memberId": "B3ooBD0AG0TnE5PXxesjHqQfiUZ2",
+      "puntosActuales": 400,
+      "walletAvailable": 400,
+      "walletHeld": 0,
+      "walletPending": 0,
+      "ledgerReconstructed": 45,
+      "walletMissing": false,
+      "critical": true,
+      "notes": [
+        "wallet_vs_ledger:400!=45"
+      ]
+    },
+    {
+      "memberId": "SD6WdJW8Q6UntrsHQ9mH3U1JweC2",
+      "puntosActuales": 45,
+      "walletAvailable": 45,
+      "walletHeld": 0,
+      "walletPending": 0,
+      "ledgerReconstructed": 40,
+      "walletMissing": false,
+      "critical": true,
+      "notes": [
+        "wallet_vs_ledger:45!=40"
+      ]
+    },
+    {
+      "memberId": "SJvAnlXI0LOt9TZMFiK000vLRWh2",
+      "puntosActuales": 2005,
+      "walletAvailable": 2005,
+      "walletHeld": 0,
+      "walletPending": 0,
+      "ledgerReconstructed": 45,
+      "walletMissing": false,
+      "critical": true,
+      "notes": [
+        "wallet_vs_ledger:2005!=45"
+      ]
+    },
+    {
+      "memberId": "kZ858h0fgzTxhlvJipdGoCePRUV2",
+      "puntosActuales": 2605,
+      "walletAvailable": 2605,
+      "walletHeld": 0,
+      "walletPending": 0,
+      "ledgerReconstructed": 45,
+      "walletMissing": false,
+      "critical": true,
+      "notes": [
+        "wallet_vs_ledger:2605!=45"
+      ]
+    }
+  ],
+  "legacyBalanceTotal": 6525,
+  "walletBalanceTotal": 6525,
+  "ledgerBalanceTotal": 1645,
+  "errors": []
+}

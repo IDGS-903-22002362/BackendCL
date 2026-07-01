@@ -7,23 +7,13 @@ import { firestoreApp } from "../../config/app.firebase";
 export const assignPoints = async (req: Request, res: Response) => {
 	try {
 		const { id } = req.params;
-		const { points, descripcion, origenId } = req.body as {
+		const { points, descripcion } = req.body as {
 			points: number;
 			descripcion?: string;
-			origenId?: string;
 		};
 
 		const descripcionMovimiento = descripcion?.trim() || "Asignación manual de puntos";
-
-		//Prioridad: 1. body.origenId, 2. usuario autenticado, 3. fallback "admin-api"
-		let origenMovimientoId: string;
-		if (origenId && origenId.trim()) {
-			origenMovimientoId = origenId.trim();
-		} else if ((req as any).user?.uid) {
-			origenMovimientoId = (req as any).user.uid;
-		} else {
-			origenMovimientoId = "admin-api";
-		}
+		const origenMovimientoId = (req as any).user?.uid ?? "admin-api";
 
 		const usuario = await pointsService.addPoints(id, points, {
 			origen: "admin",
@@ -59,10 +49,9 @@ export const assignPoints = async (req: Request, res: Response) => {
 export const assignPointsBySale = async (req: Request, res: Response) => {
 	try {
 		const { id } = req.params;
-		const { dinero, descripcion, origenId } = req.body as {
+		const { dinero, descripcion } = req.body as {
 			dinero: number;
 			descripcion?: string;
-			origenId?: string;
 		};
 
 		// Convertir dinero a puntos: multiplicar por 0.10 y redondear
@@ -71,15 +60,7 @@ export const assignPointsBySale = async (req: Request, res: Response) => {
 		const descripcionMovimiento =
 			descripcion?.trim() || `Puntos por venta de $${dinero}`;
 
-		// Determinar origenId (prioridad: body.origenId > usuario autenticado > "admin-api")
-		let origenMovimientoId: string;
-		if (origenId && origenId.trim()) {
-			origenMovimientoId = origenId.trim();
-		} else if ((req as any).user?.uid) {
-			origenMovimientoId = (req as any).user.uid;
-		} else {
-			origenMovimientoId = "admin-api";
-		}
+		const origenMovimientoId = (req as any).user?.uid ?? "admin-api";
 
 		const usuario = await pointsService.addPoints(id, points, {
 			origen: "admin",

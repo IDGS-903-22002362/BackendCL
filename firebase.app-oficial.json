@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "(default)",
+      "indexes": "firestore.indexes.loyalty-app-oficial.json"
+    }
+  ]
+}

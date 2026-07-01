@@ -1,0 +1,393 @@
+{
+  "generatedAt": "2026-07-01T17:17:37.572Z",
+  "dryRun": true,
+  "usersAnalyzed": 29,
+  "usersWithoutPuntosActuales": 0,
+  "walletsExisting": 0,
+  "walletsMissing": 29,
+  "criticalDifferences": 29,
+  "duplicateExternalTransactionIds": [],
+  "memberDiffs": [
+    {
+      "memberId": "2hQ04SJpxmckm2rOAAjFBZvc2QC3",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "3tBcxWw8ODV4A3JKqM2ngp5scJ62",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "9G26mIWGYpS3bV19BXXlNZns6lG2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "9uenBxRRP9PL95GKzIcimkscGO83",
+      "puntosActuales": 60,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "AxqQuxEGK4QbZllJDDtvPMnfXcY2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "B3ooBD0AG0TnE5PXxesjHqQfiUZ2",
+      "puntosActuales": 400,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "BKkGwBm7jXYU6PSNCxKezSJ8lbq1",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "BlUtU15nO5O99UKK13d6nCGgJZ12",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "G7GHPY1QlmTkrIZ08NWtVI26qLB2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "GGRZBQ74tfPIcaeA2ba3dgdLAnz1",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "H0PDgyVsHYWczlTgdVXDCtdyurG3",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "L8wKYQupfAfpGsIt8i9wDPGgd753",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "PNjKXN4P35XpOPuDoKUDuYoYjBD3",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "PjkavrAUC8Y4MhI3hGbntIYQPcg2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "QTN0Ez5q1ufiJ9ncj5kUwJyBLE03",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "Rf8z5LtBydbxU23bCJT9KVQ2gPr2",
+      "puntosActuales": 45,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "SD6WdJW8Q6UntrsHQ9mH3U1JweC2",
+      "puntosActuales": 45,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "SJvAnlXI0LOt9TZMFiK000vLRWh2",
+      "puntosActuales": 2005,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "VITnFDEtvbeKwnfEbA2N4eTX0pq1",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "WXdXrDTtJOZSDKONdjOwYihwXzI3",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "aog5EjTwsAYRsQb3St6qlGlniw83",
+      "puntosActuales": 470,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "fHmnMtz4KldM25mFrbHh9lKCvpA2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "kZ858h0fgzTxhlvJipdGoCePRUV2",
+      "puntosActuales": 2605,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "nxJQr1Rr51WYy8oC22BqCAuWwM22",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "rW7ZT8hCaQNo3tRU7S1KATMZPfd2",
+      "puntosActuales": 50,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "wWWdwnCm0BU5orOYsDhCwaOFe4y1",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "xDpiyfNl76Y4U7Ze7IeeCirmUxB2",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "xh1s33H4dZYlescfoQeRDTUOI7J2",
+      "puntosActuales": 45,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    },
+    {
+      "memberId": "zbXQC9qWN6f1Tvu5lxndxH5xRt12",
+      "puntosActuales": 40,
+      "walletAvailable": null,
+      "walletHeld": null,
+      "walletPending": null,
+      "ledgerReconstructed": 0,
+      "walletMissing": true,
+      "critical": true,
+      "notes": [
+        "wallet_missing_with_balance"
+      ]
+    }
+  ],
+  "legacyBalanceTotal": 6525,
+  "walletBalanceTotal": 0,
+  "ledgerBalanceTotal": 0,
+  "errors": []
+}

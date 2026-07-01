@@ -58,6 +58,20 @@ interface VistaPuntosUsuario {
 
 class PointsService {
   async otorgarBonoBienvenida(uid: string): Promise<UsuarioApp> {
+    const { default: loyaltyEngineService } = await import(
+      "../modules/loyalty/services/loyalty-engine.service"
+    );
+    await loyaltyEngineService.applyWelcomeBonus(uid);
+
+    const userRef = firestoreApp.collection(USUARIOS_COLLECTION).doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      throw new Error("Usuario no encontrado");
+    }
+    return { id: userSnap.id, ...(userSnap.data() as UsuarioApp) } as UsuarioApp;
+  }
+
+  async otorgarBonoBienvenidaLegacy(uid: string): Promise<UsuarioApp> {
     const diasExpiracion = await this.obtenerDiasExpiracionPuntos();
     await this.procesarExpiracionUsuario(uid, diasExpiracion);
 
@@ -407,6 +421,7 @@ class PointsService {
   async procesarExpiracionUsuario(
     uid: string,
     diasExpiracion: number,
+    options?: { skipBalanceWrite?: boolean; skipLegacyMovement?: boolean },
   ): Promise<ResultadoExpiracionUsuario> {
     const userRef = firestoreApp.collection(USUARIOS_COLLECTION).doc(uid);
 
@@ -513,22 +528,24 @@ class PointsService {
             fechaMovimiento: now,
           });
 
-          const movimientoRef = userRef.collection(MOVIMIENTOS_PUNTOS_SUBCOLECCION).doc();
-          const movimiento: MovimientoPuntos = {
-            id: movimientoRef.id,
-            usuarioId: uid,
-            tipo: TipoMovimientoPuntos.EXPIRACION,
-            puntos: -saldoAnterior,
-            saldoAnterior,
-            saldoNuevo: 0,
-            origen: "sistema",
-            descripcion: `Expiración automática del ciclo ${ciclo.etiqueta}`,
-            cicloAnual: ciclo.numero,
-            etiquetaCiclo: ciclo.etiqueta,
-            createdAt: now,
-          };
+          if (!options?.skipLegacyMovement) {
+            const movimientoRef = userRef.collection(MOVIMIENTOS_PUNTOS_SUBCOLECCION).doc();
+            const movimiento: MovimientoPuntos = {
+              id: movimientoRef.id,
+              usuarioId: uid,
+              tipo: TipoMovimientoPuntos.EXPIRACION,
+              puntos: -saldoAnterior,
+              saldoAnterior,
+              saldoNuevo: 0,
+              origen: "sistema",
+              descripcion: `Expiración automática del ciclo ${ciclo.etiqueta}`,
+              cicloAnual: ciclo.numero,
+              etiquetaCiclo: ciclo.etiqueta,
+              createdAt: now,
+            };
 
-          tx.set(movimientoRef, movimiento);
+            tx.set(movimientoRef, movimiento);
+          }
           seRegistroExpiracion = true;
         } else {
           resumen = {
@@ -553,7 +570,9 @@ class PointsService {
       tx.set(
         userRef,
         {
-          puntosActuales: saldoVigente,
+          ...(options?.skipBalanceWrite
+            ? {}
+            : { puntosActuales: saldoVigente }),
           updatedAt: now,
           historialPuntos: historialActualizado,
         },
@@ -567,6 +586,48 @@ class PointsService {
         puntosExpirados,
       };
     });
+  }
+
+  async evaluateExpiracionPendiente(
+    uid: string,
+    diasExpiracion: number,
+  ): Promise<{ expiring: boolean; points: number; cycleKey: string }> {
+    const userSnap = await firestoreApp.collection(USUARIOS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) {
+      return { expiring: false, points: 0, cycleKey: "" };
+    }
+    const userData = userSnap.data() as UsuarioApp;
+    if (!userData.createdAt) {
+      return { expiring: false, points: 0, cycleKey: "" };
+    }
+    const now = admin.firestore.Timestamp.now();
+    const fechaRegistro = userData.createdAt.toDate();
+    const ciclosCompletados = calcularCiclosCompletados(
+      fechaRegistro,
+      now.toDate(),
+      diasExpiracion,
+    );
+    const cicloActual = obtenerCicloActual(
+      fechaRegistro,
+      now.toDate(),
+      diasExpiracion,
+    );
+    const historialActual = this.normalizarHistorialUsuario(
+      userData.historialPuntos,
+      cicloActual.numero,
+      cicloActual.fechaFinProgramada,
+    );
+    const ultimoCicloProcesado = Number(historialActual.ultimoCicloProcesado ?? 0);
+    if (ciclosCompletados <= ultimoCicloProcesado) {
+      return { expiring: false, points: 0, cycleKey: "" };
+    }
+    const saldoVigente = Math.max(0, Number(userData.puntosActuales ?? 0));
+    const cycleKey = `cycle:${ciclosCompletados}`;
+    return {
+      expiring: saldoVigente > 0,
+      points: saldoVigente,
+      cycleKey,
+    };
   }
 
   private normalizarHistorialUsuario(

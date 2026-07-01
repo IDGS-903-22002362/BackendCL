@@ -38,6 +38,12 @@ import {
   recalculateRecommendationAggregates,
 } from "./recomendaciones.cron";
 import {
+  loyaltyPointsExpirationJob,
+} from "./modules/loyalty/jobs/expiration.job";
+import {
+  loyaltyRedemptionReleaseJob,
+} from "./modules/loyalty/jobs/redemption-release.job";
+import {
   invalidateRecommendationsOnConfigChange,
   invalidateRecommendationsOnInventoryChange,
   invalidateRecommendationsOnOfferChange,
@@ -89,6 +95,8 @@ export const probableRepurchaseNotifications =
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
 export const userLevelSyncFunction = syncUserLevelOnPointsChange;
+export const loyaltyPointsExpirationJobFunction = loyaltyPointsExpirationJob;
+export const loyaltyRedemptionReleaseJobFunction = loyaltyRedemptionReleaseJob;
 export const syncLigaMxDataFunction = syncLigaMxData;
 export const recalculateRecommendationAggregatesFunction =
   recalculateRecommendationAggregates;

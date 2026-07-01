@@ -21,7 +21,14 @@
     "repair:stuck-paid-orders": "npm run build && node lib/scripts/repair-stuck-paid-order-state.js",
     "audit:stripe-payments": "npm run build && node lib/scripts/audit-stripe-payment-health.js",
     "test:stripe:smoke": "node scripts/stripe-smoke-test.mjs",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "validate:openapi": "node -e \"require('swagger-parser').validate('src/modules/loyalty/openapi/loyalty-v1.openapi.yaml').then(()=>console.log('OpenAPI OK')).catch(e=>{console.error(e);process.exit(1);})\"",
+    "test:critical:loyalty": "jest --runInBand --testPathPatterns=\"loyalty|legacy-adapter|welcome-bonus|users.points|proxy-path|conversion-rules|payment-loyalty\"",
+    "migrate:ledger": "npm run build && node lib/modules/loyalty/scripts/migrate-ledger.js",
+    "reconcile:ledger": "npm run build && node lib/modules/loyalty/scripts/reconcile-ledger.js",
+    "seed:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/seed-loyalty-flags.js",
+    "activate:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/activate-loyalty-flags.js",
+    "deploy:loyalty-indexes": "firebase deploy --only firestore:indexes --config firebase.app-oficial.json --project app-oficial-leon"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
@@ -79,6 +86,7 @@
     "supertest": "^7.1.4",
     "ts-jest": "^29.4.5",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^4.9.0"
+    "typescript": "^4.9.0",
+    "swagger-parser": "^10.0.3"
   }
 }

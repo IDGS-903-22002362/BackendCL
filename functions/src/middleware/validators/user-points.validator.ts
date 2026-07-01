@@ -17,14 +17,6 @@ export const assignUserPointsSchema = z
       .min(1, "La descripcion no puede estar vacia")
       .max(250, "La descripcion no puede exceder 250 caracteres")
       .optional(),
-    origenId: z
-      .string({
-        invalid_type_error: "El origenId debe ser una cadena de texto",
-      })
-      .trim()
-      .min(1, "El origenId no puede estar vacio")
-      .max(120, "El origenId no puede exceder 120 caracteres")
-      .optional(),
   })
   .strict();
 
@@ -42,12 +34,6 @@ export const assignPointsBySaleSchema = z
       .trim()
       .min(1, "La descripción no puede estar vacía")
       .max(250, "La descripción no puede exceder 250 caracteres")
-      .optional(),
-    origenId: z
-      .string()
-      .trim()
-      .min(1, "El origenId no puede estar vacío")
-      .max(120, "El origenId no puede exceder 120 caracteres")
       .optional(),
   })
   .strict();

@@ -46,6 +46,7 @@ import shippingRoutes from "../modules/shipping/shipping.routes";
 import ofertasRoutes from "./ofertas.routes";
 import codigofertasRoutes from "./codigos-promocion.routes";
 import recomendacionesRoutes from "./recomendaciones.routes";
+import loyaltyRoutes from "../modules/loyalty/routes/loyalty.routes";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 import contactoRoutes from "./contacto.routes";
 
@@ -99,6 +100,7 @@ router.use("/ofertas", ofertasRoutes);
 router.use("/codigos-promocion", codigofertasRoutes);
 router.use("/recomendaciones", recomendacionesRoutes);
 router.use("/contacto", contactoRoutes);
+router.use("/loyalty/v1", loyaltyRoutes);
 
 // Futuros módulos:
 

@@ -276,6 +276,23 @@ export class PaymentFinalizerService {
       await this.restorePosInventory(paymentAttempt, context.requestedBy);
     }
 
+    if (paymentAttempt.ordenId) {
+      try {
+        const { reverseLoyaltyPointsForRefund } = await import(
+          "../../modules/loyalty/events/payment-loyalty.hook"
+        );
+        await reverseLoyaltyPointsForRefund(
+          paymentAttempt.ordenId,
+          deltaMinor,
+        );
+      } catch (error) {
+        paymentFinalizerLogger.error("loyalty_refund_hook_failed", {
+          orderId: paymentAttempt.ordenId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     return this.paymentAttemptRepo.update(paymentAttempt.id, {
       refundState: refundResult.refundState,
       status: nextStatus,

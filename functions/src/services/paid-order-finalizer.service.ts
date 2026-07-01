@@ -257,6 +257,18 @@ class PaidOrderFinalizerService {
     await ordenService.commitStockForOrder(input.orderId);
     await this.commitPromotionalCounters(order);
 
+    try {
+      const { earnLoyaltyPointsForPaidOrder } = await import(
+        "../modules/loyalty/events/payment-loyalty.hook"
+      );
+      await earnLoyaltyPointsForPaidOrder(input.orderId);
+    } catch (error) {
+      paidOrderFinalizerLogger.error("loyalty_earn_hook_failed", {
+        orderId: input.orderId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     const cartId = order.paymentMetadata?.cartId;
     if (typeof cartId === "string" && cartId.trim()) {
       const { default: carritoService } = await import("./carrito.service");

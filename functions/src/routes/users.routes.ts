@@ -8,7 +8,6 @@ import { Router } from "express";
 import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
-import * as pointsController from "../controllers/users/users.points.controller";
 import { authMiddleware, requireAdmin } from "../utils/middlewares";
 import {
   validateBody,
@@ -19,17 +18,16 @@ import {
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
 import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/validators/user-points.validator";
+import {
+  legacyAssignPoints,
+  legacyAssignPointsBySale,
+  legacyGetAsignaciones,
+  legacyGetMyHistorial,
+  legacyGetMyPoints,
+} from "../modules/loyalty/services/legacy-adapter.service";
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
 import { RolUsuario } from "../models/usuario.model";
-import { assignPointsBySale } from "../controllers/users/users.points.controller";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
-
-const promoPointsRateLimiter = createSimpleRateLimiter({
-  keyPrefix: "user:promo-points",
-  windowMs: 24 * 60 * 60 * 1000,
-  maxRequests: 1,
-  resolveKey: (req) => `uid:${req.user?.uid ?? "anonymous"}`,
-});
 
 const emailLookupRateLimiter = createSimpleRateLimiter({
   keyPrefix: "user:email-lookup",
@@ -602,12 +600,12 @@ router.get(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
-router.get("/me/getpuntos", authMiddleware, queryController.getMisPuntos);
+router.get("/me/getpuntos", authMiddleware, legacyGetMyPoints);
 
 router.get(
   "/me/puntos/historial",
   authMiddleware,
-  queryController.getMiHistorialPuntos,
+  legacyGetMyHistorial,
 );
 
 /**
@@ -687,7 +685,7 @@ router.post(
   verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
   validateParams(idParamSchema),
   validateBody(assignUserPointsSchema),
-  pointsController.assignPoints,
+  legacyAssignPoints,
 );
 
 /**
@@ -718,8 +716,16 @@ router.post(
 router.post(
   "/me/puntos/sumar",
   authMiddleware,
-  promoPointsRateLimiter,
-  commandController.sumarPuntos,
+  (_req, res) => {
+    res.set("Deprecation", "true");
+    res.set("Link", '</api/loyalty/v1>; rel="successor-version"');
+    return res.status(410).json({
+      success: false,
+      message:
+        "Este endpoint fue retirado. Usa la API de lealtad /api/loyalty/v1.",
+      code: "ENDPOINT_RETIRED",
+    });
+  },
 );
 
 
@@ -812,7 +818,7 @@ router.get(
   "/puntos/asignaciones",
   authMiddleware,
   verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
-  pointsController.getHistorialAsignaciones
+  legacyGetAsignaciones
 );
 
 /**
@@ -935,9 +941,10 @@ router.get(
 router.post(
   "/:id/puntos/asignar-por-venta",
   authMiddleware,
+  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
   validateParams(idParamSchema),
   validateBody(assignPointsBySaleSchema),
-  assignPointsBySale
+  legacyAssignPointsBySale
 );
 
 /**

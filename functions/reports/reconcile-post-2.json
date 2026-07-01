@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-07-01T17:21:01.511Z",
+  "dryRun": true,
+  "usersAnalyzed": 29,
+  "usersWithoutPuntosActuales": 0,
+  "walletsExisting": 29,
+  "walletsMissing": 0,
+  "criticalDifferences": 1,
+  "duplicateExternalTransactionIds": [],
+  "memberDiffs": [
+    {
+      "memberId": "B3ooBD0AG0TnE5PXxesjHqQfiUZ2",
+      "puntosActuales": 400,
+      "walletAvailable": 400,
+      "walletHeld": 0,
+      "walletPending": 0,
+      "ledgerReconstructed": 45,
+      "walletMissing": false,
+      "critical": true,
+      "notes": [
+        "wallet_vs_ledger:400!=45"
+      ]
+    }
+  ],
+  "legacyBalanceTotal": 6525,
+  "walletBalanceTotal": 6525,
+  "ledgerBalanceTotal": 6170,
+  "errors": []
+}
