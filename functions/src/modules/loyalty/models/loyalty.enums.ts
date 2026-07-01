@@ -4,6 +4,7 @@ export enum LoyaltyActorType {
   EMPLOYEE = "EMPLOYEE",
   SUPER_ADMIN = "SUPER_ADMIN",
   SERVICE = "SERVICE",
+  PARTNER = "PARTNER",
 }
 
 export enum LoyaltyTransactionType {
@@ -29,6 +30,7 @@ export enum LoyaltyChannel {
   STORE = "STORE",
   ADMIN = "ADMIN",
   SYSTEM = "SYSTEM",
+  PARTNER = "PARTNER",
 }
 
 export enum LoyaltyPermission {
@@ -47,6 +49,22 @@ export enum LoyaltyRedemptionStatus {
   CONFIRMED = "CONFIRMED",
   CANCELLED = "CANCELLED",
   EXPIRED = "EXPIRED",
+}
+
+/** OAuth scopes for external partner integrations */
+export enum PartnerScope {
+  WALLET_READ = "loyalty.wallet.read",
+  TRANSACTIONS_READ = "loyalty.transactions.read",
+  POINTS_EARN = "loyalty.points.earn",
+  REDEMPTIONS_CREATE = "loyalty.redemptions.create",
+  REDEMPTIONS_CONFIRM = "loyalty.redemptions.confirm",
+  REDEMPTIONS_CANCEL = "loyalty.redemptions.cancel",
+  REVERSALS_CREATE = "loyalty.reversals.create",
+}
+
+export enum LoyaltyEnvironment {
+  SANDBOX = "sandbox",
+  PRODUCTION = "production",
 }
 
 export enum LoyaltyAdjustmentReason {

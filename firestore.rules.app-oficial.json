@@ -1,0 +1,36 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /loyalty_sandbox_wallets/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_transactions/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_redemptions/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_idempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_external_txn_index/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_members/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_sandbox_member_tokens/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_partners/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_partner_clients/{document=**} {
+      allow read, write: if false;
+    }
+    match /loyalty_partner_audit/{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

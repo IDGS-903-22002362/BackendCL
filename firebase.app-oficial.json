@@ -2,6 +2,7 @@
   "firestore": [
     {
       "database": "(default)",
+      "rules": "firestore.rules.app-oficial.json",
       "indexes": "firestore.indexes.loyalty-app-oficial.json"
     }
   ]

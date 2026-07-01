@@ -2,7 +2,12 @@ const PRODUCTION_CORS_ORIGINS = [
   "https://ecomerce-next-front--e-comerce-leon.us-central1.hosted.app",
   "https://tiendalaguarida.com",
   "https://www.tiendalaguarida.com",
+  "https://clubleon.mx",
+  "https://www.clubleon.mx",
+  "https://developers.clubleon.mx",
+  "https://clubleon-developer-portal--e-comerce-leon.us-central1.hosted.app",
   "http://localhost:3001",
+  "http://localhost:3002",
 ] as const;
 
 function parseOrigins(raw: string | undefined): string[] {

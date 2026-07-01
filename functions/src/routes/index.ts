@@ -47,6 +47,8 @@ import ofertasRoutes from "./ofertas.routes";
 import codigofertasRoutes from "./codigos-promocion.routes";
 import recomendacionesRoutes from "./recomendaciones.routes";
 import loyaltyRoutes from "../modules/loyalty/routes/loyalty.routes";
+import createLoyaltyPartnerRouter from "../modules/loyalty/partner/routes/loyalty-partner.routes";
+import { LoyaltyEnvironment } from "../modules/loyalty/models/loyalty.enums";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 import contactoRoutes from "./contacto.routes";
 
@@ -100,6 +102,14 @@ router.use("/ofertas", ofertasRoutes);
 router.use("/codigos-promocion", codigofertasRoutes);
 router.use("/recomendaciones", recomendacionesRoutes);
 router.use("/contacto", contactoRoutes);
+router.use(
+  "/loyalty/sandbox/v1",
+  createLoyaltyPartnerRouter(LoyaltyEnvironment.SANDBOX),
+);
+router.use(
+  "/loyalty/v1",
+  createLoyaltyPartnerRouter(LoyaltyEnvironment.PRODUCTION),
+);
 router.use("/loyalty/v1", loyaltyRoutes);
 
 // Futuros módulos:

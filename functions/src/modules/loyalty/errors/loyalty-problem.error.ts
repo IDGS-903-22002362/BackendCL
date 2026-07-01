@@ -1,6 +1,13 @@
 import { LOYALTY_PROBLEM_BASE_URI } from "../constants/loyalty.constants";
 
 export type LoyaltyProblemCode =
+  | "AUTHENTICATION_REQUIRED"
+  | "INVALID_TOKEN"
+  | "TOKEN_EXPIRED"
+  | "INVALID_SCOPE"
+  | "PARTNER_DISABLED"
+  | "LOCATION_NOT_ALLOWED"
+  | "INVALID_MEMBER_TOKEN"
   | "MEMBER_NOT_FOUND"
   | "INVALID_AMOUNT"
   | "DUPLICATE_TRANSACTION"
@@ -14,6 +21,7 @@ export type LoyaltyProblemCode =
   | "REDEMPTION_NOT_FOUND"
   | "REDEMPTION_ALREADY_CONFIRMED"
   | "REDEMPTION_EXPIRED"
+  | "RATE_LIMIT_EXCEEDED"
   | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
@@ -21,6 +29,41 @@ const PROBLEM_META: Record<
   LoyaltyProblemCode,
   { status: number; title: string; detail: string }
 > = {
+  AUTHENTICATION_REQUIRED: {
+    status: 401,
+    title: "Autenticacion requerida",
+    detail: "Debes proporcionar credenciales validas para acceder a este recurso.",
+  },
+  INVALID_TOKEN: {
+    status: 401,
+    title: "Token invalido",
+    detail: "El token de acceso no es valido o fue revocado.",
+  },
+  TOKEN_EXPIRED: {
+    status: 401,
+    title: "Token expirado",
+    detail: "El token de acceso expiro. Solicita uno nuevo.",
+  },
+  INVALID_SCOPE: {
+    status: 403,
+    title: "Scope invalido",
+    detail: "El token no incluye el permiso necesario para esta operacion.",
+  },
+  PARTNER_DISABLED: {
+    status: 403,
+    title: "Partner deshabilitado",
+    detail: "La cuenta del socio esta deshabilitada. Contacta a Club Leon.",
+  },
+  LOCATION_NOT_ALLOWED: {
+    status: 403,
+    title: "Ubicacion no permitida",
+    detail: "La ubicacion indicada no esta autorizada para este socio.",
+  },
+  INVALID_MEMBER_TOKEN: {
+    status: 401,
+    title: "Member token invalido",
+    detail: "El token de miembro es invalido o expiro.",
+  },
   MEMBER_NOT_FOUND: {
     status: 404,
     title: "Miembro no encontrado",
@@ -86,6 +129,11 @@ const PROBLEM_META: Record<
     title: "Canje expirado",
     detail: "La reserva de canje expiro o ya no esta pendiente.",
   },
+  RATE_LIMIT_EXCEEDED: {
+    status: 429,
+    title: "Limite de solicitudes excedido",
+    detail: "Has superado el limite de solicitudes. Reintenta mas tarde.",
+  },
   SERVICE_UNAVAILABLE: {
     status: 503,
     title: "Servicio no disponible",
@@ -111,10 +159,10 @@ export default class LoyaltyProblemError extends Error {
     this.code = code;
     this.status = meta.status;
     this.title = meta.title;
-    this.type = `${LOYALTY_PROBLEM_BASE_URI}/${code.toLowerCase()}`;
+    this.type = `${LOYALTY_PROBLEM_BASE_URI}/${code.toLowerCase().replace(/_/g, "-")}`;
   }
 
-  toProblemJson(instance?: string): Record<string, unknown> {
+  toProblemJson(instance?: string, requestId?: string): Record<string, unknown> {
     return {
       type: this.type,
       title: this.title,
@@ -122,6 +170,7 @@ export default class LoyaltyProblemError extends Error {
       detail: this.message,
       code: this.code,
       ...(instance ? { instance } : {}),
+      ...(requestId ? { requestId } : {}),
     };
   }
 }

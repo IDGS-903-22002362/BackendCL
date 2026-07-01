@@ -67,6 +67,18 @@ app.use(
 app.use((req, res, next) => cors(getCorsOptions())(req, res, next));
 app.use(requestContextMiddleware);
 app.use(blockDebugInProduction);
+
+/** Cloud Functions v2 named `api` strips the function segment; restore Express `/api` prefix. */
+app.use((req, _res, next) => {
+  const path = req.path || "";
+  if (path && !path.startsWith("/api")) {
+    const queryIndex = req.url.indexOf("?");
+    const query = queryIndex >= 0 ? req.url.slice(queryIndex) : "";
+    req.url = `/api${path}${query}`;
+  }
+  next();
+});
+
 app.use(optionalAppCheckMiddleware);
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }));
 app.use("/api/pagos/webhook", express.raw({ type: "application/json" }));

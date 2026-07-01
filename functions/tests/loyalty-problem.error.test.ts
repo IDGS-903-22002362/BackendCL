@@ -5,7 +5,7 @@ import { LOYALTY_PROBLEM_BASE_URI } from "../src/modules/loyalty/constants/loyal
 describe("LoyaltyProblemError RFC7807", () => {
   it("expone type, title, status y detail", () => {
     const error = new LoyaltyProblemError("INSUFFICIENT_POINTS");
-    expect(error.type).toBe(`${LOYALTY_PROBLEM_BASE_URI}/insufficient_points`);
+    expect(error.type).toBe(`${LOYALTY_PROBLEM_BASE_URI}/insufficient-points`);
     expect(error.title).toBe("Puntos insuficientes");
     expect(error.status).toBe(409);
     expect(error.message).toBe(
@@ -18,7 +18,7 @@ describe("LoyaltyProblemError RFC7807", () => {
     const body = error.toProblemJson("/api/loyalty/v1/earn-transactions");
 
     expect(body).toEqual({
-      type: `${LOYALTY_PROBLEM_BASE_URI}/invalid_amount`,
+      type: `${LOYALTY_PROBLEM_BASE_URI}/invalid-amount`,
       title: "Monto o puntos invalidos",
       status: 400,
       detail: "Monto no valido",

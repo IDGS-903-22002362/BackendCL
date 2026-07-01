@@ -133,6 +133,10 @@ const APP_CHECK_SKIP_PATH_PREFIXES = [
   "/api/health",
   "/api-docs",
   "/api-docs/",
+  "/api/loyalty/sandbox/v1/oauth/token",
+  "/loyalty/sandbox/v1/oauth/token",
+  "/api/loyalty/v1/oauth/token",
+  "/loyalty/v1/oauth/token",
 ];
 
 /** Rutas de catálogo/tienda: GET público (SSR Next.js no puede emitir token App Check). */

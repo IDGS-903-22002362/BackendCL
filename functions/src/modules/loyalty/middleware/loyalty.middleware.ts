@@ -72,7 +72,7 @@ export function handleLoyaltyError(
     res
       .status(err.status)
       .type("application/problem+json")
-      .json(err.toProblemJson(req.originalUrl));
+      .json(err.toProblemJson(req.originalUrl, req.requestId));
     return;
   }
 

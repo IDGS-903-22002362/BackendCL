@@ -28,7 +28,20 @@
     "reconcile:ledger": "npm run build && node lib/modules/loyalty/scripts/reconcile-ledger.js",
     "seed:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/seed-loyalty-flags.js",
     "activate:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/activate-loyalty-flags.js",
-    "deploy:loyalty-indexes": "firebase deploy --only firestore:indexes --config firebase.app-oficial.json --project app-oficial-leon"
+    "deploy:loyalty-indexes": "firebase deploy --only firestore:indexes --config firebase.app-oficial.json --project app-oficial-leon",
+    "loyalty:partner:create": "npm run build && node lib/modules/loyalty/partner/scripts/partner-create.js",
+    "loyalty:partner:disable": "npm run build && node lib/modules/loyalty/partner/scripts/partner-disable.js",
+    "loyalty:client:create": "npm run build && node lib/modules/loyalty/partner/scripts/client-create.js",
+    "loyalty:client:rotate": "npm run build && node lib/modules/loyalty/partner/scripts/client-rotate.js",
+    "loyalty:client:revoke": "npm run build && node lib/modules/loyalty/partner/scripts/client-revoke.js",
+    "loyalty:test-member:create": "npm run build && node lib/modules/loyalty/partner/scripts/test-member-create.js",
+    "loyalty:test-member:reset": "npm run build && node lib/modules/loyalty/partner/scripts/test-member-reset.js",
+    "loyalty:test-token:create": "npm run build && node lib/modules/loyalty/partner/scripts/test-token-create.js",
+    "generate:loyalty-public-openapi": "node scripts/generate-loyalty-public-openapi.mjs",
+    "validate:loyalty-openapi": "node scripts/validate-loyalty-openapi.mjs",
+    "e2e:sandbox": "node scripts/e2e-sandbox-partner.mjs",
+    "e2e:sandbox:concurrency": "node scripts/e2e-sandbox-concurrency.mjs",
+    "e2e:sandbox:battery": "node scripts/e2e-sandbox-live-battery.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
@@ -84,9 +97,10 @@
     "jest": "^30.2.0",
     "nodemon": "^3.1.0",
     "supertest": "^7.1.4",
+    "swagger-parser": "^10.0.3",
     "ts-jest": "^29.4.5",
     "ts-node-dev": "^2.0.0",
     "typescript": "^4.9.0",
-    "swagger-parser": "^10.0.3"
+    "yaml": "^2.9.0"
   }
 }
