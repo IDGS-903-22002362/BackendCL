@@ -9,7 +9,7 @@ import {
   handleLoyaltyError,
   requireIdempotencyKey,
 } from "../../middleware/loyalty.middleware";
-import { LoyaltyEnvironment, PartnerScope } from "../../models/loyalty.enums";
+import { LoyaltyChannel, LoyaltyEnvironment, PartnerScope } from "../../models/loyalty.enums";
 import {
   earnPreviewQuerySchema,
   earnTransactionSchema,
@@ -60,6 +60,10 @@ export function createLoyaltyPartnerRouter(environment: LoyaltyEnvironment): Rou
   const partnerAuth = createPartnerAuthMiddleware(environment);
 
   router.use(requestIdMiddleware);
+  router.use((req, _res, next) => {
+    req.loyaltyEnvironment = environment;
+    next();
+  });
   router.use(partnerRequestLogMiddleware);
 
   router.post(
@@ -99,9 +103,19 @@ export function createLoyaltyPartnerRouter(environment: LoyaltyEnvironment): Rou
     requireIdempotencyKey,
     requirePartnerScopeMiddleware(PartnerScope.POINTS_EARN),
     validateBody(
-      earnTransactionSchema.extend({
-        memberToken: z.string().trim().min(1).optional(),
-      }),
+      earnTransactionSchema
+        .extend({
+          // memberId puede omitirse cuando se identifica al miembro vía memberToken.
+          memberId: z.string().trim().min(1).max(128).optional(),
+          memberToken: z.string().trim().min(1).optional(),
+          // Los partners no deciden el canal: el controlador siempre usa
+          // PARTNER. Se acepta opcionalmente para compatibilidad, pero el
+          // contrato público (OpenAPI) no lo exige.
+          channel: z.nativeEnum(LoyaltyChannel).optional(),
+        })
+        .refine((body) => Boolean(body.memberId || body.memberToken), {
+          message: "memberId o memberToken es requerido",
+        }),
     ),
     partnerController.createEarnTransaction,
   );

@@ -38,7 +38,9 @@ function resolveClientIp(req: Request): string {
 
 function buildRateLimitKey(req: Request, options: RateLimitOptions): string {
   if (options.resolveKey) {
-    return options.resolveKey(req);
+    // Incluir siempre keyPrefix: dos limiters con el mismo resolveKey
+    // (p. ej. earn y redeem por partnerId) no deben compartir contador.
+    return `${options.keyPrefix}:${options.resolveKey(req)}`;
   }
 
   const ip = resolveClientIp(req);

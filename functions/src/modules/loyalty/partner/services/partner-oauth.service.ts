@@ -19,6 +19,8 @@ export class PartnerOAuthService {
     clientId: string;
     clientSecret: string;
     grantType: string;
+    /** Ambiente del endpoint que recibe la petición (sandbox o producción). */
+    expectedEnvironment?: LoyaltyEnvironment;
   }): Promise<{
     access_token: string;
     token_type: "Bearer";
@@ -36,6 +38,18 @@ export class PartnerOAuthService {
       input.clientId,
       input.clientSecret,
     );
+
+    // Credenciales sandbox no emiten token en el endpoint de producción y
+    // viceversa: el aislamiento se aplica desde la emisión, no solo en el uso.
+    if (
+      input.expectedEnvironment &&
+      partner.environment !== input.expectedEnvironment
+    ) {
+      throw new LoyaltyProblemError(
+        "AUTHENTICATION_REQUIRED",
+        "Las credenciales no corresponden a este ambiente",
+      );
+    }
 
     const tokenId = partnerRegistryService.buildTokenId();
     const now = Math.floor(Date.now() / 1000);
@@ -58,6 +72,8 @@ export class PartnerOAuthService {
       audience: partner.environment === LoyaltyEnvironment.SANDBOX
         ? "loyalty-sandbox"
         : "loyalty-production",
+      // Claim estándar jti (mismo valor que tokenId) para trazabilidad/revocación.
+      jwtid: tokenId,
     });
 
     return {

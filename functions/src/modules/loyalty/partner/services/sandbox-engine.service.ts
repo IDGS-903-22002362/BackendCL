@@ -366,12 +366,40 @@ export class SandboxLoyaltyEngine {
     };
   }
 
+  /**
+   * Replay idempotente: si la clave ya se usó para esta operación, devuelve
+   * la respuesta original antes de validar estado (evita 409 en retries).
+   */
+  private async findCachedMutation(
+    operation: string,
+    partnerId: string,
+    idempotencyKey: string,
+  ): Promise<LoyaltyTransaction | null> {
+    const docId = buildIdempotencyDocId(
+      LoyaltyEnvironment.SANDBOX,
+      partnerId,
+      operation,
+      conversionRulesService.hashIdempotencyKey(idempotencyKey),
+    );
+    const snap = await this.idempotency.doc(docId).get();
+    if (!snap.exists) return null;
+    return (snap.data() as { responseBody: LoyaltyTransaction }).responseBody ?? null;
+  }
+
   async confirmRedemption(
     redemptionId: string,
     partnerId: string,
     actor: LoyaltyActorContext,
     idempotencyKey: string,
   ): Promise<TransactionResponseDto> {
+    const cachedConfirm = await this.findCachedMutation(
+      `redemptions/${redemptionId}/confirm`,
+      partnerId,
+      idempotencyKey,
+    );
+    if (cachedConfirm) {
+      return toTransactionDto(cachedConfirm);
+    }
     const redemption = await this.getRedemption(redemptionId, partnerId);
     if (redemption.status === LoyaltyRedemptionStatus.CONFIRMED) {
       throw new LoyaltyProblemError("REDEMPTION_ALREADY_CONFIRMED");
@@ -410,6 +438,14 @@ export class SandboxLoyaltyEngine {
     actor: LoyaltyActorContext,
     idempotencyKey: string,
   ): Promise<TransactionResponseDto> {
+    const cachedCancel = await this.findCachedMutation(
+      `redemptions/${redemptionId}/cancel`,
+      partnerId,
+      idempotencyKey,
+    );
+    if (cachedCancel) {
+      return toTransactionDto(cachedCancel);
+    }
     const redemption = await this.getRedemption(redemptionId, partnerId);
     if (redemption.status === LoyaltyRedemptionStatus.CONFIRMED) {
       throw new LoyaltyProblemError("REDEMPTION_ALREADY_CONFIRMED");
@@ -442,6 +478,14 @@ export class SandboxLoyaltyEngine {
   async reverseTransaction(
     input: ReversalInput & { partnerId: string; originalTransactionId: string },
   ): Promise<TransactionResponseDto> {
+    const cachedReversal = await this.findCachedMutation(
+      `transactions/${input.originalTransactionId}/reversals`,
+      input.partnerId,
+      input.idempotencyKey,
+    );
+    if (cachedReversal) {
+      return toTransactionDto(cachedReversal);
+    }
     const originalSnap = await this.transactions.doc(input.originalTransactionId).get();
     if (!originalSnap.exists) throw new LoyaltyProblemError("TRANSACTION_NOT_FOUND");
     const original = {

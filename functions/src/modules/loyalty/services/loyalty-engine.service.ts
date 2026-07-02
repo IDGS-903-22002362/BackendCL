@@ -172,11 +172,41 @@ export class LoyaltyEngineService {
     return { redemption, transaction: holdTxn };
   }
 
+  /**
+   * Replay idempotente: si la operación ya se ejecutó con la misma clave,
+   * devuelve la respuesta cacheada antes de validar estado. Sin esto, un
+   * retry legítimo (confirm/cancel/reversal ya aplicado) recibiría 409 por
+   * las validaciones de estado en lugar del resultado original.
+   * El docId incluye el ID del recurso en `operation`, por lo que la clave
+   * no puede colisionar entre recursos distintos.
+   */
+  private async findCachedMutation(
+    operation: string,
+    actorId: string,
+    idempotencyKey: string,
+  ): Promise<LoyaltyTransaction | null> {
+    const docId = idempotencyRepository.buildDocId(
+      operation,
+      actorId,
+      conversionRulesService.hashIdempotencyKey(idempotencyKey),
+    );
+    const cached = await idempotencyRepository.get(docId);
+    return (cached?.responseBody as LoyaltyTransaction) ?? null;
+  }
+
   async confirmRedemption(
     redemptionId: string,
     actor: RedemptionInput["actor"],
     idempotencyKey: string,
   ): Promise<LoyaltyTransaction> {
+    const replay = await this.findCachedMutation(
+      `redemptions/${redemptionId}/confirm`,
+      actor.actorId,
+      idempotencyKey,
+    );
+    if (replay) {
+      return replay;
+    }
     const redemption = await redemptionRepository.getById(redemptionId);
     if (!redemption) {
       throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
@@ -222,6 +252,14 @@ export class LoyaltyEngineService {
     actor: RedemptionInput["actor"],
     idempotencyKey: string,
   ): Promise<LoyaltyTransaction> {
+    const replay = await this.findCachedMutation(
+      `redemptions/${redemptionId}/cancel`,
+      actor.actorId,
+      idempotencyKey,
+    );
+    if (replay) {
+      return replay;
+    }
     const redemption = await redemptionRepository.getById(redemptionId);
     if (!redemption) {
       throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
@@ -259,6 +297,14 @@ export class LoyaltyEngineService {
   }
 
   async reverseTransaction(input: ReversalInput): Promise<LoyaltyTransaction> {
+    const replay = await this.findCachedMutation(
+      `transactions/${input.originalTransactionId}/reversals`,
+      input.actor.actorId,
+      input.idempotencyKey,
+    );
+    if (replay) {
+      return replay;
+    }
     const original = await ledgerRepository.getById(input.originalTransactionId);
     if (!original) {
       throw new LoyaltyProblemError("TRANSACTION_NOT_FOUND");

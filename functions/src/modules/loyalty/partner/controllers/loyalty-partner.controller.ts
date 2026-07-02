@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import LoyaltyProblemError from "../../errors/loyalty-problem.error";
 import { LoyaltyChannel, LoyaltyEnvironment } from "../../models/loyalty.enums";
 import ledgerRepository from "../../repositories/ledger.repository";
+import redemptionRepository from "../../repositories/redemption.repository";
 import walletRepository from "../../repositories/wallet.repository";
 import conversionRulesService from "../../services/conversion-rules.service";
 import loyaltyEngineService from "../../services/loyalty-engine.service";
@@ -9,6 +10,26 @@ import { getPartnerContext } from "../middleware/partner-auth.middleware";
 import { validateLocation } from "../services/partner-scope.service";
 import sandboxLoyaltyEngine, { sandboxMemberService } from "../services/sandbox-engine.service";
 import partnerOAuthService from "../services/partner-oauth.service";
+
+/**
+ * Aislamiento entre partners en producción: toda operación sobre una
+ * redención debe pertenecer al partner autenticado. La propiedad se
+ * deriva del actorId de la transacción de hold (actorId === partnerId).
+ * Se responde 404 para no revelar existencia de recursos ajenos.
+ */
+async function assertProductionRedemptionOwnership(
+  redemptionId: string,
+  partnerId: string,
+): Promise<void> {
+  const redemption = await redemptionRepository.getById(redemptionId);
+  if (!redemption) {
+    throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+  }
+  const holdTxn = await ledgerRepository.getById(redemption.holdTransactionId);
+  if (!holdTxn || holdTxn.actorId !== partnerId) {
+    throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+  }
+}
 
 function requireIdempotency(req: Request): string {
   const key = req.loyaltyIdempotencyKey ?? req.header("Idempotency-Key")?.trim();
@@ -30,6 +51,7 @@ export async function oauthToken(req: Request, res: Response, next: NextFunction
       grantType: String(grantType ?? ""),
       clientId: String(clientId ?? ""),
       clientSecret: String(clientSecret ?? ""),
+      expectedEnvironment: req.loyaltyEnvironment,
     });
     res.status(200).json(result);
   } catch (error) {
@@ -96,6 +118,12 @@ export async function createEarnTransaction(req: Request, res: Response, next: N
     validateLocation(partner, req.body.locationId);
     let memberId = req.body.memberId as string;
     if (req.body.memberToken) {
+      if (partner.environment !== LoyaltyEnvironment.SANDBOX) {
+        throw new LoyaltyProblemError(
+          "INVALID_MEMBER_TOKEN",
+          "memberToken solo está disponible en sandbox",
+        );
+      }
       memberId = await sandboxMemberService.resolveMemberToken(
         req.body.memberToken,
         partner.partnerId,
@@ -106,7 +134,9 @@ export async function createEarnTransaction(req: Request, res: Response, next: N
       externalTransactionId: req.body.externalTransactionId,
       amountCents: req.body.amountCents,
       currency: req.body.currency ?? "MXN",
-      channel: (req.body.channel as LoyaltyChannel) ?? LoyaltyChannel.PARTNER,
+      // El canal siempre lo fija el backend: un partner no puede registrar
+      // operaciones como si vinieran de ecommerce, tienda física o admin.
+      channel: LoyaltyChannel.PARTNER,
       description: req.body.description,
       locationId: req.body.locationId,
       metadata: req.body.metadata,
@@ -215,6 +245,7 @@ export async function confirmRedemption(req: Request, res: Response, next: NextF
       res.status(201).json({ transaction, requestId: req.requestId });
       return;
     }
+    await assertProductionRedemptionOwnership(req.params.redemptionId, partner.partnerId);
     const txn = await loyaltyEngineService.confirmRedemption(
       req.params.redemptionId,
       actor,
@@ -244,6 +275,7 @@ export async function cancelRedemption(req: Request, res: Response, next: NextFu
       res.status(201).json({ transaction, requestId: req.requestId });
       return;
     }
+    await assertProductionRedemptionOwnership(req.params.redemptionId, partner.partnerId);
     const txn = await loyaltyEngineService.cancelRedemption(
       req.params.redemptionId,
       actor,
@@ -274,6 +306,10 @@ export async function reverseTransaction(req: Request, res: Response, next: Next
       });
       res.status(201).json({ transaction, requestId: req.requestId });
       return;
+    }
+    const original = await ledgerRepository.getById(req.params.transactionId);
+    if (!original || original.actorId !== partner.partnerId) {
+      throw new LoyaltyProblemError("TRANSACTION_NOT_FOUND");
     }
     const txn = await loyaltyEngineService.reverseTransaction({
       originalTransactionId: req.params.transactionId,

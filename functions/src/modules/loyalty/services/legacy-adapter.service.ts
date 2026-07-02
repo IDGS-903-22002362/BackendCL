@@ -1,12 +1,30 @@
 import { Request, Response } from "express";
 import { logger } from "firebase-functions";
+import { ZodError } from "zod";
 import { RolUsuario } from "../../../models/usuario.model";
 import { assignPointsBySaleSchema, assignUserPointsSchema } from "../../../middleware/validators/user-points.validator";
+import LoyaltyProblemError from "../errors/loyalty-problem.error";
 import { LoyaltyChannel } from "../models/loyalty.enums";
 import ledgerRepository from "../repositories/ledger.repository";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { buildActorContext } from "../services/loyalty-auth.service";
 import { requireLegacyAdapters } from "../services/loyalty-feature-flags.service";
+
+/**
+ * Mapea errores del Loyalty Engine al contrato legacy `{ success, message }`
+ * conservando el status HTTP correcto en lugar de un 500 genérico.
+ */
+function sendLegacyError(res: Response, error: unknown, fallbackMessage: string): void {
+  if (error instanceof LoyaltyProblemError) {
+    res.status(error.status).json({ success: false, message: error.message });
+    return;
+  }
+  if (error instanceof ZodError) {
+    res.status(400).json({ success: false, message: "Datos de la solicitud inválidos" });
+    return;
+  }
+  res.status(500).json({ success: false, message: fallbackMessage });
+}
 
 function logLegacyUse(req: Request, endpoint: string, status: number): void {
   logger.info("legacy_loyalty_endpoint_used", {
@@ -42,7 +60,7 @@ export async function legacyGetMyPoints(req: Request, res: Response) {
     logLegacyUse(req, "GET /me/getpuntos", 200);
   } catch (error) {
     logLegacyUse(req, "GET /me/getpuntos", 500);
-    res.status(500).json({ success: false, message: "Error al obtener puntos" });
+    sendLegacyError(res, error, "Error al obtener puntos");
   }
 }
 
@@ -60,7 +78,7 @@ export async function legacyGetMyHistorial(req: Request, res: Response) {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Error al obtener historial" });
+    sendLegacyError(res, error, "Error al obtener historial");
   }
 }
 
@@ -92,7 +110,7 @@ export async function legacyAssignPoints(req: Request, res: Response) {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Error al asignar puntos" });
+    sendLegacyError(res, error, "Error al asignar puntos");
   }
 }
 
@@ -129,10 +147,7 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
       },
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error al asignar puntos por venta",
-    });
+    sendLegacyError(res, error, "Error al asignar puntos por venta");
   }
 }
 
@@ -166,6 +181,6 @@ export async function legacyGetAsignaciones(req: Request, res: Response) {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: "Error al obtener historial" });
+    sendLegacyError(res, error, "Error al obtener historial");
   }
 }
