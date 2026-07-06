@@ -11,12 +11,23 @@ jest.mock("../src/services/beneficio.service", () => ({
   },
 }));
 
+jest.mock("../src/services/storageApp.service", () => ({
+  __esModule: true,
+  default: {
+    uploadFile: jest.fn(),
+  },
+}));
+
 import * as commandController from "../src/controllers/beneficios/beneficio.command.controller";
 import * as queryController from "../src/controllers/beneficios/beneficio.query.controller";
 import beneficioService from "../src/services/beneficio.service";
+import storageAppService from "../src/services/storageApp.service";
 
 const mockedBeneficioService = beneficioService as jest.Mocked<
   typeof beneficioService
+>;
+const mockedStorageAppService = storageAppService as jest.Mocked<
+  typeof storageAppService
 >;
 
 const createMockResponse = () => {
@@ -115,6 +126,61 @@ describe("beneficio controllers", () => {
       {
         titulo: "Descuento actualizado",
         descripcion: "Nueva descripcion",
+      },
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("uploadImage sube imagen y actualiza el beneficio", async () => {
+    mockedBeneficioService.getBeneficioById.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:00:00Z"),
+    } as never);
+    mockedStorageAppService.uploadFile.mockResolvedValue(
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+    );
+    mockedBeneficioService.updateBeneficio.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      imagen:
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:05:00Z"),
+    } as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+      files: [
+        {
+          buffer: Buffer.from("image"),
+          originalname: "image.png",
+          mimetype: "image/png",
+        },
+      ],
+    } as unknown as Parameters<typeof commandController.uploadImage>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.uploadImage
+    >[1];
+
+    await commandController.uploadImage(req, res);
+
+    expect(mockedStorageAppService.uploadFile).toHaveBeenCalledWith(
+      Buffer.from("image"),
+      "image.png",
+      "beneficios",
+      "image/png",
+    );
+    expect(mockedBeneficioService.updateBeneficio).toHaveBeenCalledWith(
+      "benefit-1",
+      {
+        imagen:
+          "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
       },
     );
     expect((res as any).status).toHaveBeenCalledWith(200);

@@ -14,6 +14,10 @@ declare global {
 
     interface Request {
       user?: AuthenticatedUser;
+      firebaseAuth?: {
+        uid: string;
+        phoneNumber?: string;
+      };
       rawBody?: Buffer;
       requestId?: string;
     }

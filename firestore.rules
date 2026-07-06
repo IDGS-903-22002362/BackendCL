@@ -25,6 +25,38 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Datos deportivos públicos de Liga MX (calendario, clasificación,
+    // plantilla, jugadores y detalle de partidos). La app móvil los lee
+    // directamente; solo el backend (Admin SDK, cron syncLigaMxData) escribe.
+    match /liga_mx_contexto_actual/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_calendarios_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_clasificaciones_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_plantillas_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_jugadores_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_partidos_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_detalles_partido_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Todo lo demás sigue bloqueado: acceso vía Cloud Functions.
     match /{document=**} {
       allow read, write: if false;
