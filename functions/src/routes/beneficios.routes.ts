@@ -11,6 +11,7 @@ import {
   updateBeneficioSchema,
 } from "../middleware/validators/beneficio.validator";
 import { authMiddleware } from "../utils/middlewares";
+import { handleMultipart } from "../middleware/multipart-handler";
 import { verifyRole } from "../middleware/validation.middleware";
 import { RolUsuario } from "../models/usuario.model";
 
@@ -167,6 +168,19 @@ router.delete(
   verifyRole(BENEFICIOS_STAFF_ROLES),
   validateParams(idParamSchema),
   commandController.remove,
+);
+
+router.post(
+  "/:id/imagen",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  handleMultipart({
+    maxFiles: 1,
+    maxFileSize: 5 * 1024 * 1024,
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+  }),
+  commandController.uploadImage,
 );
 
 export default router;

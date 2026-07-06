@@ -78,6 +78,71 @@ export const authMiddleware = async (
   }
 };
 
+export const firebaseAuthMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({
+      success: false,
+      message: "No autorizado. Token requerido",
+      code: "AUTH_TOKEN_REQUIRED",
+    });
+    return;
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = await authAppOficial.verifyIdToken(token, true);
+    const firebaseUser = await authAppOficial.getUser(decoded.uid);
+
+    const snapshot = await firestoreApp
+      .collection("usuariosApp")
+      .where("uid", "==", decoded.uid)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      res.status(404).json({
+        success: false,
+        message: "Usuario no encontrado",
+        code: "USER_NOT_FOUND",
+      });
+      return;
+    }
+
+    const userData = snapshot.docs[0].data();
+    req.user = {
+      ...userData,
+      uid: decoded.uid,
+      email: decoded.email ?? firebaseUser.email ?? String(userData.email ?? ""),
+      rol: userData.rol as RolUsuario,
+      nombre:
+        firebaseUser.displayName ??
+        (typeof userData.nombre === "string" ? userData.nombre : ""),
+    };
+    req.firebaseAuth = {
+      uid: firebaseUser.uid,
+      phoneNumber: firebaseUser.phoneNumber,
+    };
+
+    next();
+  } catch (error) {
+    console.warn("firebase_auth_middleware_denied", {
+      route: req.originalUrl,
+      reason: error instanceof Error ? error.message : "invalid_token",
+    });
+    res.status(401).json({
+      success: false,
+      message: "Token inválido o expirado",
+      code: "AUTH_TOKEN_INVALID",
+    });
+  }
+};
+
 const ADMIN_ROLES = new Set<RolUsuario>([
   RolUsuario.SUPER_ADMIN,
   RolUsuario.ADMIN,

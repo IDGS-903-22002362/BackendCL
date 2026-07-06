@@ -5,7 +5,7 @@ import { authMiddleware, requireAdmin } from "../utils/middlewares";
 import { validateBody, validateParams } from "../middleware/validation.middleware";
 import { createBannerSchema, updateBannerSchema } from "../middleware/validators/banner.validator";
 import { idParamSchema } from "../middleware/validators/common.validator";
-import { parseMultipartImages } from "../middleware/multipart.middleware";
+import { parseMultipartImages } from  "../middleware/multipart.middleware";
 
 const router = Router();
 console.log("🔥 Cargando módulo de rutas de bannerssssssssssss");

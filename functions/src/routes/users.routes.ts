@@ -8,7 +8,11 @@ import { Router } from "express";
 import * as queryController from "../controllers/users/users.query.controller";
 import * as commandController from "../controllers/users/users.command.controller";
 import * as debugController from "../controllers/users/users.debug.controller";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import {
+  authMiddleware,
+  firebaseAuthMiddleware,
+  requireAdmin,
+} from "../utils/middlewares";
 import {
   validateBody,
   validateParams,
@@ -17,6 +21,7 @@ import {
 } from "../middleware/validation.middleware";
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
+import { verifySeasonPassSchema } from "../middleware/validators/season-pass.validator";
 import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/validators/user-points.validator";
 import {
   legacyAssignPoints,
@@ -33,6 +38,12 @@ const emailLookupRateLimiter = createSimpleRateLimiter({
   keyPrefix: "user:email-lookup",
   windowMs: 60 * 1000,
   maxRequests: 10,
+});
+
+const seasonPassVerificationRateLimiter = createSimpleRateLimiter({
+  keyPrefix: "user:season-pass-verify",
+  windowMs: 60 * 1000,
+  maxRequests: 5,
 });
 
 const router = Router();
@@ -476,7 +487,15 @@ router.put(
   "/actualizar-perfil",
   authMiddleware,
   commandController.actualizarPerfil,
-)
+);
+
+router.post(
+  "/me/season-pass/verify",
+  firebaseAuthMiddleware,
+  seasonPassVerificationRateLimiter,
+  validateBody(verifySeasonPassSchema),
+  commandController.verifySeasonPass,
+);
 
 /**
  * @swagger

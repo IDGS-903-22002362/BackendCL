@@ -1,8 +1,17 @@
 import { Request, Response } from "express";
+import { createHash } from "crypto";
 import userAppService from "../../services/user.service";
 import pointsService from "../../services/puntos.service";
 import { admin } from "../../config/firebase.admin";
+import { firestoreApp } from "../../config/app.firebase";
 import { verifyClientAppCheckToken } from "../../utils/middlewares";
+import seasonPassVerificationService, {
+    SeasonPassVerificationError,
+    SeasonPassPurchaseSummary,
+    SeasonPassVerificationResult,
+} from "../../services/season-pass-verification.service";
+import loyaltyEngineService from "../../modules/loyalty/services/loyalty-engine.service";
+import { LoyaltyActorType } from "../../modules/loyalty/models/loyalty.enums";
 
 /**
  * Controller: Users Command (Escritura)
@@ -222,6 +231,523 @@ export const completarPerfil = async (req: Request, res: Response) => {
         return res.status(500).json({
             success: false,
             message: "Error completando perfil"
+        });
+    }
+};
+
+const SEASON_PASS_ACTOR_ID = "season-pass-verifier";
+const SEASON_PASS_SEASON_KEY = "apertura-2026";
+const SEASON_PASS_PHONE_CLAIMS = "seasonPassPhoneClaims";
+const SEASON_PASS_ITEM_CLAIMS = "seasonPassItemClaims";
+
+const buildSeasonPassId = (uid: string) =>
+    `season-pass:ap26:${uid}`;
+
+const buildSeasonPassItemId = (uid: string, itemKeys: string[]) =>
+    `${buildSeasonPassId(uid)}:${createHash("sha256")
+        .update(itemKeys.slice().sort().join("|"))
+        .digest("hex")}`;
+
+const buildClaimDocId = (value: string) =>
+    createHash("sha256").update(value).digest("hex");
+
+const buildPhoneClaimId = (phone: string) =>
+    buildClaimDocId(`${SEASON_PASS_SEASON_KEY}:phone:${phone}`);
+
+const buildItemClaimId = (itemKey: string) =>
+    buildClaimDocId(`${SEASON_PASS_SEASON_KEY}:item:${itemKey}`);
+
+const seasonPassActor = {
+    actorType: LoyaltyActorType.SERVICE,
+    actorId: SEASON_PASS_ACTOR_ID,
+    roles: ["SERVICE"],
+    permissions: [],
+};
+
+const buildVerificationRecord = (
+    result: SeasonPassVerificationResult,
+    verifiedAt: FirebaseFirestore.Timestamp,
+    pointsTransactionId?: string,
+) => {
+    const record = {
+        isSubscriber: result.isSubscriber,
+        season: result.season,
+        event: result.event,
+        phone: result.phone,
+        phoneVerified: result.phoneVerified,
+        purchaseCount: result.purchaseCount,
+        totalBasePrice: result.totalBasePrice,
+        pointsAwarded: result.pointsAwarded,
+        purchaseIds: result.purchaseIds,
+        itemKeys: result.itemKeys,
+        verifiedAt,
+    };
+
+    return pointsTransactionId
+        ? { ...record, pointsTransactionId }
+        : record;
+};
+
+const asStringArray = (value: unknown): string[] =>
+    Array.isArray(value)
+        ? value
+            .map((item) => (typeof item === "string" ? item.trim() : ""))
+            .filter((item) => item.length > 0)
+        : [];
+
+const getLinkedSeasonPassPhone = (
+    verification: Record<string, unknown> | undefined,
+): string | null => {
+    if (!verification || verification.isSubscriber !== true) {
+        return null;
+    }
+
+    const phone = typeof verification.phone === "string"
+        ? verification.phone.trim()
+        : "";
+    return phone.length > 0 ? phone : null;
+};
+
+const lastTwoDigits = (phone: string): string => {
+    const digits = phone.replace(/\D/g, "");
+    return digits.slice(-2).padStart(2, "*");
+};
+
+const maskedPhone = (phone: string): string =>
+    `****${lastTwoDigits(phone)}`;
+
+const emptySeasonPassVerification = (input: {
+    phone: string;
+    phoneVerified: boolean;
+    message?: string;
+}) => ({
+    isSubscriber: false,
+    season: "Apertura 2026",
+    event: "Fierabono AP26",
+    phone: maskedPhone(input.phone),
+    phoneVerified: input.phoneVerified,
+    purchaseCount: 0,
+    totalBasePrice: 0,
+    pointsAwarded: 0,
+    purchaseIds: [],
+    itemKeys: [],
+    newItemsCount: 0,
+    newItemsBasePrice: 0,
+    newPointsAwarded: 0,
+    totalPointsAwarded: 0,
+    ...(input.message ? { message: input.message } : {}),
+});
+
+const claimSeasonPassItems = async (input: {
+    uid: string;
+    phone: string;
+    items: SeasonPassPurchaseSummary[];
+    existingRedeemedItemKeys: string[];
+}) => {
+    const phoneClaimRef = firestoreApp
+        .collection(SEASON_PASS_PHONE_CLAIMS)
+        .doc(buildPhoneClaimId(input.phone));
+    const itemClaimRefs = input.items.map((item) => ({
+        item,
+        ref: firestoreApp
+            .collection(SEASON_PASS_ITEM_CLAIMS)
+            .doc(buildItemClaimId(item.itemKey)),
+    }));
+    const existingRedeemedSet = new Set(input.existingRedeemedItemKeys);
+    const now = admin.firestore.Timestamp.now();
+
+    return firestoreApp.runTransaction(async (tx) => {
+        const phoneSnap = await tx.get(phoneClaimRef);
+        if (phoneSnap.exists) {
+            const claimedBy = phoneSnap.data()?.uid;
+            if (claimedBy && claimedBy !== input.uid) {
+                return {
+                    blockedByUid: String(claimedBy),
+                    claimedItems: [] as SeasonPassPurchaseSummary[],
+                    redeemedItemKeys: input.existingRedeemedItemKeys,
+                    createdPhoneClaim: false,
+                    createdItemClaimIds: [] as string[],
+                };
+            }
+        }
+
+        const itemSnaps: Array<{
+            item: SeasonPassPurchaseSummary;
+            ref: FirebaseFirestore.DocumentReference;
+            snap: FirebaseFirestore.DocumentSnapshot;
+        }> = [];
+
+        for (const { item, ref } of itemClaimRefs) {
+            itemSnaps.push({
+                item,
+                ref,
+                snap: await tx.get(ref),
+            });
+        }
+
+        if (!phoneSnap.exists) {
+            tx.create(phoneClaimRef, {
+                uid: input.uid,
+                phone: input.phone,
+                season: "Apertura 2026",
+                source: "boletomovil",
+                createdAt: now,
+                updatedAt: now,
+            });
+        }
+
+        const claimedItems: SeasonPassPurchaseSummary[] = [];
+        const redeemedItemKeys = new Set(input.existingRedeemedItemKeys);
+        const createdItemClaimIds: string[] = [];
+
+        for (const { item, ref, snap } of itemSnaps) {
+            if (snap.exists) {
+                const claimedBy = snap.data()?.uid;
+                if (claimedBy === input.uid) {
+                    redeemedItemKeys.add(item.itemKey);
+                }
+                continue;
+            }
+
+            tx.create(ref, {
+                uid: input.uid,
+                phone: input.phone,
+                season: "Apertura 2026",
+                event: item.event,
+                itemKey: item.itemKey,
+                purchaseID: item.purchaseID,
+                zone: item.zone,
+                section: item.section,
+                seat: item.seat,
+                basePrice: item.basePrice,
+                legacyRedeemed: existingRedeemedSet.has(item.itemKey),
+                createdAt: now,
+                updatedAt: now,
+            });
+
+            redeemedItemKeys.add(item.itemKey);
+            createdItemClaimIds.push(ref.id);
+            if (!existingRedeemedSet.has(item.itemKey)) {
+                claimedItems.push(item);
+            }
+        }
+
+        return {
+            blockedByUid: null,
+            claimedItems,
+            redeemedItemKeys: Array.from(redeemedItemKeys),
+            createdPhoneClaim: !phoneSnap.exists,
+            createdItemClaimIds,
+        };
+    });
+};
+
+const cleanupSeasonPassClaims = async (input: {
+    phone: string;
+    createdPhoneClaim: boolean;
+    createdItemClaimIds: string[];
+}) => {
+    const batch = firestoreApp.batch();
+    if (input.createdPhoneClaim) {
+        batch.delete(
+            firestoreApp
+                .collection(SEASON_PASS_PHONE_CLAIMS)
+                .doc(buildPhoneClaimId(input.phone)),
+        );
+    }
+    for (const claimId of input.createdItemClaimIds) {
+        batch.delete(firestoreApp.collection(SEASON_PASS_ITEM_CLAIMS).doc(claimId));
+    }
+    await batch.commit();
+};
+
+const markSeasonPassClaimsRedeemed = async (input: {
+    itemKeys: string[];
+    pointsTransactionId: string;
+}) => {
+    const batch = firestoreApp.batch();
+    const now = admin.firestore.Timestamp.now();
+    for (const itemKey of input.itemKeys) {
+        batch.set(
+            firestoreApp.collection(SEASON_PASS_ITEM_CLAIMS).doc(buildItemClaimId(itemKey)),
+            {
+                pointsTransactionId: input.pointsTransactionId,
+                redeemedAt: now,
+                updatedAt: now,
+            },
+            { merge: true },
+        );
+    }
+    await batch.commit();
+};
+
+const serializeVerificationRecord = (
+    verification: Record<string, unknown>,
+    alreadyVerified: boolean,
+) => {
+    const verifiedAt = verification.verifiedAt;
+    return {
+        ...verification,
+        phone: typeof verification.phone === "string"
+            ? maskedPhone(verification.phone)
+            : verification.phone,
+        alreadyVerified,
+        verifiedAt:
+            verifiedAt instanceof admin.firestore.Timestamp
+                ? verifiedAt.toDate().toISOString()
+                : verifiedAt,
+    };
+};
+
+const getUserDocumentByUid = async (uid: string) => {
+    const directRef = firestoreApp.collection("usuariosApp").doc(uid);
+    const directSnap = await directRef.get();
+    if (directSnap.exists) {
+        return { ref: directRef, snap: directSnap };
+    }
+
+    const snapshot = await firestoreApp
+        .collection("usuariosApp")
+        .where("uid", "==", uid)
+        .limit(1)
+        .get();
+
+    if (snapshot.empty) {
+        return null;
+    }
+
+    const snap = snapshot.docs[0];
+    return { ref: snap.ref, snap };
+};
+
+export const verifySeasonPass = async (req: Request, res: Response) => {
+    try {
+        const uid = req.user?.uid;
+        const verifiedPhone = req.firebaseAuth?.phoneNumber?.trim() ?? "";
+
+        if (!uid) {
+            return res.status(401).json({
+                success: false,
+                message: "No autorizado. Token requerido",
+                code: "AUTH_TOKEN_REQUIRED",
+            });
+        }
+
+        if (!verifiedPhone) {
+            return res.status(403).json({
+                success: false,
+                message:
+                    "Verifica tu teléfono por SMS para consultar tus beneficios de abonado.",
+                code: "PHONE_NOT_VERIFIED",
+            });
+        }
+
+        const phone = seasonPassVerificationService.normalizePhone(verifiedPhone);
+
+        const userDocument = await getUserDocumentByUid(uid);
+        if (!userDocument) {
+            return res.status(404).json({
+                success: false,
+                message: "Usuario no encontrado",
+            });
+        }
+
+        const existingVerification = userDocument.snap.data()
+            ?.seasonPassVerification as Record<string, unknown> | undefined;
+        const linkedPhone = getLinkedSeasonPassPhone(existingVerification);
+        if (linkedPhone) {
+            const normalizedLinkedPhone =
+                seasonPassVerificationService.normalizePhone(linkedPhone);
+
+            if (phone !== normalizedLinkedPhone) {
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        `Esta cuenta ya tiene el número ${maskedPhone(normalizedLinkedPhone)} asociado.`,
+                    code: "PHONE_ALREADY_LINKED",
+                    data: {
+                        verification: serializeVerificationRecord(
+                            {
+                                ...existingVerification,
+                                newItemsCount: 0,
+                                newItemsBasePrice: 0,
+                                newPointsAwarded: 0,
+                                pointsAwarded: 0,
+                            },
+                            true,
+                        ),
+                    },
+                });
+            }
+        }
+
+        const verification = {
+            ...(await seasonPassVerificationService.verifyByPhone(phone)),
+            phoneVerified: true,
+        };
+
+        if (!verification.isSubscriber) {
+            return res.status(404).json({
+                success: false,
+                message:
+                    "No encontramos Fierabono AP26 para el teléfono verificado.",
+                code: "SUBSCRIBER_NOT_FOUND",
+                data: {
+                    verification: emptySeasonPassVerification({
+                        phone,
+                        phoneVerified: true,
+                    }),
+                },
+            });
+        }
+
+        const now = admin.firestore.Timestamp.now();
+        let pointsTransactionId: string | undefined;
+        let puntosActuales: number | undefined;
+        let newItemsCount = 0;
+        let newItemsBasePrice = 0;
+        let newPointsAwarded = 0;
+        let redeemedItemKeys = Array.from(
+            new Set([
+                ...asStringArray(existingVerification?.redeemedItemKeys),
+                ...asStringArray(existingVerification?.itemKeys),
+            ]),
+        );
+
+        if (verification.isSubscriber && verification.pointsAwarded > 0) {
+            const claimResult = await claimSeasonPassItems({
+                uid,
+                phone: verification.phone,
+                items: verification.items,
+                existingRedeemedItemKeys: redeemedItemKeys,
+            });
+
+            if (claimResult.blockedByUid) {
+                const blockedRecord = {
+                    ...buildVerificationRecord(verification, now),
+                    isSubscriber: false,
+                    redeemedItemKeys,
+                    newItemsCount: 0,
+                    newItemsBasePrice: 0,
+                    newPointsAwarded: 0,
+                    pointsAwarded: 0,
+                    totalPointsAwarded: Number(
+                        existingVerification?.totalPointsAwarded ?? 0,
+                    ),
+                };
+
+                return res.status(409).json({
+                    success: false,
+                    message:
+                        `El número ${maskedPhone(verification.phone)} ya está vinculado a otra cuenta.`,
+                    code: "PHONE_ALREADY_LINKED",
+                    data: {
+                        verification: serializeVerificationRecord(
+                            blockedRecord,
+                            false,
+                        ),
+                    },
+                });
+            }
+
+            redeemedItemKeys = claimResult.redeemedItemKeys;
+            const newItems = claimResult.claimedItems;
+            newItemsCount = newItems.length;
+            newItemsBasePrice = newItems.reduce(
+                (sum, item) => sum + item.basePrice,
+                0,
+            );
+            newPointsAwarded = Math.round(newItemsBasePrice * 0.1);
+
+            if (newPointsAwarded <= 0) {
+                redeemedItemKeys = Array.from(
+                    new Set([...redeemedItemKeys, ...verification.itemKeys]),
+                );
+            } else {
+                const idempotencyKey = buildSeasonPassItemId(
+                    uid,
+                    newItems.map((item) => item.itemKey),
+                );
+                try {
+                    const transaction = await loyaltyEngineService.applyAdjustment({
+                        memberId: uid,
+                        points: newPointsAwarded,
+                        reasonCode: "SEASON_PASS_AP26",
+                        description:
+                            `Bono Fierabono AP26 por ${newItemsCount} abono(s) nuevo(s)`,
+                        externalReference: idempotencyKey,
+                        idempotencyKey,
+                        actor: seasonPassActor,
+                    });
+                    pointsTransactionId = transaction.transactionId;
+                    puntosActuales = transaction.balanceAfter;
+                    await markSeasonPassClaimsRedeemed({
+                        itemKeys: newItems.map((item) => item.itemKey),
+                        pointsTransactionId,
+                    });
+                } catch (error) {
+                    await cleanupSeasonPassClaims({
+                        phone: verification.phone,
+                        createdPhoneClaim: claimResult.createdPhoneClaim,
+                        createdItemClaimIds: claimResult.createdItemClaimIds,
+                    });
+                    throw error;
+                }
+            }
+        }
+
+        const record = buildVerificationRecord(
+            verification,
+            now,
+            pointsTransactionId,
+        );
+        const finalRecord = {
+            ...record,
+            redeemedItemKeys,
+            newItemsCount,
+            newItemsBasePrice,
+            newPointsAwarded,
+            pointsAwarded: newPointsAwarded,
+            totalPointsAwarded: Number(existingVerification?.totalPointsAwarded ?? 0) +
+                newPointsAwarded,
+        };
+
+        await userDocument.ref.set(
+            {
+                seasonPassVerification: finalRecord,
+                updatedAt: now,
+            },
+            { merge: true },
+        );
+
+        return res.status(200).json({
+            success: true,
+            message: verification.isSubscriber
+                ? newPointsAwarded > 0
+                    ? "Fierabono AP26 verificado correctamente."
+                    : "No hay abonos nuevos. Puntos canjeados: 0."
+                : "No encontramos Fierabono AP26 para ese teléfono.",
+            data: {
+                verification: serializeVerificationRecord(finalRecord, false),
+                puntosActuales,
+            },
+        });
+    } catch (error) {
+        if (error instanceof SeasonPassVerificationError) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message,
+                code: error.code,
+            });
+        }
+
+        console.error("Error verificando Fierabono AP26:", {
+            message: error instanceof Error ? error.message : "Error desconocido",
+        });
+
+        return res.status(500).json({
+            success: false,
+            message: "Error al verificar tu Fierabono AP26",
         });
     }
 };
