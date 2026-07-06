@@ -699,13 +699,33 @@ export class CarritoService {
       const items = [...(carrito.items || [])];
 
       // Buscar item
-      const itemIndex = items.findIndex((item) =>
+      let itemIndex = items.findIndex((item) =>
         cartItemsMatchVariant(item, {
           productoId,
           tallaId,
           personalizacion,
         }),
       );
+
+      if (itemIndex < 0) {
+        const normalizedTalla = tallaId ?? "";
+        const sizeMatches = items.filter(
+          (item) =>
+            item.productoId === productoId &&
+            (item.tallaId ?? "") === normalizedTalla,
+        );
+
+        if (sizeMatches.length === 1) {
+          itemIndex = items.indexOf(sizeMatches[0]!);
+        } else if (!tallaId) {
+          const productMatches = items.filter(
+            (item) => item.productoId === productoId,
+          );
+          if (productMatches.length === 1) {
+            itemIndex = items.indexOf(productMatches[0]!);
+          }
+        }
+      }
 
       if (itemIndex < 0) {
         throw new Error(`Producto "${productoId}" no encontrado en el carrito`);

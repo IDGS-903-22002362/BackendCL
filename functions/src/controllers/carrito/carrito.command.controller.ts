@@ -215,8 +215,18 @@ export const removeItem = async (req: Request, res: Response) => {
 
     const { productoId } = req.params;
     const tallaId =
-      typeof req.body?.tallaId === "string" ? req.body.tallaId : undefined;
-    const personalizacion = normalizeItemPersonalizacion(req.body?.personalizacion);
+      typeof req.query.tallaId === "string"
+        ? req.query.tallaId
+        : typeof req.body?.tallaId === "string"
+          ? req.body.tallaId
+          : undefined;
+    const personalizacion =
+      normalizeItemPersonalizacion(req.body?.personalizacion) ??
+      normalizeItemPersonalizacion({
+        mode: req.query.personalizationMode,
+        nombre: req.query.personalizationNombre,
+        numero: req.query.personalizationNumero,
+      });
 
     // Obtener carrito
     const carrito = await carritoService.getOrCreateCart(
