@@ -15,6 +15,18 @@ export enum RolUsuario {
   EMPLEADO = "EMPLEADO", // Empleado con permisos de gestión
   CLIENTE = "CLIENTE", // Cliente regular del sistema
   EMPLEADO_CLUB = "EMPLEADO_CLUB", // Empleado con acceso limitado a funciones del club
+  CONCESION_VENDEDOR = "CONCESION_VENDEDOR", // Vendedor de concesión interna del club (asignación de puntos)
+}
+
+/** Roles internos del club autorizados para asignar puntos en tienda/concesión. */
+export const ROLES_ASIGNACION_PUNTOS: readonly RolUsuario[] = [
+  RolUsuario.ADMIN,
+  RolUsuario.EMPLEADO,
+  RolUsuario.CONCESION_VENDEDOR,
+];
+
+export function puedeAsignarPuntos(rol: RolUsuario | string | undefined): boolean {
+  return ROLES_ASIGNACION_PUNTOS.includes(rol as RolUsuario);
 }
 
 /**

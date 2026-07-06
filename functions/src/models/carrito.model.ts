@@ -32,6 +32,7 @@
  */
 
 import { Timestamp } from "firebase-admin/firestore";
+import type { ItemPersonalizacion } from "../utils/product-personalization.util";
 
 /**
  * Cantidad máxima permitida por item en el carrito
@@ -48,6 +49,7 @@ export interface ItemCarrito {
   cantidad: number; // Cantidad de unidades (1 a MAX_CANTIDAD_POR_ITEM)
   precioUnitario: number; // Precio del producto al momento de agregarlo (snapshot de precioPublico)
   tallaId?: string; // ID de la talla seleccionada (opcional, si el producto maneja tallas)
+  personalizacion?: ItemPersonalizacion;
 }
 
 /**
@@ -80,6 +82,7 @@ export interface AgregarItemCarritoDTO {
   productoId: string; // ID del producto a agregar
   cantidad: number; // Cantidad a agregar (1 a MAX_CANTIDAD_POR_ITEM)
   tallaId?: string; // ID de talla seleccionada (si aplica)
+  personalizacion?: ItemPersonalizacion;
 }
 
 /**

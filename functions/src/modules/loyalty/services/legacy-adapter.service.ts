@@ -9,6 +9,7 @@ import ledgerRepository from "../repositories/ledger.repository";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { buildActorContext } from "../services/loyalty-auth.service";
 import { requireLegacyAdapters } from "../services/loyalty-feature-flags.service";
+import { toDayKey } from "../../../utils/day-key.util";
 
 /**
  * Mapea errores del Loyalty Engine al contrato legacy `{ success, message }`
@@ -61,6 +62,28 @@ export async function legacyGetMyPoints(req: Request, res: Response) {
   } catch (error) {
     logLegacyUse(req, "GET /me/getpuntos", 500);
     sendLegacyError(res, error, "Error al obtener puntos");
+  }
+}
+
+export async function legacySumarStreakPoints(req: Request, res: Response) {
+  try {
+    await requireLegacyAdapters();
+    setDeprecation(res);
+    const uid = req.user!.uid;
+    const dayKey = toDayKey(new Date(), "America/Mexico_City");
+    await loyaltyEngineService.applyDailyStreakBonus(uid, dayKey);
+    const wallet = await loyaltyEngineService.getWallet(uid);
+    res.status(200).json({
+      success: true,
+      puntos: wallet.availablePoints,
+      data: {
+        puntosActuales: wallet.availablePoints,
+      },
+    });
+    logLegacyUse(req, "POST /me/puntos/sumar", 200);
+  } catch (error) {
+    logLegacyUse(req, "POST /me/puntos/sumar", 500);
+    sendLegacyError(res, error, "Error al sumar puntos");
   }
 }
 

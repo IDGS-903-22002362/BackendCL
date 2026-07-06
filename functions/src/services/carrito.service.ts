@@ -16,6 +16,12 @@
  */
 
 import { firestoreTienda } from "../config/firebase";
+import {
+  assertPersonalizationAllowed,
+  cartItemsMatchVariant,
+  resolvePersonalizationFeeMxn,
+} from "../utils/product-personalization.util";
+import type { Producto } from "../models/producto.model";
 import { Timestamp } from "firebase-admin/firestore";
 import {
   Carrito,
@@ -356,9 +362,14 @@ export class CarritoService {
 
         const availability = this.resolveCartItemAvailability(prodData, item);
 
+        const personalizationFee = item.personalizacion
+          ? resolvePersonalizationFeeMxn(prodData as Producto)
+          : 0;
+
         return {
           ...item,
           ...availability,
+          ...(personalizationFee > 0 ? { personalizationFee } : {}),
           producto: {
             clave: prodData.clave || "N/A",
             descripcion: prodData.descripcion || "Sin descripción",
@@ -415,13 +426,15 @@ export class CarritoService {
         throw new Error(`Producto con ID "${itemDTO.productoId}" no existe`);
       }
 
-      const prodData = prodDoc.data()!;
+      const prodData = prodDoc.data()! as Producto;
 
       if (!prodData.activo) {
         throw new Error(
           `Producto "${prodData.descripcion || itemDTO.productoId}" no está disponible`,
         );
       }
+
+      assertPersonalizationAllowed(prodData, itemDTO.personalizacion);
 
       const stockContext = this.resolveStockContext(prodData, itemDTO.tallaId);
 
@@ -439,10 +452,12 @@ export class CarritoService {
       const items = [...(carrito.items || [])];
 
       // 3. Buscar si el producto ya está en el carrito (mismo productoId y tallaId)
-      const existingIndex = items.findIndex(
-        (item) =>
-          item.productoId === itemDTO.productoId &&
-          item.tallaId === stockContext.tallaId,
+      const existingIndex = items.findIndex((item) =>
+        cartItemsMatchVariant(item, {
+          productoId: itemDTO.productoId,
+          tallaId: stockContext.tallaId,
+          personalizacion: itemDTO.personalizacion,
+        }),
       );
 
       let cantidadTotal: number;
@@ -486,6 +501,9 @@ export class CarritoService {
           cantidad: itemDTO.cantidad,
           precioUnitario,
           ...(stockContext.tallaId ? { tallaId: stockContext.tallaId } : {}),
+          ...(itemDTO.personalizacion
+            ? { personalizacion: itemDTO.personalizacion }
+            : {}),
         };
         items.push(newItem);
       }
@@ -546,11 +564,12 @@ export class CarritoService {
     productoId: string,
     cantidad: number,
     tallaId?: string,
+    personalizacion?: ItemCarrito["personalizacion"],
   ): Promise<Carrito> {
     try {
       // Si cantidad es 0, delegar a removeItem
       if (cantidad === 0) {
-        return this.removeItem(cartId, productoId, tallaId);
+        return this.removeItem(cartId, productoId, tallaId, personalizacion);
       }
 
       // 1. Obtener carrito
@@ -567,10 +586,12 @@ export class CarritoService {
       const items = [...(carrito.items || [])];
 
       // 2. Buscar item en el carrito
-      const itemIndex = items.findIndex(
-        (item) =>
-          item.productoId === productoId &&
-          (tallaId ? item.tallaId === tallaId : true),
+      const itemIndex = items.findIndex((item) =>
+        cartItemsMatchVariant(item, {
+          productoId,
+          tallaId,
+          personalizacion,
+        }),
       );
 
       if (itemIndex < 0) {
@@ -662,6 +683,7 @@ export class CarritoService {
     cartId: string,
     productoId: string,
     tallaId?: string,
+    personalizacion?: ItemCarrito["personalizacion"],
   ): Promise<Carrito> {
     try {
       const cartDoc = await firestoreTienda
@@ -677,10 +699,12 @@ export class CarritoService {
       const items = [...(carrito.items || [])];
 
       // Buscar item
-      const itemIndex = items.findIndex(
-        (item) =>
-          item.productoId === productoId &&
-          (tallaId ? item.tallaId === tallaId : true),
+      const itemIndex = items.findIndex((item) =>
+        cartItemsMatchVariant(item, {
+          productoId,
+          tallaId,
+          personalizacion,
+        }),
       );
 
       if (itemIndex < 0) {
@@ -1025,6 +1049,10 @@ export class CarritoService {
         precioUnitario: item.unitPriceFinal,
         subtotal: item.subtotalFinal,
         ...(item.tallaId ? { tallaId: item.tallaId } : {}),
+        ...(item.personalizacion ? { personalizacion: item.personalizacion } : {}),
+        ...(item.personalizationFee
+          ? { personalizationFee: item.personalizationFee }
+          : {}),
       })),
       subtotal: pricing.subtotalFinal,
       impuestos: 0,

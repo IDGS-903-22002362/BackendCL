@@ -8,6 +8,7 @@ import {
   CheckoutPricingSnapshot,
   CheckoutShippingSnapshot,
 } from "./checkout-pricing.model";
+import type { ItemPersonalizacion } from "../utils/product-personalization.util";
 
 export enum EstadoOrden {
   PENDIENTE = "PENDIENTE",
@@ -94,6 +95,8 @@ export interface ItemOrden {
   precioUnitario: number;
   subtotal: number;
   tallaId?: string;
+  personalizacion?: ItemPersonalizacion;
+  personalizationFee?: number;
 }
 
 export interface DireccionEnvio {

@@ -52,6 +52,12 @@ export type CheckoutItemPricingSnapshot = {
   widthCm?: number;
   heightCm?: number;
   requiereEnvio?: boolean;
+  personalizacion?: {
+    mode: "player" | "custom";
+    nombre: string;
+    numero: string;
+  };
+  personalizationFee?: number;
 };
 
 export type CheckoutShippingSnapshot = {

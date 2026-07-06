@@ -12,6 +12,9 @@
 import { z } from "zod";
 import { MAX_CANTIDAD_POR_ITEM } from "../../models/carrito.model";
 import {
+  itemPersonalizacionSchema,
+} from "./product-personalization.validator";
+import {
   direccionEnvioSchema,
   fulfillmentMethodSchema,
 } from "./orden.validator";
@@ -136,6 +139,8 @@ export const addItemCarritoSchema = z
       .trim()
       .min(1, "El ID de talla no puede estar vacío")
       .optional(),
+
+    personalizacion: itemPersonalizacionSchema.optional(),
   })
   .strict();
 

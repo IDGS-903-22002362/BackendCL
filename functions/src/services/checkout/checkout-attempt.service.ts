@@ -63,6 +63,10 @@ function roundMoney(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+import {
+  getPersonalizationSignature,
+} from "../../utils/product-personalization.util";
+
 /**
  * Genera una firma comparable del carrito + pricing del intento.
  * Incluye items (producto/talla/cantidad/precio unitario), total, subtotal con
@@ -79,6 +83,7 @@ function computeCartSignature(
       [
         item.productoId,
         item.tallaId ?? "",
+        getPersonalizationSignature(item.personalizacion),
         item.cantidad,
         roundMoney(item.precioUnitario),
       ].join(":"),

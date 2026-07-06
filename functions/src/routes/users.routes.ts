@@ -18,15 +18,16 @@ import {
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
 import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/validators/user-points.validator";
+import { ROLES_ASIGNACION_PUNTOS } from "../models/usuario.model";
 import {
   legacyAssignPoints,
   legacyAssignPointsBySale,
   legacyGetAsignaciones,
   legacyGetMyHistorial,
   legacyGetMyPoints,
+  legacySumarStreakPoints,
 } from "../modules/loyalty/services/legacy-adapter.service";
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
-import { RolUsuario } from "../models/usuario.model";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const emailLookupRateLimiter = createSimpleRateLimiter({
@@ -682,7 +683,7 @@ router.get(
 router.post(
   "/:id/puntos/asignar",
   authMiddleware,
-  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
+  verifyRole([...ROLES_ASIGNACION_PUNTOS]),
   validateParams(idParamSchema),
   validateBody(assignUserPointsSchema),
   legacyAssignPoints,
@@ -716,16 +717,7 @@ router.post(
 router.post(
   "/me/puntos/sumar",
   authMiddleware,
-  (_req, res) => {
-    res.set("Deprecation", "true");
-    res.set("Link", '</api/loyalty/v1>; rel="successor-version"');
-    return res.status(410).json({
-      success: false,
-      message:
-        "Este endpoint fue retirado. Usa la API de lealtad /api/loyalty/v1.",
-      code: "ENDPOINT_RETIRED",
-    });
-  },
+  legacySumarStreakPoints,
 );
 
 
@@ -817,7 +809,7 @@ router.post(
 router.get(
   "/puntos/asignaciones",
   authMiddleware,
-  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
+  verifyRole([...ROLES_ASIGNACION_PUNTOS]),
   legacyGetAsignaciones
 );
 
@@ -941,7 +933,7 @@ router.get(
 router.post(
   "/:id/puntos/asignar-por-venta",
   authMiddleware,
-  verifyRole([RolUsuario.ADMIN, RolUsuario.EMPLEADO]),
+  verifyRole([...ROLES_ASIGNACION_PUNTOS]),
   validateParams(idParamSchema),
   validateBody(assignPointsBySaleSchema),
   legacyAssignPointsBySale
