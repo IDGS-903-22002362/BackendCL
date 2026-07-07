@@ -27,7 +27,7 @@ const cleanupExpired = (now: number): void => {
   }
 };
 
-function resolveClientIp(req: Request): string {
+export function resolveClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string" && forwarded.trim()) {
     return forwarded.split(",")[0]?.trim() || "unknown";

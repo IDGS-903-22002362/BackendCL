@@ -22,6 +22,7 @@ import { Oferta } from "../../models/ofertas.model";
 import { codigosPromocionService } from "../codigos-promocion.service";
 import { getAvailableForVariant, getPhysicalForVariant } from "../../utils/inventory-stock.util";
 import type { CheckoutUnavailableItemDetail } from "../../models/checkout-unavailable-item.model";
+import { resolvePersonalizationFeeMxn } from "../../utils/product-personalization.util";
 
 const CARRITOS_COLLECTION = "carritos";
 const PRODUCTOS_COLLECTION = "productos";
@@ -373,6 +374,22 @@ export class CheckoutPricingService {
     );
 
     if (unavailableItems.length > 0) {
+      const inactiveItems = unavailableItems.filter(
+        (item) => item.reason === "inactive",
+      );
+      if (inactiveItems.length > 0) {
+        const message =
+          inactiveItems.length === 1
+            ? `El producto "${inactiveItems[0].productName}" ya no está disponible.`
+            : `No puedes continuar: ${inactiveItems.length} productos ya no están disponibles.`;
+        throw new CheckoutFlowError(
+          "CHECKOUT_PRODUCT_INACTIVE",
+          message,
+          409,
+          { unavailableItems: inactiveItems },
+        );
+      }
+
       const message =
         unavailableItems.length === 1
           ? `Stock insuficiente para "${unavailableItems[0].productName}".`
@@ -402,12 +419,21 @@ export class CheckoutPricingService {
         this.toOfertaBase(item.productoId, product),
         stockContext.tallaId,
       );
-      const unitPriceFinal = roundMoney(
+      const unitPriceAfterOffer = roundMoney(
         bestOffer?.precioFinal ?? unitPriceOriginal,
       );
+      const personalizationFee = item.personalizacion
+        ? resolvePersonalizationFeeMxn(product)
+        : 0;
+      const unitPriceFinal = roundMoney(unitPriceAfterOffer + personalizationFee);
       const subtotalOriginal = roundMoney(unitPriceOriginal * item.cantidad);
-      const subtotalFinal = roundMoney(unitPriceFinal * item.cantidad);
-      const discountTotal = roundMoney(subtotalOriginal - subtotalFinal);
+      const subtotalAfterOffer = roundMoney(unitPriceAfterOffer * item.cantidad);
+      const subtotalFinal = roundMoney(
+        subtotalAfterOffer + personalizationFee * item.cantidad,
+      );
+      const discountTotal = roundMoney(
+        Math.max(0, subtotalOriginal - subtotalAfterOffer),
+      );
       const logistics = resolveLogistics(product);
 
       return {
@@ -428,6 +454,8 @@ export class CheckoutPricingService {
         widthCm: logistics.widthCm,
         heightCm: logistics.heightCm,
         requiereEnvio: resolveRequiresShipping(product),
+        ...(item.personalizacion ? { personalizacion: item.personalizacion } : {}),
+        ...(personalizationFee > 0 ? { personalizationFee } : {}),
       };
     });
   }

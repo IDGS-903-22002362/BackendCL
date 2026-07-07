@@ -1411,6 +1411,58 @@ export class ProductService {
     };
   }
 
+  private async mergeCatalogWithRecentActiveFallback(
+    rankedProducts: Producto[],
+    rankedIds: string[],
+    filters: CatalogCursor["filters"],
+    catalogOfertasActivas: Oferta[],
+    options: {
+      requireActiveOffer?: boolean;
+      maxTotal: number;
+    },
+  ): Promise<Producto[]> {
+    if (rankedProducts.length >= options.maxTotal) {
+      return rankedProducts.slice(0, options.maxTotal);
+    }
+
+    const seenIds = new Set(
+      rankedProducts
+        .map((product) => product.id)
+        .filter((id): id is string => Boolean(id)),
+    );
+    rankedIds.forEach((id) => seenIds.add(id));
+
+    const fallbackLimit = Math.max(options.maxTotal - rankedProducts.length, 24);
+    const fallbackSnapshot = await firestoreTienda
+      .collection(PRODUCTOS_COLLECTION)
+      .where("activo", "==", true)
+      .orderBy("createdAt", "desc")
+      .orderBy(admin.firestore.FieldPath.documentId(), "desc")
+      .limit(fallbackLimit * 3)
+      .get();
+    const fallbackProducts = fallbackSnapshot.docs
+      .map((snapshot) =>
+        this.normalizeProduct(snapshot.id, snapshot.data()),
+      )
+      .filter(
+        (product) =>
+          product.activo === true &&
+          product.id &&
+          !seenIds.has(product.id) &&
+          this.matchesCatalogFilters(
+            product,
+            filters,
+            catalogOfertasActivas,
+            {
+              requireActiveOffer: options.requireActiveOffer,
+            },
+          ),
+      );
+
+    const merged = [...rankedProducts, ...fallbackProducts];
+    return merged.slice(0, options.maxTotal);
+  }
+
   private async listCatalogProductsByAggregateRanking(
     query: CatalogQuery,
     filters: CatalogCursor["filters"],
@@ -1463,8 +1515,19 @@ export class ProductService {
       ),
     );
 
-    const pageProducts = filteredProducts.slice(offset, offset + query.limit);
-    const hasMore = offset + query.limit < filteredProducts.length;
+    const mergedProducts = await this.mergeCatalogWithRecentActiveFallback(
+      filteredProducts,
+      rankedIds,
+      filters,
+      catalogOfertasActivas ?? [],
+      {
+        requireActiveOffer: this.isOfertasCatalogSort(sort),
+        maxTotal: 200,
+      },
+    );
+
+    const pageProducts = mergedProducts.slice(offset, offset + query.limit);
+    const hasMore = offset + query.limit < mergedProducts.length;
     let items = pageProducts.map((product) =>
       this.toCatalogCard(product, labels, catalogOfertasActivas),
     );

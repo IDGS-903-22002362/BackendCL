@@ -12,6 +12,7 @@ export const createBeneficioSchema = z
       .trim()
       .min(1, "La descripcion no puede estar vacia")
       .max(500, "La descripcion no puede exceder 500 caracteres"),
+    imagen: z.string().url("La imagen debe ser una URL valida").optional(),
     estatus: z.boolean({
       required_error: "El estatus es obligatorio",
       invalid_type_error: "El estatus debe ser booleano",
@@ -23,6 +24,7 @@ export const updateBeneficioSchema = z
   .object({
     titulo: z.string().trim().min(1).max(100).optional(),
     descripcion: z.string().trim().min(1).max(500).optional(),
+    imagen: z.string().url("La imagen debe ser una URL valida").optional(),
     estatus: z.boolean().optional(),
   })
   .strict();

@@ -330,6 +330,9 @@ export const createProductSchema = z
       })
       .optional()
       .default(true),
+
+    personalizable: z.boolean().optional(),
+    personalizationFeeMxn: z.number().nonnegative().optional(),
   })
   .strict(); // Rechaza campos extra (prevención de mass assignment)
 
@@ -461,6 +464,9 @@ export const updateProductSchema = z
         invalid_type_error: "El campo activo debe ser un booleano",
       })
       .optional(),
+
+    personalizable: z.boolean().optional(),
+    personalizationFeeMxn: z.number().nonnegative().optional(),
   })
   .strict(); // Rechaza campos extra
 

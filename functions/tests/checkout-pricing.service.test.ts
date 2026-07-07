@@ -210,4 +210,129 @@ describe("CheckoutPricingService", () => {
       code: "CHECKOUT_STOCK_UNAVAILABLE",
     });
   });
+
+  it("adds personalization fee per unit when item is customized", async () => {
+    const db = createDb({
+      carritos: {
+        cart_1: {
+          usuarioId: "user-1",
+          items: [
+            {
+              productoId: "prod-1",
+              cantidad: 2,
+              precioUnitario: 1300,
+              tallaId: "M",
+              personalizacion: {
+                mode: "custom",
+                nombre: "LEON",
+                numero: "9",
+              },
+            },
+          ],
+          subtotal: 2600,
+          total: 2600,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      productos: {
+        "prod-1": {
+          clave: "JERSEY-1",
+          descripcion: "Jersey Local",
+          precioPublico: 1000,
+          activo: true,
+          personalizable: true,
+          existencias: 10,
+          tallaIds: ["M"],
+          inventarioPorTalla: [{ tallaId: "M", cantidad: 10 }],
+          shipping: {
+            requiresShipping: true,
+            weightKg: 0.5,
+            lengthCm: 30,
+            widthCm: 20,
+            heightCm: 10,
+          },
+        },
+      },
+    });
+    const service = new CheckoutPricingService(db, {
+      calculateShipping: jest.fn().mockResolvedValue({
+        method: "PICKUP",
+        provider: "STORE",
+        amount: 0,
+        currency: "MXN",
+      }),
+    } as any);
+
+    const result = await service.calculateCheckoutPricing({
+      userId: "user-1",
+      cartId: "cart_1",
+      shippingSelection: { method: "PICKUP" },
+    });
+
+    expect(result.subtotalFinal).toBe(2600);
+    expect(result.items[0]).toMatchObject({
+      unitPriceFinal: 1300,
+      personalizationFee: 300,
+      personalizacion: {
+        mode: "custom",
+        nombre: "LEON",
+        numero: "9",
+      },
+    });
+  });
+
+  it("does not add personalization fee when item has no customization", async () => {
+    const db = createDb({
+      carritos: {
+        cart_1: {
+          usuarioId: "user-1",
+          items: [
+            {
+              productoId: "prod-1",
+              cantidad: 1,
+              precioUnitario: 1000,
+              tallaId: "M",
+            },
+          ],
+          subtotal: 1000,
+          total: 1000,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      productos: {
+        "prod-1": {
+          clave: "JERSEY-1",
+          descripcion: "Jersey Local",
+          precioPublico: 1000,
+          activo: true,
+          personalizable: true,
+          existencias: 10,
+          tallaIds: ["M"],
+          inventarioPorTalla: [{ tallaId: "M", cantidad: 10 }],
+        },
+      },
+    });
+    const service = new CheckoutPricingService(db, {
+      calculateShipping: jest.fn().mockResolvedValue({
+        method: "PICKUP",
+        provider: "STORE",
+        amount: 0,
+        currency: "MXN",
+      }),
+    } as any);
+
+    const result = await service.calculateCheckoutPricing({
+      userId: "user-1",
+      cartId: "cart_1",
+      shippingSelection: { method: "PICKUP" },
+    });
+
+    expect(result.subtotalFinal).toBe(1000);
+    expect(result.items[0]).toMatchObject({
+      unitPriceFinal: 1000,
+    });
+    expect(result.items[0].personalizationFee).toBeUndefined();
+  });
 });

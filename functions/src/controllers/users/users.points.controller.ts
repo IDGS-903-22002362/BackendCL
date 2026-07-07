@@ -99,19 +99,21 @@ export const getHistorialAsignaciones = async (req: Request, res: Response) => {
 		const { usuarioId, limit, cursor, empleadoId } = req.query;
 
 		const esAdmin = currentUser.rol === RolUsuario.ADMIN;
-		const esEmpleado = currentUser.rol === RolUsuario.EMPLEADO;
+		const esStaffAsignacion =
+			currentUser.rol === RolUsuario.EMPLEADO ||
+			currentUser.rol === RolUsuario.CONCESION_VENDEDOR;
 
-		if (!esAdmin && !esEmpleado) {
+		if (!esAdmin && !esStaffAsignacion) {
 			return res.status(403).json({
 				success: false,
 				message: "No tienes permisos para ver este historial",
 			});
 		}
 
-		// 🔐 Empleados: solo ven sus propias asignaciones
+		// 🔐 Empleados/concesión: solo ven sus propias asignaciones
 		// Admin: puede ver sus asignaciones o las de un empleado específico
 		let origenIdParaConsulta: string;
-		if (esEmpleado) {
+		if (esStaffAsignacion) {
 			origenIdParaConsulta = currentUser.uid;
 		} else if (esAdmin && empleadoId) {
 			// Admin puede ver las asignaciones de un empleado específico

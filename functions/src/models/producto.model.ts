@@ -114,6 +114,10 @@ export interface Producto {
   fedexShipping?: FedexProductShipping;
   shipping?: ProductShipping;
   activo: boolean; // Si el producto está disponible para venta
+  /** Jersey u otro producto con dorsal/número opcional. */
+  personalizable?: boolean;
+  /** Cargo MXN por personalización; default 300. */
+  personalizationFeeMxn?: number;
   createdAt: Timestamp; // Fecha de creación
   updatedAt: Timestamp; // Fecha de última actualización
 }

@@ -138,6 +138,41 @@ export class LoyaltyEngineService {
     }
   }
 
+  async applyDailyStreakBonus(
+    memberId: string,
+    dayKey: string,
+    actorId = "racha-system",
+  ): Promise<LoyaltyTransaction | null> {
+    const idempotencyKey = `streak:${memberId}:${dayKey}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.SERVICE,
+          actorId,
+          roles: ["SERVICE"],
+          permissions: [],
+        },
+        points: LOYALTY_DEFAULTS.STREAK_DAILY_BONUS_POINTS,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/streak",
+        description: "Bonificación por Fiera Racha diaria",
+        reasonCode: "STREAK",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async createRedemption(input: RedemptionInput): Promise<{
     redemption: LoyaltyRedemption;
     transaction: LoyaltyTransaction;

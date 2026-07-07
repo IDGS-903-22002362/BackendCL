@@ -162,7 +162,10 @@ export async function verifyAndLogin(req: Request, res: Response) {
                     email: userData.email,
                     nombre: userData.nombre,
                     rol: userData.rol,
-                    perfilCompleto: userData.perfilCompleto || false
+                    telefono: userData.telefono ?? null,
+                    fechaNacimiento: userData.fechaNacimiento ?? null,
+                    genero: userData.genero ?? "",
+                    perfilCompleto: userData.perfilCompleto ?? false
                 }
             }
         });

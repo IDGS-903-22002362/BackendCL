@@ -11,7 +11,9 @@ export class IdempotencyRepository {
   private collection = firestoreApp.collection(LOYALTY_COLLECTIONS.IDEMPOTENCY);
 
   buildDocId(operation: string, actorId: string, idempotencyKeyHash: string): string {
-    return `${operation}:${actorId}:${idempotencyKeyHash}`;
+    const safeOperation = encodeURIComponent(operation.trim());
+    const safeActorId = encodeURIComponent(actorId.trim());
+    return `${safeOperation}:${safeActorId}:${idempotencyKeyHash}`;
   }
 
   docRef(docId: string) {

@@ -32,5 +32,40 @@ service cloud.firestore {
     match /loyalty_partner_audit/{document=**} {
       allow read, write: if false;
     }
+
+    // Datos deportivos públicos de Liga MX. La app móvil los lee
+    // directamente; solo el backend (Admin SDK) escribe.
+    match /liga_mx_contexto_actual/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_calendarios_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_clasificaciones_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_plantillas_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_jugadores_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_partidos_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /liga_mx_detalles_partido_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }

@@ -21,6 +21,18 @@ export enum RolUsuario {
   CONCESION_SUPERADMIN = "CONCESION_SUPERADMIN",
   CONCESION_ADMIN = "CONCESION_ADMIN",
   CONCESION_VENDEDOR = "CONCESION_VENDEDOR",
+  CONCESION_VENDEDOR = "CONCESION_VENDEDOR", // Vendedor de concesión interna del club (asignación de puntos)
+}
+
+/** Roles internos del club autorizados para asignar puntos en tienda/concesión. */
+export const ROLES_ASIGNACION_PUNTOS: readonly RolUsuario[] = [
+  RolUsuario.ADMIN,
+  RolUsuario.EMPLEADO,
+  RolUsuario.CONCESION_VENDEDOR,
+];
+
+export function puedeAsignarPuntos(rol: RolUsuario | string | undefined): boolean {
+  return ROLES_ASIGNACION_PUNTOS.includes(rol as RolUsuario);
 }
 
 /**
