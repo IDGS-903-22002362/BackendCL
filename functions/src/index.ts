@@ -32,6 +32,7 @@ import { processPaymentEventTrigger } from "./services/payments/payment-event.tr
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
 import { syncLigaMxData } from "./liga-mx.cron";
+import { syncTrabajadorClubCortesias } from "./trabajador-club-cortesias.cron";
 import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
 import {
   cleanupRecommendationEvents,
@@ -98,6 +99,7 @@ export const userLevelSyncFunction = syncUserLevelOnPointsChange;
 export const loyaltyPointsExpirationJobFunction = loyaltyPointsExpirationJob;
 export const loyaltyRedemptionReleaseJobFunction = loyaltyRedemptionReleaseJob;
 export const syncLigaMxDataFunction = syncLigaMxData;
+export const syncTrabajadorClubCortesiasFunction = syncTrabajadorClubCortesias;
 export const recalculateRecommendationAggregatesFunction =
   recalculateRecommendationAggregates;
 export const cleanupRecommendationEventsFunction = cleanupRecommendationEvents;

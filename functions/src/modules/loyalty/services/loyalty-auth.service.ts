@@ -25,8 +25,17 @@ const ROLE_PERMISSIONS: Record<RolUsuario, LoyaltyPermission[]> = {
     LoyaltyPermission.TRANSACTIONS_READ_SELF,
     LoyaltyPermission.POINTS_EARN,
   ],
+  [RolUsuario.TRABAJADOR_CLUBLEON]: [
+    LoyaltyPermission.WALLET_READ_SELF,
+    LoyaltyPermission.TRANSACTIONS_READ_SELF,
+    LoyaltyPermission.POINTS_REDEEM,
+  ],
   [RolUsuario.ADMIN]: ALL_PERMISSIONS,
   [RolUsuario.SUPER_ADMIN]: ALL_PERMISSIONS,
+  // Roles del POS de concesiones: sin permisos de loyalty de tienda.
+  [RolUsuario.CONCESION_SUPERADMIN]: [],
+  [RolUsuario.CONCESION_ADMIN]: [],
+  [RolUsuario.CONCESION_VENDEDOR]: [],
 };
 
 export function mapRolToActorType(rol: RolUsuario): LoyaltyActorType {

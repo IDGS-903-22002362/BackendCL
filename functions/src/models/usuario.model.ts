@@ -15,6 +15,12 @@ export enum RolUsuario {
   EMPLEADO = "EMPLEADO", // Empleado con permisos de gestión
   CLIENTE = "CLIENTE", // Cliente regular del sistema
   EMPLEADO_CLUB = "EMPLEADO_CLUB", // Empleado con acceso limitado a funciones del club
+  /** Cliente promovido a trabajador del club (beneficios/cortesías). */
+  TRABAJADOR_CLUBLEON = "TRABAJADOR_CLUBLEON",
+  /** Roles del POS de concesiones (sin privilegios de tienda/admin Club León). */
+  CONCESION_SUPERADMIN = "CONCESION_SUPERADMIN",
+  CONCESION_ADMIN = "CONCESION_ADMIN",
+  CONCESION_VENDEDOR = "CONCESION_VENDEDOR",
 }
 
 /**
@@ -27,7 +33,11 @@ export interface UsuarioApp {
   provider: "google" | "apple" | "email";
   nombre: string; // Nombre completo del usuario
   email: string; // Correo electrónico
-  rol: RolUsuario; // Rol del usuario en el sistema (default: CLIENTE)
+  rol: RolUsuario; // Rol primario del usuario (default: CLIENTE)
+  /** Roles adicionales; si falta, tratar como [rol]. */
+  roles?: RolUsuario[];
+  trabajadorClubAgregadoAt?: Timestamp;
+  trabajadorClubAgregadoPor?: string;
   telefono?: string; // Teléfono de contacto (opcional)
   stripeCustomerId?: string; // Mapeo persistente con Stripe Customer
   puntosActuales: number; // Saldo actual de puntos
@@ -37,12 +47,38 @@ export interface UsuarioApp {
   edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
   genero: string // sexo de la persona.
   activo: boolean; // Si la cuenta está activa
+  /** true si el usuario fue creado/gestionado desde el POS de concesiones. */
+  from_concesion?: boolean;
+  /** Concesión asignada (solo usuarios CONCESION_*). */
+  concesionId?: string | null;
+  /** Sucursal asignada (vendedores de concesión). */
+  sucursalId?: string | null;
+  /** Caja default del vendedor dentro de su sucursal. */
+  cajaId?: string | null;
   solicitudEliminacion?: SolicitudEliminacion; // Información sobre solicitud de eliminación de cuenta
   historialPuntos?: HistorialPuntosUsuario;
   bonoBienvenidaOtorgadoAt?: Timestamp;
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
 }
+
+/** Cortesía por jornada de local (subcolección usuariosApp/{id}/cortesias). */
+export interface CortesiaTrabajadorClub {
+  torneo: string;
+  torneoPath: string;
+  partidoKey: string;
+  jornada: number;
+  fecha: string;
+  hora?: string | null;
+  equipoLocal: string;
+  equipoVisitante: string;
+  estadio?: string | null;
+  cortesiaCanjeada: boolean;
+  syncedAt?: Timestamp;
+  updatedAt?: Timestamp;
+  createdAt?: Timestamp;
+}
+
 export interface CrearUsuarioAppDTO {
   // Elimina este campo -->  uid: string;
   nombre: string;
@@ -136,6 +172,10 @@ export interface ActualizarUsuarioAppDTO {
   fechaNacimiento?: Date;
   nivel?: string;
   activo?: boolean;
+  from_concesion?: boolean;
+  concesionId?: string | null;
+  sucursalId?: string | null;
+  cajaId?: string | null;
 }
 
 /**

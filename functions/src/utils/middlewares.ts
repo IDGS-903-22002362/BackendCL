@@ -84,8 +84,22 @@ const ADMIN_ROLES = new Set<RolUsuario>([
   RolUsuario.EMPLEADO,
 ]);
 
+/** Roles del POS de concesiones: nunca tienen privilegios admin de tienda. */
+const CONCESION_ROLES = new Set<RolUsuario>([
+  RolUsuario.CONCESION_SUPERADMIN,
+  RolUsuario.CONCESION_ADMIN,
+  RolUsuario.CONCESION_VENDEDOR,
+]);
+
 export function isAdminRole(rol: RolUsuario | string | undefined): boolean {
+  if (!rol) return false;
+  // Defensa explícita: roles CONCESION_* no son admin de Club León.
+  if (CONCESION_ROLES.has(rol as RolUsuario)) return false;
   return ADMIN_ROLES.has(rol as RolUsuario);
+}
+
+export function isConcesionRole(rol: RolUsuario | string | undefined): boolean {
+  return CONCESION_ROLES.has(rol as RolUsuario);
 }
 
 export async function syncFirebaseAdminClaims(
@@ -93,7 +107,7 @@ export async function syncFirebaseAdminClaims(
   rol: RolUsuario,
 ): Promise<void> {
   await authAppOficial.setCustomUserClaims(uid, {
-    admin: ADMIN_ROLES.has(rol),
+    admin: isAdminRole(rol),
     rol,
   });
 }
