@@ -143,10 +143,15 @@ export const firebaseAuthMiddleware = async (
   }
 };
 
-const ADMIN_ROLES = new Set<RolUsuario>([
+const STAFF_ROLES = new Set<RolUsuario>([
   RolUsuario.SUPER_ADMIN,
   RolUsuario.ADMIN,
   RolUsuario.EMPLEADO,
+]);
+
+const FULL_ADMIN_ROLES = new Set<RolUsuario>([
+  RolUsuario.SUPER_ADMIN,
+  RolUsuario.ADMIN,
 ]);
 
 /** Roles del POS de concesiones: nunca tienen privilegios admin de tienda. */
@@ -156,11 +161,20 @@ const CONCESION_ROLES = new Set<RolUsuario>([
   RolUsuario.CONCESION_VENDEDOR,
 ]);
 
-export function isAdminRole(rol: RolUsuario | string | undefined): boolean {
+export function isStaffRole(rol: RolUsuario | string | undefined): boolean {
   if (!rol) return false;
-  // Defensa explícita: roles CONCESION_* no son admin de Club León.
   if (CONCESION_ROLES.has(rol as RolUsuario)) return false;
-  return ADMIN_ROLES.has(rol as RolUsuario);
+  return STAFF_ROLES.has(rol as RolUsuario);
+}
+
+export function isFullAdminRole(rol: RolUsuario | string | undefined): boolean {
+  if (!rol) return false;
+  if (CONCESION_ROLES.has(rol as RolUsuario)) return false;
+  return FULL_ADMIN_ROLES.has(rol as RolUsuario);
+}
+
+export function isAdminRole(rol: RolUsuario | string | undefined): boolean {
+  return isStaffRole(rol);
 }
 
 export function isConcesionRole(rol: RolUsuario | string | undefined): boolean {
@@ -426,9 +440,35 @@ export const optionalAuthMiddleware = (
 };
 
 /**
- * Middleware de autorización para administradores
- * Verifica que el usuario autenticado tenga rol ADMIN o EMPLEADO
- * (Debe usarse DESPUÉS de authMiddleware)
+ * Middleware de autorización para personal operativo (admin + empleado).
+ * Debe usarse DESPUÉS de authMiddleware.
+ */
+export const requireStaff = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: "No autenticado" });
+    return;
+  }
+
+  const userRole = req.user.rol as RolUsuario;
+
+  if (!isStaffRole(userRole)) {
+    res.status(403).json({
+      success: false,
+      message: "Acceso denegado. Se requieren permisos de personal autorizado.",
+    });
+    return;
+  }
+
+  next();
+};
+
+/**
+ * Middleware de autorización para administradores completos (ADMIN / SUPER_ADMIN).
+ * Debe usarse DESPUÉS de authMiddleware.
  */
 export const requireAdmin = async (
   req: Request,
@@ -442,7 +482,7 @@ export const requireAdmin = async (
 
   const userRole = req.user.rol as RolUsuario;
 
-  if (!isAdminRole(userRole)) {
+  if (!isFullAdminRole(userRole)) {
     res.status(403).json({
       success: false,
       message: "Acceso denegado. Se requieren permisos de administrador.",

@@ -3,9 +3,10 @@
  * Maneja toda la lógica de negocio relacionada con productos
  */
 
-import { firestoreApp } from "../config/app.firebase";
+import { authAppOficial, firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import pointsService from "./puntos.service";
+import { syncFirebaseAdminClaims } from "../utils/middlewares";
 import {
   CrearUsuarioAppDTO,
   RolUsuario,
@@ -30,6 +31,54 @@ const normalizeUserRoles = (
 
   return [RolUsuario.CLIENTE];
 };
+
+function toTimestampMs(value: unknown): number {
+  if (!value) return 0;
+  if (typeof value === "string" || value instanceof Date) {
+    const parsed = new Date(value).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === "object" && value !== null && "toDate" in value) {
+    const parsed = (value as { toDate: () => Date }).toDate().getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function dedupeUsuariosByUid(usuarios: UsuarioApp[]): UsuarioApp[] {
+  const byUid = new Map<string, UsuarioApp>();
+
+  for (const usuario of usuarios) {
+    const uid = usuario.uid?.trim();
+    if (!uid) continue;
+
+    const existing = byUid.get(uid);
+    if (!existing) {
+      byUid.set(uid, usuario);
+      continue;
+    }
+
+    const usuarioIsCanonical = usuario.id === uid;
+    const existingIsCanonical = existing.id === uid;
+    if (usuarioIsCanonical && !existingIsCanonical) {
+      byUid.set(uid, usuario);
+      continue;
+    }
+    if (!usuarioIsCanonical && existingIsCanonical) {
+      continue;
+    }
+
+    const usuarioUpdated = toTimestampMs(usuario.updatedAt ?? usuario.createdAt);
+    const existingUpdated = toTimestampMs(
+      existing.updatedAt ?? existing.createdAt,
+    );
+    if (usuarioUpdated >= existingUpdated) {
+      byUid.set(uid, usuario);
+    }
+  }
+
+  return Array.from(byUid.values());
+}
 
 /**
  * Clase UserAppService
@@ -79,11 +128,13 @@ export class UserAppService {
         } as UsuarioApp;
       });
 
-      // Ordenar alfabéticamente en memoria
-      usuarios.sort((a, b) => a.nombre.localeCompare(b.nombre));
+      const uniqueUsuarios = dedupeUsuariosByUid(usuarios);
 
-      console.log(`Se obtuvieron ${usuarios.length} usuarios activos`);
-      return usuarios;
+      // Ordenar alfabéticamente en memoria
+      uniqueUsuarios.sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+      console.log(`Se obtuvieron ${uniqueUsuarios.length} usuarios activos`);
+      return uniqueUsuarios;
     } catch (error) {
       console.error("Error al obtener usuarios:", error);
       throw new Error("Error al obtener usuarios de la base de datos");
@@ -214,53 +265,102 @@ export class UserAppService {
    * @returns Promise con el usuario creado incluyendo su ID
    */
   async createUser(usuarioData: CrearUsuarioAppDTO): Promise<UsuarioApp> {
+    const normalizedEmail = usuarioData.email.toLowerCase().trim();
+    const rol = usuarioData.rol ?? RolUsuario.CLIENTE;
+
+    const emailExists = await this.existsByEmail(normalizedEmail);
+    if (emailExists) {
+      throw new Error("El correo electrónico ya está registrado");
+    }
+
     try {
-      // 1 CREAR EN FIREBASE AUTH primero
-      const authUser = await admin.auth().createUser({
-        email: usuarioData.email.toLowerCase(),
-        password: usuarioData.password,
-        displayName: usuarioData.nombre,
-      });
+      await authAppOficial.getUserByEmail(normalizedEmail);
+      throw new Error("El correo electrónico ya está registrado");
+    } catch (error: unknown) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: string }).code || "")
+          : "";
 
-      // 2 USAR el uid generado por Firebase (no uno random)
-      const now = admin.firestore.Timestamp.now();
+      if (code !== "auth/user-not-found") {
+        if (code === "auth/email-already-exists") {
+          throw new Error("El correo electrónico ya está registrado");
+        }
 
-      const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
-        uid: authUser.uid,  // ← UID auténtico de Firebase
-        provider: "email",
-        nombre: usuarioData.nombre,
-        email: usuarioData.email.toLowerCase(),
-        rol: usuarioData.rol ?? RolUsuario.CLIENTE,
-        telefono: usuarioData.telefono,
-        fechaNacimiento: usuarioData.fechaNacimiento,
-        puntosActuales: 0,
-        nivel: "Bronce",
-        perfilCompleto: true,
-        edad: usuarioData.edad,
-        genero: usuarioData.genero,
-        activo: true,
-        createdAt: now,
-        updatedAt: now,
-      };
+        if (code) {
+          console.warn("auth_email_lookup_failed", {
+            code,
+            email: normalizedEmail,
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
 
-      const emailExists = await this.existsByEmail(usuarioData.email);
-      if (emailExists) {
-        throw new Error("El correo electrónico ya está registrado");
+    const authUser = await authAppOficial.createUser({
+      email: normalizedEmail,
+      password: usuarioData.password,
+      displayName: usuarioData.nombre,
+    });
+
+    const now = admin.firestore.Timestamp.now();
+    const nuevoUsuarioData: Omit<UsuarioApp, "id"> = {
+      uid: authUser.uid,
+      provider: "email",
+      nombre: usuarioData.nombre,
+      email: normalizedEmail,
+      rol,
+      telefono: usuarioData.telefono,
+      fechaNacimiento: usuarioData.fechaNacimiento,
+      puntosActuales: 0,
+      nivel: "Bronce",
+      perfilCompleto: true,
+      edad: usuarioData.edad,
+      genero: usuarioData.genero,
+      activo: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const docRef = firestoreApp
+      .collection(USUARIOSAPP_COLLECTION)
+      .doc(authUser.uid);
+
+    try {
+      await docRef.create(nuevoUsuarioData);
+      const usuario = await pointsService.otorgarBonoBienvenida(authUser.uid);
+
+      try {
+        await syncFirebaseAdminClaims(authUser.uid, rol);
+      } catch (claimsError) {
+        console.error("admin_claims_sync_error", {
+          uid: authUser.uid,
+          rol,
+          reason:
+            claimsError instanceof Error ? claimsError.message : "unknown",
+        });
       }
 
-      // 3 CREAR EN FIRESTORE con el uid auténtico
-      const docRef = firestoreApp
-        .collection(USUARIOSAPP_COLLECTION)
-        .doc(authUser.uid);
+      return usuario;
+    } catch (createError) {
+      try {
+        await authAppOficial.deleteUser(authUser.uid);
+      } catch (rollbackError) {
+        console.error("rollback_auth_user_failed", {
+          uid: authUser.uid,
+          reason:
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : "unknown",
+        });
+      }
 
-      await docRef.create(nuevoUsuarioData);
-
-      return pointsService.otorgarBonoBienvenida(authUser.uid);
-
-    } catch (error) {
-      console.error("Error al crear usuario:", error);
+      console.error("Error al crear usuario:", createError);
       throw new Error(
-        error instanceof Error ? error.message : "Error al crear el usuario",
+        createError instanceof Error
+          ? createError.message
+          : "Error al crear el usuario",
       );
     }
   }

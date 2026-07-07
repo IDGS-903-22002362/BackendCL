@@ -42,7 +42,6 @@ const ROLE_PERMISSIONS: Record<RolUsuario, LoyaltyPermission[]> = {
   // Roles del POS de concesiones: sin permisos de loyalty de tienda.
   [RolUsuario.CONCESION_SUPERADMIN]: [],
   [RolUsuario.CONCESION_ADMIN]: [],
-  [RolUsuario.CONCESION_VENDEDOR]: [],
 };
 
 export function mapRolToActorType(rol: RolUsuario): LoyaltyActorType {

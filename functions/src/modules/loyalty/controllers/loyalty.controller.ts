@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { RolUsuario } from "../../../models/usuario.model";
 import LoyaltyProblemError from "../errors/loyalty-problem.error";
 import { LoyaltyAdjustmentReason, LoyaltyPermission } from "../models/loyalty.enums";
 import ledgerRepository from "../repositories/ledger.repository";
@@ -204,12 +205,21 @@ export async function reverseTransaction(req: Request, res: Response, next: Next
 
 export async function getAdminTransactions(req: Request, res: Response, next: NextFunction) {
   try {
+    const actor = requireActor(req);
     const limit = Number(req.query.limit ?? 50);
+
+    let actorId = req.query.actorId as string | undefined;
+    if (req.user?.rol === RolUsuario.EMPLEADO) {
+      actorId = actor.actorId;
+    } else if (req.user?.rol === RolUsuario.ADMIN && req.query.actorId) {
+      actorId = String(req.query.actorId);
+    }
+
     const result = await ledgerRepository.listAdmin({
       limit,
       cursor: req.query.cursor as string | undefined,
       memberId: req.query.memberId as string | undefined,
-      actorId: req.query.actorId as string | undefined,
+      actorId,
       channel: req.query.channel as never,
     });
     res.status(200).json({

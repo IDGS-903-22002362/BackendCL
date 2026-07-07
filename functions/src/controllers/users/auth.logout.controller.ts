@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { admin } from "../../config/firebase.admin";
+import { authAppOficial } from "../../config/app.firebase";
 
 export const logout = async (req: Request, res: Response) => {
     try {
@@ -17,7 +17,7 @@ export const logout = async (req: Request, res: Response) => {
          * Revoca TODOS los refresh tokens del usuario.
          * Esto invalida sesiones activas en Firebase.
          */
-        await admin.auth().revokeRefreshTokens(uid);
+        await authAppOficial.revokeRefreshTokens(uid);
 
         return res.status(200).json({
             success: true,

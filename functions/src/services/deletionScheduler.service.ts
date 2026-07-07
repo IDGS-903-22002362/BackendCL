@@ -1,5 +1,5 @@
 import { admin } from "../config/firebase.admin";
-import { firestoreApp } from "../config/app.firebase";
+import { authAppOficial, firestoreApp } from "../config/app.firebase";
 
 export class DeletionSchedulerService {
     /**
@@ -29,7 +29,7 @@ export class DeletionSchedulerService {
 
             try {
                 // 1. Eliminar usuario de Firebase Authentication
-                await admin.auth().deleteUser(uid);
+                await authAppOficial.deleteUser(uid);
                 console.log(`Usuario ${uid} eliminado de Firebase Auth`);
 
                 // 3. Eliminar documento de Firestore

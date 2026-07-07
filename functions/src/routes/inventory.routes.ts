@@ -14,7 +14,7 @@ import {
   updateRecepcionLineasSchema,
   confirmRecepcionSchema,
 } from "../middleware/validators/inventory.validator";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { authMiddleware, requireStaff } from "../utils/middlewares";
 import * as commandController from "../controllers/inventory/inventory.command.controller";
 import * as queryController from "../controllers/inventory/inventory.query.controller";
 import * as receptionCommandController from "../controllers/inventory/inventory-reception.command.controller";
@@ -85,7 +85,7 @@ const router = Router();
 router.post(
   "/movimientos",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateBody(registerInventoryMovementSchema),
   commandController.registerMovement,
 );
@@ -183,7 +183,7 @@ router.post(
 router.post(
   "/ajustes",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateBody(registerInventoryAdjustmentSchema),
   commandController.registerAdjustment,
 );
@@ -282,7 +282,7 @@ router.post(
 router.get(
   "/movimientos",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateQuery(listInventoryMovementsQuerySchema),
   queryController.getMovements,
 );
@@ -356,7 +356,7 @@ router.get(
 router.get(
   "/alertas-stock",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateQuery(listLowStockAlertsQuerySchema),
   queryController.getLowStockAlerts,
 );
@@ -364,7 +364,7 @@ router.get(
 router.get(
   "/dashboard",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateQuery(listInventoryDashboardQuerySchema),
   queryController.getDashboard,
 );
@@ -372,42 +372,42 @@ router.get(
 router.get(
   "/resumen-operativo",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   queryController.getOperationalSummary,
 );
 
 router.get(
   "/notificaciones-admin",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   queryController.listAdminNotifications,
 );
 
 router.post(
   "/notificaciones-admin/read",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   queryController.markAdminNotificationsRead,
 );
 
 router.post(
   "/notificaciones-admin/read-all",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   queryController.markAllAdminNotificationsRead,
 );
 
 router.get(
   "/diagnostico/:productoId",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   queryController.getDiagnostic,
 );
 
 router.post(
   "/recepciones",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateBody(createRecepcionSchema),
   receptionCommandController.createRecepcion,
 );
@@ -415,7 +415,7 @@ router.post(
 router.get(
   "/recepciones",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateQuery(listRecepcionesQuerySchema),
   receptionQueryController.listRecepciones,
 );
@@ -423,14 +423,14 @@ router.get(
 router.get(
   "/recepciones/:recepcionId",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   receptionQueryController.getRecepcion,
 );
 
 router.put(
   "/recepciones/:recepcionId/lineas",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateBody(updateRecepcionLineasSchema),
   receptionCommandController.updateRecepcionLineas,
 );
@@ -438,7 +438,7 @@ router.put(
 router.post(
   "/recepciones/:recepcionId/confirmar",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateBody(confirmRecepcionSchema),
   receptionCommandController.confirmRecepcion,
 );
@@ -446,7 +446,7 @@ router.post(
 router.post(
   "/recepciones/:recepcionId/cerrar",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   receptionCommandController.closeRecepcion,
 );
 

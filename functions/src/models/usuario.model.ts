@@ -20,8 +20,8 @@ export enum RolUsuario {
   /** Roles del POS de concesiones (sin privilegios de tienda/admin Club León). */
   CONCESION_SUPERADMIN = "CONCESION_SUPERADMIN",
   CONCESION_ADMIN = "CONCESION_ADMIN",
+  /** Vendedor de concesión interna del club (asignación de puntos). */
   CONCESION_VENDEDOR = "CONCESION_VENDEDOR",
-  CONCESION_VENDEDOR = "CONCESION_VENDEDOR", // Vendedor de concesión interna del club (asignación de puntos)
 }
 
 /** Roles internos del club autorizados para asignar puntos en tienda/concesión. */

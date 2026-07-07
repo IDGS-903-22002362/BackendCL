@@ -18,7 +18,7 @@ import {
   listOrdenesQuerySchema,
 } from "../middleware/validators/orden.validator";
 import { idParamSchema } from "../middleware/validators/common.validator";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { authMiddleware, requireStaff } from "../utils/middlewares";
 
 const router = Router();
 
@@ -366,7 +366,7 @@ router.post(
 router.put(
   "/:id/estado",
   authMiddleware,
-  requireAdmin,
+  requireStaff,
   validateParams(idParamSchema),
   validateBody(updateEstadoOrdenSchema),
   commandController.updateEstado,
