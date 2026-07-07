@@ -1,4 +1,6 @@
-import { Router } from "express";
+import { createHash } from "crypto";
+import { Router, Request } from "express";
+import jwt from "jsonwebtoken";
 import { registerOrLogin } from "../controllers/users/auth.social.controller";
 import { logout } from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
@@ -8,14 +10,47 @@ import {
   requestRegistrationCode,
   verifyRegistration,
 } from "../controllers/users/auth.registration.controller";
-import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
+import {
+  createSimpleRateLimiter,
+  resolveClientIp,
+} from "../middleware/rate-limit.middleware";
 
 const router = Router();
+
+function resolveRegisterOrLoginRateLimitKey(req: Request): string {
+  const authHeader = req.header("Authorization") ?? "";
+  const bearerToken = authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : "";
+
+  if (bearerToken) {
+    try {
+      const decoded = jwt.decode(bearerToken) as
+        | { sub?: string; user_id?: string }
+        | null;
+      const uid = decoded?.sub ?? decoded?.user_id;
+      if (uid) {
+        return `uid:${uid}`;
+      }
+
+      const tokenFingerprint = createHash("sha256")
+        .update(bearerToken)
+        .digest("hex")
+        .slice(0, 16);
+      return `token:${tokenFingerprint}`;
+    } catch {
+      // Fall back to IP below.
+    }
+  }
+
+  return `ip:${resolveClientIp(req)}`;
+}
 
 const authRateLimit = createSimpleRateLimiter({
   keyPrefix: "auth",
   windowMs: 60_000,
   maxRequests: 20,
+  resolveKey: resolveRegisterOrLoginRateLimitKey,
 });
 
 const otpRateLimit = createSimpleRateLimiter({

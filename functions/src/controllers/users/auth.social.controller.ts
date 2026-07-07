@@ -101,6 +101,9 @@ const buildUsuarioFromDoc = (
     edad: data.edad ?? 0,
     genero: data.genero ?? "",
     rol: data.rol ?? RolUsuario.CLIENTE,
+    roles: Array.isArray(data.roles)
+      ? data.roles.filter((role): role is string => typeof role === "string")
+      : [data.rol ?? RolUsuario.CLIENTE],
     activo: data.activo ?? true,
     historialPuntos: data.historialPuntos,
     bonoBienvenidaOtorgadoAt: data.bonoBienvenidaOtorgadoAt,

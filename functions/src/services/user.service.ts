@@ -17,6 +17,20 @@ import {
  */
 const USUARIOSAPP_COLLECTION = "usuariosApp";
 
+const normalizeUserRoles = (
+  data: FirebaseFirestore.DocumentData,
+): string[] => {
+  if (Array.isArray(data.roles)) {
+    return data.roles.filter((role): role is string => typeof role === "string");
+  }
+
+  if (typeof data.rol === "string" && data.rol.trim().length > 0) {
+    return [data.rol];
+  }
+
+  return [RolUsuario.CLIENTE];
+};
+
 /**
  * Clase UserAppService
  * Encapsula las operaciones CRUD y consultas de productos
@@ -50,6 +64,7 @@ export class UserAppService {
           nombre: data.nombre,
           email: data.email,
           rol: data.rol,
+          roles: normalizeUserRoles(data),
           telefono: data.telefono,
           puntosActuales: data.puntosActuales,
           nivel: data.nivel,
@@ -125,6 +140,7 @@ export class UserAppService {
         nombre: data.nombre,
         email: data.email,
         rol: data.rol,
+        roles: normalizeUserRoles(data),
         telefono: data.telefono,
         puntosActuales: data.puntosActuales,
         nivel: data.nivel,

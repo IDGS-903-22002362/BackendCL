@@ -40,6 +40,7 @@ export interface UsuarioApp {
   nombre: string; // Nombre completo del usuario
   email: string; // Correo electrónico
   rol: RolUsuario; // Rol del usuario en el sistema (default: CLIENTE)
+  roles?: string[]; // Roles acumulados (ej. CLIENTE + TRABAJADOR_CLUBLEON)
   telefono?: string; // Teléfono de contacto (opcional)
   stripeCustomerId?: string; // Mapeo persistente con Stripe Customer
   puntosActuales: number; // Saldo actual de puntos
