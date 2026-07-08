@@ -2,7 +2,10 @@ import { createHash } from "crypto";
 import { Router, Request } from "express";
 import jwt from "jsonwebtoken";
 import { registerOrLogin } from "../controllers/users/auth.social.controller";
-import { logout } from "../controllers/users/auth.logout.controller";
+import {
+  logout,
+  logoutAllSessions,
+} from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
 import { refreshToken } from "../controllers/users/auth.refresh.controller";
 import { requestVerificationCode, verifyAndLogin } from "../controllers/users/auth.otp.controller";
@@ -142,6 +145,7 @@ const otpRateLimit = createSimpleRateLimiter({
 router.post("/register-or-login", authRateLimit, registerOrLogin);
 
 router.post("/logout", authMiddleware, logout);
+router.post("/logout-all", authMiddleware, logoutAllSessions);
 
 router.post("/refresh", authMiddleware, refreshToken);
 
