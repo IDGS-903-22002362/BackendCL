@@ -9,6 +9,7 @@ import {
   CheckoutShippingSnapshot,
 } from "./checkout-pricing.model";
 import type { ItemPersonalizacion } from "../utils/product-personalization.util";
+import type { ClientOrigin } from "../types/client-origin";
 
 export enum EstadoOrden {
   PENDIENTE = "PENDIENTE",
@@ -204,6 +205,8 @@ export interface Orden {
   descuentoCodigoPromocion?: number;
   notas?: string;
   deliveredAt?: Timestamp;
+  clientOrigin?: ClientOrigin;
+  advertisingTrackingAllowed?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -235,6 +238,8 @@ export interface CrearOrdenDTO {
   selectedServiceType?: string;
   shippingMethod?: string;
   notas?: string;
+  clientOrigin?: ClientOrigin;
+  advertisingTrackingAllowed?: boolean;
 }
 
 export interface ActualizarOrdenDTO {

@@ -733,6 +733,12 @@ console.log(
 subtotalFinal: subtotalCalculado,
         shippingTotal: costoEnvioCalculado,
         ...(data.currency ? { currency: data.currency } : {}),
+        ...(data.clientOrigin ? { clientOrigin: data.clientOrigin } : {}),
+        ...(typeof data.advertisingTrackingAllowed === "boolean"
+          ? {
+              advertisingTrackingAllowed: data.advertisingTrackingAllowed,
+            }
+          : {}),
         notas: data.notas,
         createdAt: now,
         updatedAt: now,

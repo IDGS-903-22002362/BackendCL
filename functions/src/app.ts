@@ -9,6 +9,7 @@ import publicPaymentsRoutes from "./routes/payments-public.routes";
 import { errorHandler, notFoundHandler } from "./utils/error-handler";
 import { getSwaggerSpec } from "./config/swagger.config";
 import { requestContextMiddleware } from "./middleware/request-context.middleware";
+import { clientOriginMiddleware } from "./middlewares/client-origin.middleware";
 import {
   blockDebugInProduction,
   optionalAppCheckMiddleware,
@@ -66,6 +67,7 @@ app.use(
 );
 app.use((req, res, next) => cors(getCorsOptions())(req, res, next));
 app.use(requestContextMiddleware);
+app.use(clientOriginMiddleware);
 app.use(blockDebugInProduction);
 
 /** Cloud Functions v2 named `api` strips the function segment; restore Express `/api` prefix. */

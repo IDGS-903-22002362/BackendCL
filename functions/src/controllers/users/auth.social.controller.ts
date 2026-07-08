@@ -297,7 +297,7 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       const edad = calcularEdad(fechaNacimiento);
       const perfilCompleto =
         provider === "email"
-          ? !!(nombre && telefono && fechaNacimiento)
+          ? !!(nombre && telefono)
           : false;
 
       const nuevoUsuario: Omit<UsuarioApp, "id"> = {

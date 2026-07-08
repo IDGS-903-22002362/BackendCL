@@ -14,6 +14,7 @@ import {
   fedexShipService,
   FedexShipError,
 } from "../modules/shipping/fedex/fedex-ship.service";
+import { canSendAdvertisingConversionForOrder } from "../lib/privacy/advertising-tracking-policy";
 
 const ORDENES_COLLECTION = "ordenes";
 const SHIPPING_EVENTS_COLLECTION = "shipping_events";
@@ -246,6 +247,18 @@ class PaidOrderFinalizerService {
     }
 
     const order = { id: orderDoc.id, ...(orderDoc.data() as Orden) };
+
+    /**
+     * App Store privacy requirement:
+     * Advertising and cross-site tracking must remain disabled when the
+     * storefront is embedded in the iOS or Android application.
+     */
+    if (!canSendAdvertisingConversionForOrder(order)) {
+      paidOrderFinalizerLogger.info("advertising_conversion_skipped_embedded_app", {
+        orderId: input.orderId,
+        clientOrigin: order.clientOrigin ?? "unknown",
+      });
+    }
 
     if (!input.paymentConfirmed) {
       await this.assertPaymentConfirmed(input);

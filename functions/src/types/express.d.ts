@@ -1,4 +1,5 @@
 import { RolUsuario } from "../models/usuario.model";
+import type { ClientOrigin } from "./client-origin";
 
 declare global {
   namespace Express {
@@ -20,6 +21,8 @@ declare global {
       };
       rawBody?: Buffer;
       requestId?: string;
+      clientOrigin?: ClientOrigin;
+      advertisingTrackingAllowed?: boolean;
     }
   }
 }

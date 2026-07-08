@@ -33,6 +33,7 @@
 
 import { Timestamp } from "firebase-admin/firestore";
 import type { ItemPersonalizacion } from "../utils/product-personalization.util";
+import type { ClientOrigin } from "../types/client-origin";
 
 /**
  * Cantidad máxima permitida por item en el carrito
@@ -68,6 +69,9 @@ export interface Carrito {
   items: ItemCarrito[]; // Array de productos en el carrito
   subtotal: number; // Suma de (precioUnitario * cantidad) de cada item
   total: number; // Igual al subtotal (impuestos se aplican en checkout)
+
+  clientOrigin?: ClientOrigin;
+  advertisingTrackingAllowed?: boolean;
 
   // Campos de auditoría
   createdAt: Timestamp; // Fecha de creación del carrito

@@ -34,6 +34,10 @@ export const startCheckout = async (req: Request, res: Response) => {
       userId,
       req.body,
       idempotencyKey,
+      {
+        clientOrigin: req.clientOrigin,
+        advertisingTrackingAllowed: req.advertisingTrackingAllowed,
+      },
     );
 
     return res.status(result.created ? 201 : 200).json({

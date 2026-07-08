@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { firestoreApp } from "../../config/app.firebase";
 import { sendVerificationEmail } from "../../lib/brevo/client";
+import { isAppleReviewTestEmail } from "../../lib/auth/apple-review-credentials";
 import otpService from "../../lib/firebase/otp-service";
 import jwt from "jsonwebtoken";
 import { RolUsuario } from "../../models/usuario.model";
@@ -19,6 +20,13 @@ export async function requestVerificationCode(req: Request, res: Response) {
 
         // Normalizar email
         const normalizedEmail = email.toLowerCase().trim();
+
+        if (isAppleReviewTestEmail(normalizedEmail)) {
+            return res.status(400).json({
+                success: false,
+                message: "Esta cuenta debe iniciar sesión con correo y contraseña",
+            });
+        }
 
         // Verificar si el usuario existe en Firestore
         const snapshot = await firestoreApp

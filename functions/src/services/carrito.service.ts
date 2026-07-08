@@ -1014,6 +1014,8 @@ export class CarritoService {
       selectedServiceType?: string;
       shippingSelection?: Partial<CheckoutShippingSelection>;
       notas?: string;
+      clientOrigin?: import("../types/client-origin").ClientOrigin;
+      advertisingTrackingAllowed?: boolean;
     },
   ): Promise<{
     cartId: string;
@@ -1023,6 +1025,21 @@ export class CarritoService {
     >;
   }> {
     const carrito = await this.getOrCreateCart(usuarioId);
+
+    if (
+      checkoutData.clientOrigin &&
+      (carrito.clientOrigin !== checkoutData.clientOrigin ||
+        carrito.advertisingTrackingAllowed !==
+          checkoutData.advertisingTrackingAllowed)
+    ) {
+      await this.updateCartPrivacyContext(carrito.id!, {
+        clientOrigin: checkoutData.clientOrigin,
+        advertisingTrackingAllowed: checkoutData.advertisingTrackingAllowed,
+      });
+      carrito.clientOrigin = checkoutData.clientOrigin;
+      carrito.advertisingTrackingAllowed =
+        checkoutData.advertisingTrackingAllowed;
+    }
 
     if (!carrito.items || carrito.items.length === 0) {
       throw new Error(
@@ -1104,9 +1121,34 @@ export class CarritoService {
       selectedShippingOptionId: checkoutData.selectedShippingOptionId,
       selectedServiceType: checkoutData.selectedServiceType,
       notas: checkoutData.notas,
+      ...(checkoutData.clientOrigin
+        ? { clientOrigin: checkoutData.clientOrigin }
+        : {}),
+      ...(typeof checkoutData.advertisingTrackingAllowed === "boolean"
+        ? {
+            advertisingTrackingAllowed:
+              checkoutData.advertisingTrackingAllowed,
+          }
+        : {}),
     };
 
     return { cartId: carrito.id!, orderDraft, pricing };
+  }
+
+  private async updateCartPrivacyContext(
+    cartId: string,
+    context: {
+      clientOrigin: import("../types/client-origin").ClientOrigin;
+      advertisingTrackingAllowed?: boolean;
+    },
+  ): Promise<void> {
+    await firestoreTienda.collection(CARRITOS_COLLECTION).doc(cartId).update({
+      clientOrigin: context.clientOrigin,
+      advertisingTrackingAllowed:
+        context.advertisingTrackingAllowed ??
+        context.clientOrigin === "web",
+      updatedAt: Timestamp.now(),
+    });
   }
 
   /**

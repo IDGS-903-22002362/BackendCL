@@ -21,6 +21,7 @@ import ordenService from "../orden.service";
 import pagoService from "../pago.service";
 import paidOrderFinalizerService from "../paid-order-finalizer.service";
 import pickupOrderService from "../pickup-order.service";
+import type { ClientPrivacyMetadata } from "../../types/client-origin";
 
 const checkoutLogger = logger.child({ component: "checkout-attempt-service" });
 
@@ -109,6 +110,7 @@ export class CheckoutAttemptService {
     userId: string,
     body: CheckoutBody,
     idempotencyKey: string,
+    clientContext?: ClientPrivacyMetadata,
   ): Promise<StartCheckoutAttemptResult> {
     if (!idempotencyKey || idempotencyKey.length < 8) {
       throw new ApiError(
@@ -136,6 +138,15 @@ export class CheckoutAttemptService {
       await carritoService.buildCheckoutOrderDraft(userId, {
         ...body,
         metodoPago,
+        ...(clientContext?.clientOrigin
+          ? { clientOrigin: clientContext.clientOrigin }
+          : {}),
+        ...(typeof clientContext?.advertisingTrackingAllowed === "boolean"
+          ? {
+              advertisingTrackingAllowed:
+                clientContext.advertisingTrackingAllowed,
+            }
+          : {}),
       } as Parameters<typeof carritoService.buildCheckoutOrderDraft>[1]);
 
     const currentSignature = computeCartSignature(orderDraft, pricing);
