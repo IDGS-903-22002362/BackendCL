@@ -279,52 +279,14 @@ export class PickupOrderService {
     return updated;
   }
 
-  async expirePickup(orderId: string, actor: Actor): Promise<Orden> {
-    const order = await this.getPickupOrder(orderId);
-    if (
-      order.fulfillmentStatus === FulfillmentStatus.PICKED_UP ||
-      order.fulfillmentStatus === FulfillmentStatus.CANCELED ||
-      order.fulfillmentStatus === FulfillmentStatus.EXPIRED
-    ) {
-      throw new Error("No se puede expirar un pedido pickup ya cerrado");
-    }
-    const updated = await this.updatePickupState(order, FulfillmentStatus.EXPIRED, actor, {
-      estado: EstadoOrden.CANCELADA,
-      eventType: "PICKUP_EXPIRED",
-    });
-    await this.enqueuePickupNotification(updated, "pickup_expired", {
-      pickupExpiresAt: updated.pickupExpiresAt,
-    });
-    return updated;
+  async expirePickup(_orderId: string, _actor: Actor): Promise<Orden> {
+    // Caducidad de pickup deshabilitada: los pedidos no vencen ni se cancelan solos.
+    throw new Error("La caducidad automática de pickup está deshabilitada");
   }
 
   async expireOverduePickups(): Promise<{ expired: number }> {
-    const now = Timestamp.now();
-    const snapshot = await firestoreTienda
-      .collection(ORDENES_COLLECTION)
-      .where("fulfillmentMethod", "==", FulfillmentMethod.PICKUP)
-      .where("fulfillmentStatus", "in", [
-        FulfillmentStatus.PAID,
-        FulfillmentStatus.PREPARING,
-        FulfillmentStatus.READY_FOR_PICKUP,
-      ])
-      .where("pickupExpiresAt", "<=", now)
-      .limit(100)
-      .get();
-
-    let expired = 0;
-    for (const doc of snapshot.docs) {
-      try {
-        await this.expirePickup(doc.id, { actorType: "system", uid: "pickup-cron" });
-        expired += 1;
-      } catch (error) {
-        console.warn("pickup_expiration_failed", {
-          orderId: doc.id,
-          message: error instanceof Error ? error.message : error,
-        });
-      }
-    }
-    return { expired };
+    // No-op intencional: el scheduler puede seguir vivo en GCP, pero no cancela pedidos.
+    return { expired: 0 };
   }
 
   private assertReadyForCodeValidation(order: Orden, pickupLocationId?: string): void {

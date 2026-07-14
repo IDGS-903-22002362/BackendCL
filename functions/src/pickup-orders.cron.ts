@@ -12,6 +12,8 @@ export const expirePickupOrders = onSchedule(
     secrets: [...AUTH_SECRETS],
   },
   async () => {
-    await pickupOrderService.expireOverduePickups();
+    // Caducidad deshabilitada: expireOverduePickups es no-op.
+    const result = await pickupOrderService.expireOverduePickups();
+    console.info("pickup_expiration_skipped", result);
   },
 );
