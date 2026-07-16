@@ -28,6 +28,11 @@ Excepcion:
 - `POST /api/ai/public/chat/messages`
 
 Esos endpoints son para modo guest y no requieren JWT; usan `publicAccessToken` por sesion.
+Solo existen cuando `AI_PUBLIC_CHAT_ENABLED=true`; el valor por defecto es `false`.
+
+> Seguimiento operativo de seguridad: cualquier credencial que haya estado en
+> archivos locales versionados debe rotarse y eliminarse del historial Git.
+> Quitar el archivo del tracking no revoca una credencial ya expuesta.
 
 Importante:
 

@@ -3,6 +3,13 @@ import { RuntimeAiToolDefinition } from "../tools/types";
 import aiToolDefinitions from "../tools/definitions";
 import roleToolMapperService from "./role-tool-mapper.service";
 
+const MODEL_DENIED_TOOL_NAMES = new Set([
+  "admin_update_stock",
+  "admin_update_price",
+  "admin_publish_product",
+  "admin_hide_product",
+]);
+
 class ToolRegistryService {
   getAllowedTools(
     role: RolUsuario,
@@ -12,6 +19,10 @@ class ToolRegistryService {
     const capabilities = roleToolMapperService.getCapabilities(role, scopes);
 
     return aiToolDefinitions.filter((tool) => {
+      if (MODEL_DENIED_TOOL_NAMES.has(tool.name)) {
+        return false;
+      }
+
       if (!tool.roles.includes(role)) {
         return false;
       }
@@ -29,6 +40,10 @@ class ToolRegistryService {
   }
 
   getToolByName(name: string): RuntimeAiToolDefinition | undefined {
+    if (MODEL_DENIED_TOOL_NAMES.has(name)) {
+      return undefined;
+    }
+
     return aiToolDefinitions.find((tool) => tool.name === name);
   }
 }

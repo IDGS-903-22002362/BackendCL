@@ -19,6 +19,17 @@ describe("ai.config", () => {
     expect(aiConfig.gemini.primaryModel).toBe("gemini-2.5-pro");
   });
 
+  it("deshabilita chat guest por defecto y permite opt-in explicito", () => {
+    delete process.env.AI_PUBLIC_CHAT_ENABLED;
+    let config = require("../src/config/ai.config").aiConfig;
+    expect(config.api.publicChatEnabled).toBe(false);
+
+    jest.resetModules();
+    process.env.AI_PUBLIC_CHAT_ENABLED = "true";
+    config = require("../src/config/ai.config").aiConfig;
+    expect(config.api.publicChatEnabled).toBe(true);
+  });
+
   it("rechaza modelos preview/versionados en modo vertexai", () => {
     process.env.AI_GEMINI_MODE = "vertexai";
     process.env.GCP_PROJECT_ID = "e-comerce-leon";

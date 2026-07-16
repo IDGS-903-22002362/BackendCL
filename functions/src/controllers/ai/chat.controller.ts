@@ -111,24 +111,15 @@ export const listSessions = async (req: Request, res: Response) => {
 };
 
 export const getSessionDetail = async (req: Request, res: Response) => {
-  const detail = await aiChatService.getSessionDetail(req.params.id);
+  const detail = await aiChatService.getSessionDetail(
+    req.params.id,
+    req.user!.uid,
+  );
   if (!detail.session) {
+    // Deliberately conceal whether a guest or foreign session exists.
     return res
       .status(404)
       .json({ success: false, message: "Sesion AI no encontrada" });
-  }
-
-  if (
-    detail.session.mode !== "guest" &&
-    detail.session.userId !== req.user!.uid &&
-    req.user!.rol !== RolUsuario.ADMIN
-  ) {
-    return res
-      .status(403)
-      .json({
-        success: false,
-        message: "No tienes permisos para esta sesion AI",
-      });
   }
 
   return res.status(200).json({

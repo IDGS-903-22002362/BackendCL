@@ -111,7 +111,7 @@ class AiChatService {
       );
     }
 
-    if (session.userId !== input.userId && input.role !== RolUsuario.ADMIN) {
+    if (session.userId !== input.userId) {
       throw new AiRuntimeError(
         "AI_FORBIDDEN",
         "No tienes permisos para usar esta sesion AI",
@@ -186,9 +186,17 @@ class AiChatService {
     return aiSessionService.listSessionsByUser(userId);
   }
 
-  async getSessionDetail(sessionId: string) {
+  async getSessionDetail(sessionId: string, userId: string) {
     const session = await aiSessionService.getSessionById(sessionId);
     if (!session) {
+      return {
+        session: null,
+        messages: [],
+        toolCalls: [],
+      };
+    }
+
+    if (session.mode === AiSessionMode.GUEST || session.userId !== userId) {
       return {
         session: null,
         messages: [],

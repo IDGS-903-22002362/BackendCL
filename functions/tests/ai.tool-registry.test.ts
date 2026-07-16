@@ -25,18 +25,26 @@ describe("AI tool registry", () => {
     const tools = toolRegistryService.getAllowedTools(RolUsuario.EMPLEADO, ["inventory"]);
     const names = tools.map((tool) => tool.name);
 
-    expect(names).toContain("admin_update_stock");
+    expect(names).not.toContain("admin_update_stock");
     expect(names).toContain("admin_view_private_inventory");
     expect(names).not.toContain("admin_update_price");
   });
 
-  it("expone todas las tools administrativas al admin", () => {
+  it("nunca expone mutaciones administrativas al modelo", () => {
     const tools = toolRegistryService.getAllowedTools(RolUsuario.ADMIN);
     const names = tools.map((tool) => tool.name);
 
-    expect(names).toContain("admin_update_stock");
-    expect(names).toContain("admin_update_price");
-    expect(names).toContain("admin_publish_product");
-    expect(names).toContain("admin_hide_product");
+    const deniedNames = [
+      "admin_update_stock",
+      "admin_update_price",
+      "admin_publish_product",
+      "admin_hide_product",
+    ];
+
+    expect(names).toContain("admin_view_private_inventory");
+    for (const deniedName of deniedNames) {
+      expect(names).not.toContain(deniedName);
+      expect(toolRegistryService.getToolByName(deniedName)).toBeUndefined();
+    }
   });
 });
