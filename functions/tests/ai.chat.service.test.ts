@@ -2,6 +2,8 @@ jest.mock("../src/services/ai/memory/session.service", () => ({
   __esModule: true,
   default: {
     getSessionById: jest.fn(),
+    createSession: jest.fn(),
+    listSessionsByUser: jest.fn(),
   },
 }));
 
@@ -50,7 +52,10 @@ import aiSessionService from "../src/services/ai/memory/session.service";
 import aiMessageService from "../src/services/ai/memory/message.service";
 import aiToolCallService from "../src/services/ai/memory/tool-call.service";
 import tryOnAssetService from "../src/services/ai/jobs/tryon-asset.service";
-import { AiSessionMode } from "../src/models/ai/ai.model";
+import {
+  AiAgentType,
+  AiSessionMode,
+} from "../src/models/ai/ai.model";
 import { RolUsuario } from "../src/models/usuario.model";
 
 const mockedSessionService = aiSessionService as jest.Mocked<
@@ -69,6 +74,7 @@ const mockedTryOnAssetService = tryOnAssetService as jest.Mocked<
 describe("AiChatService.getSessionDetail", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedSessionService.listSessionsByUser.mockResolvedValue([]);
   });
 
   it("retorna session null y evita queries secundarias cuando la sesion no existe", async () => {
@@ -160,6 +166,132 @@ describe("AiChatService.getSessionDetail", () => {
         message: "actualiza el precio",
       }),
     ).rejects.toMatchObject({ code: "AI_FORBIDDEN", statusCode: 403 });
+  });
+
+  it("acepta una sesion legacy como Shopping Agent", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "legacy-session",
+      userId: "user-1",
+      mode: AiSessionMode.AUTHENTICATED,
+    } as never);
+
+    await expect(
+      aiChatService.assertMessageExecutionReady({
+        sessionId: "legacy-session",
+        userId: "user-1",
+        role: RolUsuario.CLIENTE,
+        message: "Busca un jersey",
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("la ruta shopping oculta una sesion Admin Copilot incluso a su owner", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "admin-session",
+      userId: "admin-1",
+      role: RolUsuario.ADMIN,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.ADMIN,
+    } as never);
+
+    await expect(
+      aiChatService.assertMessageExecutionReady({
+        sessionId: "admin-session",
+        userId: "admin-1",
+        role: RolUsuario.ADMIN,
+        message: "Consulta inventario privado",
+      }),
+    ).rejects.toMatchObject({ code: "AI_SESSION_NOT_FOUND", statusCode: 404 });
+  });
+
+  it("solo un ADMIN real puede crear una sesion Admin Copilot", async () => {
+    await expect(
+      aiChatService.createAdminSession({
+        userId: "customer-1",
+        role: RolUsuario.CLIENTE,
+        channel: "admin-web",
+      }),
+    ).rejects.toMatchObject({ code: "AI_FORBIDDEN", statusCode: 403 });
+    expect(mockedSessionService.createSession).not.toHaveBeenCalled();
+
+    mockedSessionService.createSession.mockResolvedValue({
+      id: "admin-session",
+      userId: "admin-1",
+      role: RolUsuario.ADMIN,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.ADMIN,
+    } as never);
+
+    await aiChatService.createAdminSession({
+      userId: "admin-1",
+      role: RolUsuario.ADMIN,
+      channel: "admin-web",
+    });
+
+    expect(mockedSessionService.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "admin-1",
+        role: RolUsuario.ADMIN,
+        agentType: AiAgentType.ADMIN,
+      }),
+    );
+  });
+
+  it("persiste Shopping Agent por defecto sin aceptar tipo del cliente", async () => {
+    mockedSessionService.createSession.mockResolvedValue({
+      id: "shopping-session",
+      userId: "customer-1",
+      role: RolUsuario.CLIENTE,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.SHOPPING,
+    } as never);
+
+    await aiChatService.createSession({
+      userId: "customer-1",
+      role: RolUsuario.CLIENTE,
+      channel: "storefront",
+    });
+
+    expect(mockedSessionService.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ agentType: AiAgentType.SHOPPING }),
+    );
+  });
+
+  it("bloquea a no-admin y conserva ownership en Admin Copilot", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "admin-session",
+      userId: "admin-owner",
+      role: RolUsuario.ADMIN,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.ADMIN,
+    } as never);
+
+    await expect(
+      aiChatService.assertAdminMessageExecutionReady({
+        sessionId: "admin-session",
+        userId: "customer-1",
+        role: RolUsuario.CLIENTE,
+        message: "Diagnostica inventario",
+      }),
+    ).rejects.toMatchObject({ code: "AI_FORBIDDEN", statusCode: 403 });
+
+    await expect(
+      aiChatService.assertAdminMessageExecutionReady({
+        sessionId: "admin-session",
+        userId: "other-admin",
+        role: RolUsuario.ADMIN,
+        message: "Diagnostica inventario",
+      }),
+    ).rejects.toMatchObject({ code: "AI_FORBIDDEN", statusCode: 403 });
+
+    await expect(
+      aiChatService.assertAdminMessageExecutionReady({
+        sessionId: "admin-session",
+        userId: "admin-owner",
+        role: RolUsuario.ADMIN,
+        message: "Diagnostica inventario",
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("acepta un asset propio en la sesion autenticada", async () => {

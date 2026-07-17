@@ -88,6 +88,17 @@ export const createSession = async (req: Request, res: Response) => {
   });
 };
 
+export const createAdminSession = async (req: Request, res: Response) => {
+  const session = await aiChatService.createAdminSession({
+    userId: req.user!.uid,
+    role: req.user!.rol as RolUsuario,
+    channel: req.body.channel,
+    title: req.body.title,
+  });
+
+  return res.status(201).json({ success: true, data: session });
+};
+
 export const createPublicSession = async (req: Request, res: Response) => {
   const result = await aiChatService.createPublicSession({
     channel: req.body.channel,
@@ -103,6 +114,18 @@ export const createPublicSession = async (req: Request, res: Response) => {
 
 export const listSessions = async (req: Request, res: Response) => {
   const sessions = await aiChatService.listSessions(req.user!.uid);
+  return res.status(200).json({
+    success: true,
+    count: sessions.length,
+    data: sessions,
+  });
+};
+
+export const listAdminSessions = async (req: Request, res: Response) => {
+  const sessions = await aiChatService.listAdminSessions(
+    req.user!.uid,
+    req.user!.rol as RolUsuario,
+  );
   return res.status(200).json({
     success: true,
     count: sessions.length,
@@ -126,6 +149,21 @@ export const getSessionDetail = async (req: Request, res: Response) => {
     success: true,
     data: detail,
   });
+};
+
+export const getAdminSessionDetail = async (req: Request, res: Response) => {
+  const detail = await aiChatService.getAdminSessionDetail(
+    req.params.id,
+    req.user!.uid,
+    req.user!.rol as RolUsuario,
+  );
+  if (!detail.session) {
+    return res
+      .status(404)
+      .json({ success: false, message: "Sesion AI no encontrada" });
+  }
+
+  return res.status(200).json({ success: true, data: detail });
 };
 
 export const sendMessage = async (req: Request, res: Response) => {
@@ -169,6 +207,55 @@ export const sendMessage = async (req: Request, res: Response) => {
       success: true,
       data: result,
     });
+  } catch (error) {
+    const errorPayload = toAiErrorPayload(error);
+    return res.status(errorPayload.statusCode).json({
+      success: false,
+      error: {
+        code: errorPayload.code,
+        message: errorPayload.message,
+      },
+    });
+  }
+};
+
+export const sendAdminMessage = async (req: Request, res: Response) => {
+  const payload = {
+    sessionId: req.body.sessionId,
+    userId: req.user!.uid,
+    role: req.user!.rol as RolUsuario,
+    message: req.body.message,
+    attachments: toAttachments(req.body.attachments),
+    clientContext:
+      typeof req.body.clientContext === "object" && req.body.clientContext !== null
+        ? req.body.clientContext
+        : undefined,
+    // Admin scopes are derived from the verified backend role, never request data.
+    aiToolScopes: [],
+    requestId: req.requestId,
+  };
+
+  if (wantsSseResponse(req)) {
+    try {
+      await aiChatService.assertAdminMessageExecutionReady(payload);
+    } catch (error) {
+      const errorPayload = toAiErrorPayload(error);
+      return res.status(errorPayload.statusCode).json({
+        success: false,
+        error: {
+          code: errorPayload.code,
+          message: errorPayload.message,
+        },
+      });
+    }
+
+    await writeStreamEvents(res, aiChatService.sendAdminMessageStream(payload));
+    return;
+  }
+
+  try {
+    const result = await aiChatService.sendAdminMessage(payload);
+    return res.status(200).json({ success: true, data: result });
   } catch (error) {
     const errorPayload = toAiErrorPayload(error);
     return res.status(errorPayload.statusCode).json({

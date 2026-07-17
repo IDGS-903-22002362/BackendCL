@@ -33,6 +33,7 @@ describe("chat.controller.sendMessage", () => {
             toolCalls: [],
             model: "gemini-test",
             latencyMs: 123,
+            agentType: "shopping" as never,
           },
         };
       },

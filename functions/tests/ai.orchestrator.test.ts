@@ -64,6 +64,7 @@ import toolRegistryService from "../src/services/ai/rbac/tool-registry.service";
 import roleToolMapperService from "../src/services/ai/rbac/role-tool-mapper.service";
 import { RolUsuario } from "../src/models/usuario.model";
 import {
+  AiAgentType,
   AiMessageRole,
   AiSessionMode,
   AiToolCallStatus,
@@ -271,5 +272,68 @@ describe("AiOrchestrator.handleMessage", () => {
     expect(result.text).toContain("¿De cual producto hablas");
     expect(mockedGeminiAdapter.generate).not.toHaveBeenCalled();
     expect(mockedToolCallService.createToolCall).not.toHaveBeenCalled();
+  });
+
+  it("deriva prompt y toolset desde el agentType persistido de Admin Copilot", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "admin-session",
+      userId: "admin-1",
+      role: RolUsuario.ADMIN,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.ADMIN,
+      summary: "",
+      conversationState: {},
+    } as never);
+    mockedPlanner.plan.mockResolvedValue({
+      normalized: {
+        originalText: "diagnostica inventario",
+        normalizedText: "diagnostica inventario",
+        tokens: ["diagnostica", "inventario"],
+        filters: {},
+        references: [],
+        topics: [],
+        asksForRecommendation: false,
+        asksForComparison: false,
+        asksForStoreLocation: false,
+        mentionsImage: false,
+      },
+      plan: {
+        intent: "admin_inventory_diagnostic",
+        confidence: 0.8,
+        requiresTools: false,
+        toolCalls: [],
+        needsClarification: true,
+        clarificationQuestion: "Indica el producto a diagnosticar.",
+        sessionUpdates: {},
+        finalAnswer: "Indica el producto a diagnosticar.",
+      },
+    } as never);
+
+    await aiOrchestrator.handleMessage({
+      sessionId: "admin-session",
+      userId: "admin-1",
+      role: RolUsuario.ADMIN,
+      message: "diagnostica inventario",
+      aiToolScopes: [],
+      requestId: "req-admin",
+      sessionMode: AiSessionMode.AUTHENTICATED,
+    });
+
+    expect(mockedRoleToolMapperService.getCapabilities).toHaveBeenCalledWith(
+      RolUsuario.ADMIN,
+      [],
+      AiAgentType.ADMIN,
+    );
+    expect(mockedToolRegistryService.getAllowedTools).toHaveBeenCalledWith(
+      RolUsuario.ADMIN,
+      [],
+      {
+        publicOnly: false,
+        agentType: AiAgentType.ADMIN,
+      },
+    );
+    expect(mockedPlanner.plan).toHaveBeenCalledWith(
+      expect.objectContaining({ agentType: AiAgentType.ADMIN }),
+    );
   });
 });

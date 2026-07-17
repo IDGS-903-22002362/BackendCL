@@ -44,6 +44,7 @@ jest.mock("../src/services/ai/jobs/tryon-workflow.service", () => ({
 import aiToolDefinitions from "../src/services/ai/tools/definitions";
 import storeAiBusinessService from "../src/services/ai/knowledge/store-business.service";
 import tryOnWorkflowService from "../src/services/ai/jobs/tryon-workflow.service";
+import { AiAgentType } from "../src/models/ai/ai.model";
 import { RolUsuario } from "../src/models/usuario.model";
 
 const mockedStoreAiBusinessService = storeAiBusinessService as jest.Mocked<
@@ -73,6 +74,7 @@ describe("AI commerce tools", () => {
         userId: "user-1",
         role: RolUsuario.CLIENTE,
         capabilities: ["customer"],
+        agentType: AiAgentType.SHOPPING,
         sessionMode: "authenticated",
       },
     );
@@ -100,6 +102,7 @@ describe("AI commerce tools", () => {
         userId: "user-1",
         role: RolUsuario.CLIENTE,
         capabilities: ["customer"],
+        agentType: AiAgentType.SHOPPING,
         sessionId: "session-1",
         sessionMode: "authenticated",
         attachments: [
@@ -129,6 +132,7 @@ describe("AI commerce tools", () => {
       userId: "user-1",
       role: RolUsuario.CLIENTE,
       capabilities: ["customer"],
+      agentType: AiAgentType.SHOPPING,
       sessionMode: "authenticated" as const,
     };
 

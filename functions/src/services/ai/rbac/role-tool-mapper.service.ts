@@ -1,24 +1,26 @@
 import { RolUsuario } from "../../../models/usuario.model";
+import { AiAgentType } from "../../../models/ai/ai.model";
 
 export type AiCapability = "customer" | "support" | "inventory" | "admin";
 
 class RoleToolMapperService {
-  getCapabilities(role: RolUsuario, scopes: string[] = []): AiCapability[] {
-    if (role === RolUsuario.ADMIN) {
+  getCapabilities(
+    role: RolUsuario,
+    scopes: string[] = [],
+    agentType: AiAgentType = AiAgentType.SHOPPING,
+  ): AiCapability[] {
+    if (agentType === AiAgentType.ADMIN) {
+      if (role !== RolUsuario.ADMIN) {
+        return [];
+      }
+
       return ["admin", "support", "inventory", "customer"];
     }
 
-    if (role === RolUsuario.CLIENTE) {
-      return ["customer"];
-    }
-
-    const normalizedScopes = scopes.map((scope) => scope.toLowerCase());
-    const capabilities: AiCapability[] = ["support", "customer"];
-    if (normalizedScopes.includes("inventory")) {
-      capabilities.push("inventory");
-    }
-
-    return capabilities;
+    // Shopping sessions always run with customer capabilities. Neither a
+    // privileged role nor client-provided scopes can elevate this toolset.
+    void scopes;
+    return ["customer"];
   }
 }
 

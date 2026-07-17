@@ -12,6 +12,18 @@ export enum AiSessionMode {
   GUEST = "guest",
 }
 
+export enum AiAgentType {
+  SHOPPING = "shopping",
+  ADMIN = "admin",
+}
+
+/**
+ * Legacy sessions predate agent separation. Unknown values deliberately fall
+ * back to the least-privileged Shopping Agent instead of granting admin tools.
+ */
+export const resolveAiAgentType = (value: unknown): AiAgentType =>
+  value === AiAgentType.ADMIN ? AiAgentType.ADMIN : AiAgentType.SHOPPING;
+
 export enum AiMessageRole {
   USER = "user",
   ASSISTANT = "assistant",
@@ -182,6 +194,7 @@ export interface AiSession {
   userId: string;
   role: RolUsuario;
   mode: AiSessionMode;
+  agentType: AiAgentType;
   channel: string;
   title: string;
   status: AiSessionStatus;

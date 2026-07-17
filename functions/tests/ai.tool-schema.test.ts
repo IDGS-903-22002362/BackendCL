@@ -3,6 +3,7 @@ import {
   buildFunctionDeclaration,
   buildToolParametersJsonSchema,
 } from "../src/services/ai/tools/types";
+import { AiAgentType } from "../src/models/ai/ai.model";
 import { RolUsuario } from "../src/models/usuario.model";
 
 describe("AI tool schema builder", () => {
@@ -39,6 +40,7 @@ describe("AI tool schema builder", () => {
       description: "Obtiene politica de envio",
       schema: z.object({}).strict(),
       roles: [RolUsuario.CLIENTE],
+      agentTypes: [AiAgentType.SHOPPING],
       execute: jest.fn(),
     });
 

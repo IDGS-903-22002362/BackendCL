@@ -1,8 +1,12 @@
 import { zodToJsonSchema } from "zod-to-json-schema";
 import aiConfig from "../../../config/ai.config";
-import { ChatPlan, ConversationState } from "../../../models/ai/ai.model";
+import {
+  AiAgentType,
+  ChatPlan,
+  ConversationState,
+} from "../../../models/ai/ai.model";
 import logger from "../../../utils/logger";
-import { AI_PLANNER_INSTRUCTIONS } from "../ai.prompts";
+import { getAiPlannerInstructions } from "../ai.prompts";
 import geminiAdapter from "../adapters/gemini.adapter";
 import { RuntimeAiToolDefinition } from "../tools/types";
 import {
@@ -16,6 +20,7 @@ export interface PlanChatInput {
   sessionState?: ConversationState;
   allowedTools: RuntimeAiToolDefinition[];
   sessionMode: "authenticated" | "guest";
+  agentType: AiAgentType;
   requestId?: string;
 }
 
@@ -53,10 +58,11 @@ class ChatPlannerService {
 
       const rawPlan = await geminiAdapter.generateStructured<ChatPlan>({
         model: aiConfig.gemini.fastModel,
-        systemInstruction: AI_PLANNER_INSTRUCTIONS,
+        systemInstruction: getAiPlannerInstructions(input.agentType),
         prompt: JSON.stringify(
           {
             sessionMode: input.sessionMode,
+            agentType: input.agentType,
             message: input.message,
             normalized,
             sessionState: input.sessionState || {},

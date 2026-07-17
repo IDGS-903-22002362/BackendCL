@@ -21,6 +21,7 @@ import {
   tryOnJobIdParamSchema,
 } from "../middleware/validators/ai-tryon.validator";
 import {
+  aiAdminChatRateLimiter,
   aiChatRateLimiter,
   aiPublicChatRateLimiter,
   aiUploadRateLimiter,
@@ -201,6 +202,36 @@ protectedRouter.post(
   aiChatRateLimiter,
   validateBody(sendAiMessageSchema),
   asyncHandler(chatController.sendMessage),
+);
+
+// Admin Copilot has a separate route surface. The agent type is assigned by
+// the backend and is never accepted from request bodies.
+protectedRouter.post(
+  "/admin/chat/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(createAiSessionSchema),
+  asyncHandler(chatController.createAdminSession),
+);
+protectedRouter.get(
+  "/admin/chat/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  asyncHandler(chatController.listAdminSessions),
+);
+protectedRouter.get(
+  "/admin/chat/sessions/:id",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateParams(sessionIdParamSchema),
+  asyncHandler(chatController.getAdminSessionDetail),
+);
+protectedRouter.post(
+  "/admin/chat/messages",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(sendAiMessageSchema),
+  asyncHandler(chatController.sendAdminMessage),
 );
 
 /**

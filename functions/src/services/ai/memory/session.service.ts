@@ -2,10 +2,12 @@ import { admin } from "../../../config/firebase.admin";
 import { firestoreTienda } from "../../../config/firebase";
 import { RolUsuario } from "../../../models/usuario.model";
 import {
+  AiAgentType,
   AiSession,
   AiSessionMode,
   AiSessionStatus,
   ConversationState,
+  resolveAiAgentType,
 } from "../../../models/ai/ai.model";
 import AI_COLLECTIONS from "../collections";
 
@@ -13,6 +15,7 @@ class AiSessionService {
   async createSession(input: {
     userId: string;
     role: RolUsuario;
+    agentType: AiAgentType;
     channel: string;
     title?: string;
     mode?: AiSessionMode;
@@ -24,6 +27,7 @@ class AiSessionService {
       userId: input.userId,
       role: input.role,
       mode: input.mode || AiSessionMode.AUTHENTICATED,
+      agentType: input.agentType,
       channel: input.channel,
       title: input.title?.trim() || "Nueva conversacion",
       status: AiSessionStatus.ACTIVE,
@@ -45,7 +49,12 @@ class AiSessionService {
       return null;
     }
 
-    return { id: snapshot.id, ...(snapshot.data() as Omit<AiSession, "id">) };
+    const data = snapshot.data() as Omit<AiSession, "id">;
+    return {
+      id: snapshot.id,
+      ...data,
+      agentType: resolveAiAgentType(data.agentType),
+    };
   }
 
   async listSessionsByUser(userId: string): Promise<AiSession[]> {
@@ -56,10 +65,14 @@ class AiSessionService {
       .limit(50)
       .get();
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...(doc.data() as Omit<AiSession, "id">),
-    }));
+    return snapshot.docs.map((doc) => {
+      const data = doc.data() as Omit<AiSession, "id">;
+      return {
+        id: doc.id,
+        ...data,
+        agentType: resolveAiAgentType(data.agentType),
+      };
+    });
   }
 
   async updateSessionSummary(sessionId: string, summary: string): Promise<void> {

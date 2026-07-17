@@ -10,7 +10,12 @@ import {
   AiRuntimeError,
   toAiErrorPayload,
 } from "./ai.error";
-import { AiAttachment, AiSessionMode } from "../../models/ai/ai.model";
+import {
+  AiAgentType,
+  AiAttachment,
+  AiSessionMode,
+  resolveAiAgentType,
+} from "../../models/ai/ai.model";
 import { admin } from "../../config/firebase.admin";
 import tryOnAssetService from "./jobs/tryon-asset.service";
 
@@ -86,6 +91,7 @@ class AiChatService {
     userId?: string;
     role?: RolUsuario;
     publicAccessToken?: string;
+    expectedAgentType: AiAgentType;
   }) {
     try {
       assertAiConfig();
@@ -100,6 +106,15 @@ class AiChatService {
 
     const session = await aiSessionService.getSessionById(input.sessionId);
     if (!session) {
+      throw new AiRuntimeError(
+        "AI_SESSION_NOT_FOUND",
+        "Sesion AI no encontrada",
+        404,
+      );
+    }
+
+    if (resolveAiAgentType(session.agentType) !== input.expectedAgentType) {
+      // Conceal whether the identifier belongs to the other agent surface.
       throw new AiRuntimeError(
         "AI_SESSION_NOT_FOUND",
         "Sesion AI no encontrada",
@@ -136,6 +151,17 @@ class AiChatService {
       );
     }
 
+    if (
+      input.expectedAgentType === AiAgentType.ADMIN &&
+      input.role !== RolUsuario.ADMIN
+    ) {
+      throw new AiRuntimeError(
+        "AI_FORBIDDEN",
+        "No tienes permisos para usar Admin Copilot",
+        403,
+      );
+    }
+
     if (session.userId !== input.userId) {
       throw new AiRuntimeError(
         "AI_FORBIDDEN",
@@ -152,6 +178,7 @@ class AiChatService {
       sessionId: input.sessionId,
       userId: input.userId,
       role: input.role,
+      expectedAgentType: AiAgentType.SHOPPING,
     });
     await this.assertAttachmentsOwnedByUser(input.attachments, input.userId);
   }
@@ -160,6 +187,7 @@ class AiChatService {
     const session = await this.getValidatedSessionForUser({
       sessionId: input.sessionId,
       publicAccessToken: input.publicAccessToken,
+      expectedAgentType: AiAgentType.SHOPPING,
     });
     await this.assertAttachmentsOwnedByUser(input.attachments, session.userId);
   }
@@ -173,6 +201,21 @@ class AiChatService {
     return aiSessionService.createSession({
       ...input,
       mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.SHOPPING,
+    });
+  }
+
+  async createAdminSession(input: {
+    userId: string;
+    role: RolUsuario;
+    channel: string;
+    title?: string;
+  }) {
+    this.assertAdminRole(input.role);
+    return aiSessionService.createSession({
+      ...input,
+      mode: AiSessionMode.AUTHENTICATED,
+      agentType: AiAgentType.ADMIN,
     });
   }
 
@@ -188,6 +231,7 @@ class AiChatService {
       channel: input.channel,
       title: input.title,
       mode: AiSessionMode.GUEST,
+      agentType: AiAgentType.SHOPPING,
       guestAccess: {
         tokenHash: hashToken(publicAccessToken),
         label: input.guestLabel?.trim(),
@@ -210,7 +254,19 @@ class AiChatService {
   }
 
   async listSessions(userId: string) {
-    return aiSessionService.listSessionsByUser(userId);
+    const sessions = await aiSessionService.listSessionsByUser(userId);
+    return sessions.filter(
+      (session) =>
+        resolveAiAgentType(session.agentType) === AiAgentType.SHOPPING,
+    );
+  }
+
+  async listAdminSessions(userId: string, role: RolUsuario) {
+    this.assertAdminRole(role);
+    const sessions = await aiSessionService.listSessionsByUser(userId);
+    return sessions.filter(
+      (session) => resolveAiAgentType(session.agentType) === AiAgentType.ADMIN,
+    );
   }
 
   async getSessionDetail(sessionId: string, userId: string) {
@@ -223,7 +279,11 @@ class AiChatService {
       };
     }
 
-    if (session.mode === AiSessionMode.GUEST || session.userId !== userId) {
+    if (
+      session.mode === AiSessionMode.GUEST ||
+      session.userId !== userId ||
+      resolveAiAgentType(session.agentType) !== AiAgentType.SHOPPING
+    ) {
       return {
         session: null,
         messages: [],
@@ -243,6 +303,34 @@ class AiChatService {
     };
   }
 
+  async getAdminSessionDetail(
+    sessionId: string,
+    userId: string,
+    role: RolUsuario,
+  ) {
+    this.assertAdminRole(role);
+    const session = await aiSessionService.getSessionById(sessionId);
+    if (
+      !session ||
+      session.mode !== AiSessionMode.AUTHENTICATED ||
+      session.userId !== userId ||
+      resolveAiAgentType(session.agentType) !== AiAgentType.ADMIN
+    ) {
+      return {
+        session: null,
+        messages: [],
+        toolCalls: [],
+      };
+    }
+
+    const [messages, toolCalls] = await Promise.all([
+      aiMessageService.listMessagesBySession(sessionId),
+      aiToolCallService.listToolCallsBySession(sessionId),
+    ]);
+
+    return { session, messages, toolCalls };
+  }
+
   async sendMessage(input: SendAiMessageInput) {
     await this.assertMessageExecutionReady(input);
     return aiOrchestrator.handleMessage({
@@ -251,10 +339,33 @@ class AiChatService {
     });
   }
 
+  async assertAdminMessageExecutionReady(input: SendAiMessageInput) {
+    this.assertAdminRole(input.role);
+    await this.getValidatedSessionForUser({
+      sessionId: input.sessionId,
+      userId: input.userId,
+      role: input.role,
+      expectedAgentType: AiAgentType.ADMIN,
+    });
+    await this.assertAttachmentsOwnedByUser(input.attachments, input.userId);
+  }
+
+  async sendAdminMessage(input: SendAiMessageInput) {
+    await this.assertAdminMessageExecutionReady(input);
+    return aiOrchestrator.handleMessage({
+      ...input,
+      // Admin Copilot authorization is derived from the verified backend role;
+      // caller-supplied scopes never influence its toolset.
+      aiToolScopes: [],
+      sessionMode: AiSessionMode.AUTHENTICATED,
+    });
+  }
+
   async sendPublicMessage(input: SendPublicAiMessageInput) {
     const session = await this.getValidatedSessionForUser({
       sessionId: input.sessionId,
       publicAccessToken: input.publicAccessToken,
+      expectedAgentType: AiAgentType.SHOPPING,
     });
     await this.assertAttachmentsOwnedByUser(input.attachments, session.userId);
 
@@ -299,6 +410,29 @@ class AiChatService {
     }
   }
 
+  async *sendAdminMessageStream(
+    input: SendAiMessageInput,
+  ): AsyncGenerator<SendAiMessageStreamEvent> {
+    yield {
+      type: "status",
+      data: { status: "processing" },
+    };
+
+    try {
+      const result = await this.sendAdminMessage(input);
+      yield { type: "final", data: result };
+    } catch (error) {
+      const errorPayload = toAiErrorPayload(error);
+      yield {
+        type: "error",
+        data: {
+          code: errorPayload.code,
+          message: errorPayload.message,
+        },
+      };
+    }
+  }
+
   async *sendPublicMessageStream(
     input: SendPublicAiMessageInput,
   ): AsyncGenerator<SendAiMessageStreamEvent> {
@@ -324,6 +458,16 @@ class AiChatService {
           message: errorPayload.message,
         },
       };
+    }
+  }
+
+  private assertAdminRole(role: RolUsuario): void {
+    if (role !== RolUsuario.ADMIN) {
+      throw new AiRuntimeError(
+        "AI_FORBIDDEN",
+        "No tienes permisos para usar Admin Copilot",
+        403,
+      );
     }
   }
 }

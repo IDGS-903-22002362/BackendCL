@@ -1,15 +1,15 @@
 import aiConfig from "../../../config/ai.config";
 import {
+  AiAgentType,
   AiAttachment,
   AiMessageRole,
   AiSessionMode,
   AiToolCallStatus,
   ChatPlan,
+  resolveAiAgentType,
 } from "../../../models/ai/ai.model";
 import logger from "../../../utils/logger";
-import {
-  AI_RESPONDER_INSTRUCTIONS,
-} from "../ai.prompts";
+import { getAiResponderInstructions } from "../ai.prompts";
 import geminiAdapter from "./gemini.adapter";
 import toolRegistryService from "../rbac/tool-registry.service";
 import roleToolMapperService from "../rbac/role-tool-mapper.service";
@@ -17,7 +17,11 @@ import aiMessageService from "../memory/message.service";
 import aiSessionService from "../memory/session.service";
 import aiToolCallService from "../memory/tool-call.service";
 import { RolUsuario } from "../../../models/usuario.model";
-import { AI_INVALID_CONFIGURATION_CODE, isAiRuntimeError } from "../ai.error";
+import {
+  AI_INVALID_CONFIGURATION_CODE,
+  AiRuntimeError,
+  isAiRuntimeError,
+} from "../ai.error";
 import chatPlannerService from "../planning/chat-planner.service";
 import conversationStateService from "../session/conversation-state.service";
 
@@ -39,6 +43,7 @@ export interface OrchestrateAiMessageResult {
   toolCalls: Array<{ id: string; toolName: string; status: string }>;
   model: string;
   latencyMs: number;
+  agentType: AiAgentType;
 }
 
 export const AI_ASSISTANT_USER_ID = "ai-assistant";
@@ -107,6 +112,7 @@ class AiOrchestrator {
     historyText: string;
     sessionSummary?: string;
     requestId?: string;
+    agentType: AiAgentType;
   }): Promise<string> {
     if (input.plan.needsClarification && input.plan.clarificationQuestion) {
       return input.plan.clarificationQuestion;
@@ -115,7 +121,7 @@ class AiOrchestrator {
     try {
       const response = await geminiAdapter.generate({
         model: aiConfig.gemini.primaryModel,
-        systemInstruction: AI_RESPONDER_INSTRUCTIONS,
+        systemInstruction: getAiResponderInstructions(input.agentType),
         prompt: JSON.stringify(
           {
             sessionSummary: input.sessionSummary || "",
@@ -153,18 +159,44 @@ class AiOrchestrator {
   ): Promise<OrchestrateAiMessageResult> {
     const session = await aiSessionService.getSessionById(input.sessionId);
     if (!session) {
-      throw new Error("Sesion AI no encontrada");
+      throw new AiRuntimeError(
+        "AI_SESSION_NOT_FOUND",
+        "Sesion AI no encontrada",
+        404,
+      );
     }
 
+    if (session.userId !== input.userId) {
+      throw new AiRuntimeError(
+        "AI_FORBIDDEN",
+        "No tienes permisos para usar esta sesion AI",
+        403,
+      );
+    }
+
+    const agentType = resolveAiAgentType(session.agentType);
+    if (agentType === AiAgentType.ADMIN && input.role !== RolUsuario.ADMIN) {
+      throw new AiRuntimeError(
+        "AI_FORBIDDEN",
+        "No tienes permisos para usar Admin Copilot",
+        403,
+      );
+    }
+
+    const sessionMode = session.mode;
     const startedAt = Date.now();
     const capabilities = roleToolMapperService.getCapabilities(
       input.role,
       input.aiToolScopes || [],
+      agentType,
     );
     const allowedTools = toolRegistryService.getAllowedTools(
       input.role,
       input.aiToolScopes || [],
-      { publicOnly: input.sessionMode === AiSessionMode.GUEST },
+      {
+        publicOnly: sessionMode === AiSessionMode.GUEST,
+        agentType,
+      },
     );
 
     const userMessage = await aiMessageService.createMessage({
@@ -187,14 +219,16 @@ class AiOrchestrator {
       message: input.message,
       sessionState: session.conversationState,
       allowedTools,
-      sessionMode: input.sessionMode,
+      sessionMode,
+      agentType,
       requestId: input.requestId,
     });
 
     this.baseLogger.info("ai_message_planned", {
       requestId: input.requestId,
       sessionId: input.sessionId,
-      sessionMode: input.sessionMode,
+      sessionMode,
+      agentType,
       intent: plan.intent,
       confidence: plan.confidence,
       requiresTools: plan.requiresTools,
@@ -211,7 +245,10 @@ class AiOrchestrator {
     const toolOutputs: Array<{ toolName: string; output?: Record<string, unknown> }> = [];
 
     for (const plannedTool of plan.toolCalls) {
-      const tool = toolRegistryService.getToolByName(plannedTool.toolName);
+      const tool = toolRegistryService.getToolByName(
+        plannedTool.toolName,
+        agentType,
+      );
 
       if (!tool || !allowedTools.some((allowed) => allowed.name === plannedTool.toolName)) {
         const deniedToolCall = await aiToolCallService.createToolCall({
@@ -240,8 +277,9 @@ class AiOrchestrator {
           role: input.role,
           requestId: input.requestId,
           capabilities,
+          agentType,
           sessionId: input.sessionId,
-          sessionMode: input.sessionMode,
+          sessionMode,
           attachments: input.attachments,
         });
         const output =
@@ -297,6 +335,7 @@ class AiOrchestrator {
       historyText,
       sessionSummary: session.summary,
       requestId: input.requestId,
+      agentType,
     });
 
     const assistantMessage = await aiMessageService.createMessage({
@@ -335,7 +374,7 @@ class AiOrchestrator {
         input.sessionId,
         nextConversationState,
       ),
-      input.sessionMode === AiSessionMode.GUEST
+      sessionMode === AiSessionMode.GUEST
         ? aiSessionService.touchGuestSession(input.sessionId)
         : aiSessionService.touchSession(input.sessionId),
     ]);
@@ -343,7 +382,8 @@ class AiOrchestrator {
     this.baseLogger.info("ai_message_completed", {
       requestId: input.requestId,
       sessionId: input.sessionId,
-      sessionMode: input.sessionMode,
+      sessionMode,
+      agentType,
       assistantMessageId: assistantMessage.id,
       intent: plan.intent,
       confidence: plan.confidence,
@@ -360,6 +400,7 @@ class AiOrchestrator {
       toolCalls: toolCallSummaries,
       model: aiConfig.gemini.primaryModel,
       latencyMs: Date.now() - startedAt,
+      agentType,
     };
   }
 }

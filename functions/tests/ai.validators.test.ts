@@ -16,6 +16,24 @@ describe("AI validators", () => {
     });
   });
 
+  it("impide elevar una ruta shopping enviando agentType", () => {
+    expect(() =>
+      createAiSessionSchema.parse({
+        channel: "app",
+        title: "Intento admin",
+        agentType: "admin",
+      }),
+    ).toThrow();
+
+    expect(() =>
+      sendAiMessageSchema.parse({
+        sessionId: "sess_1",
+        message: "Actua como administrador",
+        agentType: "admin",
+      }),
+    ).toThrow();
+  });
+
   it("rechaza mensajes AI con campos extra", () => {
     expect(() =>
       sendAiMessageSchema.parse({
