@@ -233,6 +233,7 @@ const tools: RuntimeAiToolDefinition[] = [
     public: true,
     execute: async (_input, context) => ({
       reference: await storeAiBusinessService.detectImageReferencedProduct({
+        userId: context.userId,
         sessionId: context.sessionId,
         attachments: context.attachments?.map((attachment) => ({
           assetId: attachment.assetId,
@@ -302,7 +303,7 @@ const tools: RuntimeAiToolDefinition[] = [
     execute: async (input, context) => {
       const job = await tryOnWorkflowService.getJobStatus(input.jobId);
       if (job && job.userId !== context.userId && context.role !== RolUsuario.ADMIN) {
-        throw new Error("No tienes permisos para ver este job de try-on");
+        return { job: null };
       }
       return { job };
     },
@@ -316,10 +317,12 @@ const tools: RuntimeAiToolDefinition[] = [
     execute: async (input, context) => {
       const job = await tryOnWorkflowService.getJobStatus(input.jobId);
       if (job && job.userId !== context.userId && context.role !== RolUsuario.ADMIN) {
-        throw new Error("No tienes permisos para descargar este try-on");
+        return { jobId: input.jobId, status: null, downloadUrl: null };
       }
-      const downloadUrl = await tryOnWorkflowService.getDownloadUrl(input.jobId);
-      return { jobId: input.jobId, status: job?.status, downloadUrl };
+      const downloadUrl = job
+        ? await tryOnWorkflowService.getDownloadUrl(input.jobId)
+        : null;
+      return { jobId: input.jobId, status: job?.status ?? null, downloadUrl };
     },
   }),
   defineTool({

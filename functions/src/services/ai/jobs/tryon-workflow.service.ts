@@ -396,7 +396,11 @@ class TryOnWorkflowService {
     }
 
     const asset = await tryOnAssetService.getAssetById(job.outputAssetId);
-    return asset || null;
+    if (!asset || asset.userId !== job.userId || asset.jobId !== job.id) {
+      return null;
+    }
+
+    return asset;
   }
 
   async processQueuedJob(jobId: string): Promise<void> {

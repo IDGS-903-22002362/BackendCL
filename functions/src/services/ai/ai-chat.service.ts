@@ -12,6 +12,7 @@ import {
 } from "./ai.error";
 import { AiAttachment, AiSessionMode } from "../../models/ai/ai.model";
 import { admin } from "../../config/firebase.admin";
+import tryOnAssetService from "./jobs/tryon-asset.service";
 
 const hashToken = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
@@ -56,6 +57,30 @@ export type SendAiMessageStreamEvent =
     };
 
 class AiChatService {
+  private async assertAttachmentsOwnedByUser(
+    attachments: AiAttachment[] | undefined,
+    userId: string,
+  ): Promise<void> {
+    const assetIds = [
+      ...new Set((attachments || []).map((attachment) => attachment.assetId)),
+    ];
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    const assets = await Promise.all(
+      assetIds.map((assetId) => tryOnAssetService.getAssetById(assetId)),
+    );
+    if (assets.some((asset) => !asset || asset.userId !== userId)) {
+      // Missing and foreign assets intentionally share the same response.
+      throw new AiRuntimeError(
+        "AI_ATTACHMENT_NOT_FOUND",
+        "Adjunto AI no encontrado",
+        404,
+      );
+    }
+  }
+
   private async getValidatedSessionForUser(input: {
     sessionId: string;
     userId?: string;
@@ -128,13 +153,15 @@ class AiChatService {
       userId: input.userId,
       role: input.role,
     });
+    await this.assertAttachmentsOwnedByUser(input.attachments, input.userId);
   }
 
   async assertPublicMessageExecutionReady(input: SendPublicAiMessageInput) {
-    await this.getValidatedSessionForUser({
+    const session = await this.getValidatedSessionForUser({
       sessionId: input.sessionId,
       publicAccessToken: input.publicAccessToken,
     });
+    await this.assertAttachmentsOwnedByUser(input.attachments, session.userId);
   }
 
   async createSession(input: {
@@ -229,6 +256,7 @@ class AiChatService {
       sessionId: input.sessionId,
       publicAccessToken: input.publicAccessToken,
     });
+    await this.assertAttachmentsOwnedByUser(input.attachments, session.userId);
 
     return aiOrchestrator.handleMessage({
       sessionId: input.sessionId,

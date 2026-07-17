@@ -397,11 +397,14 @@ describe("AI try-on workflow", () => {
   it("firma la descarga usando el bucket persistido en el asset de salida", async () => {
     mockedJobService.getJobById.mockResolvedValue({
       id: "job_1",
+      userId: "user_1",
       status: TryOnJobStatus.COMPLETED,
       outputAssetId: "asset_out_1",
     } as never);
     mockedAssetService.getAssetById.mockResolvedValue({
       id: "asset_out_1",
+      userId: "user_1",
+      jobId: "job_1",
       bucket: "custom-output-bucket",
       objectPath: "ai/tryon-results/user_1/session_1/job_1.png",
     } as never);

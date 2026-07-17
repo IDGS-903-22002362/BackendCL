@@ -32,6 +32,7 @@ import {
 } from "../middleware/ai-tryon.middleware";
 import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { requireAiAdmin } from "../middleware/ai-authz.middleware";
+import { aiAppCheckMiddleware } from "../middleware/ai-app-check.middleware";
 import * as chatController from "../controllers/ai/chat.controller";
 import * as filesController from "../controllers/ai/files.controller";
 import * as tryonController from "../controllers/ai/tryon.controller";
@@ -39,6 +40,10 @@ import * as adminController from "../controllers/ai/admin.controller";
 
 const router = Router();
 const protectedRouter = Router();
+
+// App Check is independent from user authentication: a valid Bearer JWT never
+// bypasses attestation for chat, uploads, try-on, or AI admin endpoints.
+router.use(aiAppCheckMiddleware);
 
 if (aiConfig.api.publicChatEnabled) {
   router.post(

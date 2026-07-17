@@ -26,6 +26,13 @@ jest.mock("../src/services/ai/adapters/ai-orchestrator", () => ({
   },
 }));
 
+jest.mock("../src/services/ai/jobs/tryon-asset.service", () => ({
+  __esModule: true,
+  default: {
+    getAssetById: jest.fn(),
+  },
+}));
+
 jest.mock("../src/config/ai.config", () => ({
   __esModule: true,
   assertAiConfig: jest.fn(),
@@ -42,6 +49,7 @@ import aiChatService from "../src/services/ai/ai-chat.service";
 import aiSessionService from "../src/services/ai/memory/session.service";
 import aiMessageService from "../src/services/ai/memory/message.service";
 import aiToolCallService from "../src/services/ai/memory/tool-call.service";
+import tryOnAssetService from "../src/services/ai/jobs/tryon-asset.service";
 import { AiSessionMode } from "../src/models/ai/ai.model";
 import { RolUsuario } from "../src/models/usuario.model";
 
@@ -53,6 +61,9 @@ const mockedMessageService = aiMessageService as jest.Mocked<
 >;
 const mockedToolCallService = aiToolCallService as jest.Mocked<
   typeof aiToolCallService
+>;
+const mockedTryOnAssetService = tryOnAssetService as jest.Mocked<
+  typeof tryOnAssetService
 >;
 
 describe("AiChatService.getSessionDetail", () => {
@@ -149,5 +160,68 @@ describe("AiChatService.getSessionDetail", () => {
         message: "actualiza el precio",
       }),
     ).rejects.toMatchObject({ code: "AI_FORBIDDEN", statusCode: 403 });
+  });
+
+  it("acepta un asset propio en la sesion autenticada", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "customer-session",
+      userId: "user-1",
+      mode: AiSessionMode.AUTHENTICATED,
+    } as never);
+    mockedTryOnAssetService.getAssetById.mockResolvedValue({
+      id: "asset-user-1",
+      userId: "user-1",
+    } as never);
+
+    await expect(
+      aiChatService.assertMessageExecutionReady({
+        sessionId: "customer-session",
+        userId: "user-1",
+        role: RolUsuario.CLIENTE,
+        message: "muestra el producto de mi foto",
+        attachments: [
+          {
+            assetId: "asset-user-1",
+            mimeType: "image/jpeg",
+            kind: "user_upload" as never,
+          },
+        ],
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("oculta un asset ajeno con la misma respuesta que uno inexistente", async () => {
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "customer-session",
+      userId: "user-1",
+      mode: AiSessionMode.AUTHENTICATED,
+    } as never);
+
+    for (const asset of [
+      { id: "asset-user-2", userId: "user-2" },
+      null,
+    ]) {
+      mockedTryOnAssetService.getAssetById.mockResolvedValueOnce(asset as never);
+
+      await expect(
+        aiChatService.assertMessageExecutionReady({
+          sessionId: "customer-session",
+          userId: "user-1",
+          role: RolUsuario.CLIENTE,
+          message: "muestra el producto de esta foto",
+          attachments: [
+            {
+              assetId: asset?.id || "missing-asset",
+              mimeType: "image/jpeg",
+              kind: "user_upload" as never,
+            },
+          ],
+        }),
+      ).rejects.toMatchObject({
+        code: "AI_ATTACHMENT_NOT_FOUND",
+        message: "Adjunto AI no encontrado",
+        statusCode: 404,
+      });
+    }
   });
 });

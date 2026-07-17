@@ -226,12 +226,13 @@ class StoreAiBusinessService {
   }
 
   async detectImageReferencedProduct(input: {
+    userId: string;
     sessionId?: string;
     attachments?: Array<{ assetId: string }>;
   }): Promise<Record<string, unknown> | null> {
     if (input.attachments?.length) {
       const asset = await tryOnAssetService.getAssetById(input.attachments[0].assetId);
-      return asset
+      return asset && asset.userId === input.userId
         ? {
             assetId: asset.id,
             productId: asset.productId || null,
@@ -246,7 +247,11 @@ class StoreAiBusinessService {
     }
 
     const session = await aiSessionService.getSessionById(input.sessionId);
-    if (!session?.conversationState?.recentAttachments?.length) {
+    if (
+      !session ||
+      session.userId !== input.userId ||
+      !session.conversationState?.recentAttachments?.length
+    ) {
       return null;
     }
 
@@ -256,7 +261,7 @@ class StoreAiBusinessService {
     }
 
     const asset = await tryOnAssetService.getAssetById(attachment.assetId);
-    return asset
+    return asset && asset.userId === input.userId
       ? {
           assetId: asset.id,
           productId: asset.productId || null,

@@ -56,7 +56,7 @@ export const getTryOnJob = async (req: Request, res: Response) => {
   }
 
   if (job.userId !== req.user!.uid && req.user!.rol !== RolUsuario.ADMIN) {
-    return res.status(403).json({ success: false, message: "No tienes permisos para este job de try-on" });
+    return res.status(404).json({ success: false, message: "Job de try-on no encontrado" });
   }
 
   return res.status(200).json({ success: true, data: job });
@@ -69,7 +69,7 @@ export const getTryOnDownloadLink = async (req: Request, res: Response) => {
   }
 
   if (job.userId !== req.user!.uid && req.user!.rol !== RolUsuario.ADMIN) {
-    return res.status(403).json({ success: false, message: "No tienes permisos para descargar este try-on" });
+    return res.status(404).json({ success: false, message: "Job de try-on no encontrado" });
   }
 
   let url: string | null;
@@ -112,7 +112,7 @@ export const streamTryOnImage = async (req: Request, res: Response) => {
   }
 
   if (job.userId !== req.user!.uid && req.user!.rol !== RolUsuario.ADMIN) {
-    return res.status(403).json({ success: false, message: "No tienes permisos para ver este try-on" });
+    return res.status(404).json({ success: false, message: "Job de try-on no encontrado" });
   }
 
   const asset = await tryOnWorkflowService.getDownloadAsset(req.params.id);

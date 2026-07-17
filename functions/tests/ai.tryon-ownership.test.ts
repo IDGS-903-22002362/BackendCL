@@ -63,7 +63,7 @@ describe("AI try-on ownership", () => {
 
     await tryonController.getTryOnDownloadLink(req, res);
 
-    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(403);
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(404);
     expect((res.json as jest.Mock).mock.calls[0][0]).toMatchObject({
       success: false,
     });
@@ -198,7 +198,7 @@ describe("AI try-on ownership", () => {
 
     await tryonController.streamTryOnImage(req, res);
 
-    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(403);
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(404);
     expect(mockedWorkflow.getDownloadAsset).not.toHaveBeenCalled();
   });
 

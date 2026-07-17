@@ -1907,6 +1907,7 @@ subtotalFinal: subtotalCalculado,
   async getOrderStatusForAssistant(input: {
     orderId: string;
     authUser?: { uid: string; rol: RolUsuario };
+    /** @deprecated Kept only for request compatibility; never grants access. */
     phone?: string;
   }): Promise<{
     orderId: string;
@@ -1933,16 +1934,11 @@ subtotalFinal: subtotalCalculado,
       input.authUser?.rol === RolUsuario.EMPLEADO;
     const isOwner =
       Boolean(input.authUser?.uid) && orden.usuarioId === input.authUser?.uid;
-    const normalizedPhone = (input.phone || "").replace(/\D/g, "");
-    const matchesPhone =
-      normalizedPhone.length >= 8 &&
-      String(orden.direccionEnvio?.telefono || "").replace(/\D/g, "") ===
-        normalizedPhone;
 
-    if (!isPrivileged && !isOwner && !matchesPhone) {
-      throw new Error(
-        "No hay autorizacion suficiente para consultar el estado de este pedido",
-      );
+    if (!isPrivileged && !isOwner) {
+      // Deliberately match the missing-order result. A phone number received in
+      // the request is neither authentication nor proof of ownership.
+      return null;
     }
 
     return {
