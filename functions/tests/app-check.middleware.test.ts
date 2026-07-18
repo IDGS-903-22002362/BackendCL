@@ -199,7 +199,23 @@ describe("firebase rules static validation", () => {
 
   it("firestore denies default access", () => {
     expect(firestoreRules).toMatch(/allow read, write: if false/);
-    expect(firestoreRules).not.toMatch(/allow read: if true/);
+
+    const publicReadCollections = Array.from(
+      firestoreRules.matchAll(
+        /match \/([^/]+)\/\{[^}]+\}\s*\{\s*allow read: if true;/g,
+      ),
+      (match) => match[1],
+    );
+
+    expect(publicReadCollections).toEqual([
+      "liga_mx_contexto_actual",
+      "liga_mx_calendarios_actuales",
+      "liga_mx_clasificaciones_actuales",
+      "liga_mx_plantillas_actuales",
+      "liga_mx_jugadores_actuales",
+      "liga_mx_partidos_actuales",
+      "liga_mx_detalles_partido_actuales",
+    ]);
   });
 
   it("storage denies all client access", () => {

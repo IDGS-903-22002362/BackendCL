@@ -16,6 +16,7 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "test": "jest --runInBand",
+    "test:firestore:rules": "npx -y firebase-tools@latest emulators:exec --only firestore --project demo-backendcl-ai-rules --config ../firebase.rules-test.json \"jest --runInBand --runTestsByPath tests/firestore.ai-rules.emulator.test.ts\"",
     "migrate:size-inventory": "ts-node-dev --transpile-only src/scripts/migrate-size-inventory.ts",
     "backfill:search-text": "npm run build && node lib/scripts/backfill-product-search-text.js",
     "repair:stuck-paid-orders": "npm run build && node lib/scripts/repair-stuck-paid-order-state.js",
@@ -74,6 +75,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/busboy": "^1.5.4",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
@@ -94,6 +96,7 @@
     "eslint": "^8.9.0",
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.25.4",
+    "firebase": "^12.16.0",
     "firebase-functions-test": "^3.1.0",
     "jest": "^30.2.0",
     "nodemon": "^3.1.0",
