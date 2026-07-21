@@ -41,6 +41,54 @@ export const isCustomerOnlyAccount = (usuario: UsuarioRolesInput): boolean => {
   return roles.length > 0 && roles.every((role) => role === RolUsuario.CLIENTE);
 };
 
+type LoyaltyRecipientInput = UsuarioRolesInput & {
+  uid?: unknown;
+  email?: unknown;
+  provider?: unknown;
+  activo?: unknown;
+  from_concesion?: unknown;
+  concesionId?: unknown;
+  sucursalId?: unknown;
+  cajaId?: unknown;
+  admin?: unknown;
+  isAdmin?: unknown;
+};
+
+/**
+ * Compatibilidad acotada para miembros legacy: user.service ya normaliza un
+ * documento sin rol como CLIENTE. Para mutaciones de loyalty aplicamos el
+ * mismo fallback solo a perfiles de app sin marcadores internos/concesión.
+ */
+export const isLoyaltyCustomerRecipient = (
+  usuario: LoyaltyRecipientInput,
+): boolean => {
+  if (usuario.activo === false) return false;
+
+  const explicitRoles = getEffectiveRoles(usuario);
+  if (explicitRoles.length > 0) {
+    return explicitRoles.every((role) => role === RolUsuario.CLIENTE);
+  }
+
+  if (
+    usuario.from_concesion === true ||
+    usuario.admin === true ||
+    usuario.isAdmin === true ||
+    usuario.concesionId ||
+    usuario.sucursalId ||
+    usuario.cajaId
+  ) {
+    return false;
+  }
+
+  const hasUid = typeof usuario.uid === "string" && usuario.uid.trim().length > 0;
+  const hasClientIdentity =
+    typeof usuario.email === "string" ||
+    usuario.provider === "google" ||
+    usuario.provider === "apple" ||
+    usuario.provider === "email";
+  return hasUid && hasClientIdentity;
+};
+
 export const canAddAsTrabajadorClub = (
   usuario: UsuarioRolesInput & { activo?: boolean },
 ): { ok: true } | { ok: false; code: string; message: string } => {

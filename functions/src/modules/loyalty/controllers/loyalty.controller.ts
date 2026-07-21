@@ -8,7 +8,7 @@ import conversionRulesService from "../services/conversion-rules.service";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { actorHasPermission } from "../services/loyalty-auth.service";
 import { firestoreApp } from "../../../config/app.firebase";
-import { isCustomerOnlyAccount } from "../../../utils/usuario-roles";
+import { isLoyaltyCustomerRecipient } from "../../../utils/usuario-roles";
 
 function requireActor(req: Request) {
   if (!req.loyaltyActor) {
@@ -75,7 +75,7 @@ export async function getQrMemberSummary(req: Request, res: Response, next: Next
     const userSnap = await firestoreApp.collection("usuariosApp").doc(memberId).get();
     const userData = userSnap.data();
 
-    if (!userSnap.exists || !isCustomerOnlyAccount(userData ?? {})) {
+    if (!userSnap.exists || !isLoyaltyCustomerRecipient(userData ?? {})) {
       throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
     }
 

@@ -10,6 +10,7 @@ import * as loyaltyController from "../controllers/loyalty.controller";
 import {
   handleLoyaltyError,
   loyaltyActorMiddleware,
+  requirePointsAssignmentStaff,
   requireIdempotencyKey,
   requireLoyaltyPermission,
 } from "../middleware/loyalty.middleware";
@@ -72,7 +73,7 @@ router.get(
 router.get(
   "/staff/qr-members/:memberId",
   validateParams(memberIdParamSchema),
-  requireLoyaltyPermission(LoyaltyPermission.WALLET_READ_ANY),
+  requirePointsAssignmentStaff,
   loyaltyController.getQrMemberSummary,
 );
 

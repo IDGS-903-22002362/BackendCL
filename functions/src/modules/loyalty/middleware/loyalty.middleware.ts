@@ -6,6 +6,7 @@ import {
   actorHasPermission,
   buildActorContext,
 } from "../services/loyalty-auth.service";
+import { puedeAsignarPuntos } from "../../../models/usuario.model";
 
 declare global {
   namespace Express {
@@ -41,6 +42,19 @@ export function requireLoyaltyPermission(permission: LoyaltyPermission) {
     }
     next();
   };
+}
+
+/** Misma política usada por /usuarios/:id/puntos/asignar-por-venta. */
+export function requirePointsAssignmentStaff(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  if (!req.user || !puedeAsignarPuntos(req.user.rol)) {
+    next(new LoyaltyProblemError("FORBIDDEN"));
+    return;
+  }
+  next();
 }
 
 export function requireIdempotencyKey(

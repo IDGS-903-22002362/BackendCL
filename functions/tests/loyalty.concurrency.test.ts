@@ -241,4 +241,32 @@ describe("loyalty concurrency", () => {
 
     expect(fakeFirestore.count("loyalty_transactions")).toBe(0);
   });
+
+  it("permite acumular a un cliente legacy activo sin rol explícito", async () => {
+    fakeFirestore = createFakeFirestore({
+      usuariosApp: {
+        legacy_1: {
+          uid: "legacy_1",
+          email: "legacy@example.com",
+          activo: true,
+          puntosActuales: 0,
+          createdAt: fixedNow,
+          updatedAt: fixedNow,
+        },
+      },
+    });
+
+    const transaction = await loyaltyEngineService.earnFromSale({
+      memberId: "legacy_1",
+      externalTransactionId: "FOLIO-LEGACY",
+      amountCents: 10000,
+      currency: "MXN",
+      channel: LoyaltyChannel.STORE,
+      idempotencyKey: "legacy-sale",
+      actor,
+    });
+
+    expect(transaction.points).toBe(10);
+    expect(transaction.balanceAfter).toBe(10);
+  });
 });

@@ -29,7 +29,7 @@ import walletRepository from "../repositories/wallet.repository";
 import conversionRulesService from "./conversion-rules.service";
 import { requireLoyaltyWrites, loyaltyFeatureFlagsService } from "./loyalty-feature-flags.service";
 import pointsService from "../../../services/puntos.service";
-import { isCustomerOnlyAccount } from "../../../utils/usuario-roles";
+import { isLoyaltyCustomerRecipient } from "../../../utils/usuario-roles";
 
 const USUARIOS = "usuariosApp";
 const MOVIMIENTOS = "movimientos_puntos";
@@ -454,7 +454,7 @@ export class LoyaltyEngineService {
         .collection(USUARIOS)
         .doc(params.memberId)
         .get();
-      if (!recipient.exists || !isCustomerOnlyAccount(recipient.data() ?? {})) {
+      if (!recipient.exists || !isLoyaltyCustomerRecipient(recipient.data() ?? {})) {
         throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
       }
     }
@@ -516,7 +516,7 @@ export class LoyaltyEngineService {
       }
       if (
         params.requireCustomerRecipient &&
-        !isCustomerOnlyAccount(userSnap.data() ?? {})
+        !isLoyaltyCustomerRecipient(userSnap.data() ?? {})
       ) {
         // Mismo error que un QR desconocido: no filtrar la existencia ni el rol
         // de cuentas internas a operadores del escáner.
