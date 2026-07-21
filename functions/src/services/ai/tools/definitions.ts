@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { RolUsuario } from "../../../models/usuario.model";
+import { AiAgentType } from "../../../models/ai/ai.model";
 import { RuntimeAiToolDefinition, defineTool } from "./types";
 import storeAiBusinessService from "../knowledge/store-business.service";
 import tryOnWorkflowService from "../jobs/tryon-workflow.service";
@@ -58,6 +59,9 @@ const adminUpdateStockInput = z.object({ productId: z.string().trim().min(1), ca
 const adminUpdatePriceInput = z.object({ productId: z.string().trim().min(1), precioPublico: z.number().nonnegative() }).strict();
 
 const customerRoles = [RolUsuario.CLIENTE, RolUsuario.EMPLEADO, RolUsuario.ADMIN];
+const shoppingAgentTypes = [AiAgentType.SHOPPING];
+const sharedReadAgentTypes = [AiAgentType.SHOPPING, AiAgentType.ADMIN];
+const adminAgentTypes = [AiAgentType.ADMIN];
 
 const tools: RuntimeAiToolDefinition[] = [
   defineTool({
@@ -65,6 +69,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Busca productos reales del catalogo por texto libre y filtros semanticos.",
     schema: searchProductsInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({
       products: await storeAiBusinessService.searchProducts(input.query, input.filters),
@@ -75,6 +80,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene detalle completo de un producto real.",
     schema: productIdInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ product: await storeAiBusinessService.getProductDetail(input.productId) }),
   }),
@@ -83,6 +89,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene el precio publico actual de un producto.",
     schema: productIdInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ price: await storeAiBusinessService.getProductPrice(input.productId) }),
   }),
@@ -91,6 +98,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Consulta existencias reales y stock por talla de un producto.",
     schema: stockInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({
       stock: await storeAiBusinessService.getProductStock(input.productId, input.sizeId),
@@ -101,6 +109,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Consulta stock real de una talla especifica o del producto completo.",
     schema: stockInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({
       stock: await storeAiBusinessService.getProductStock(input.productId, input.sizeId),
@@ -111,6 +120,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene variantes y tallas reales de un producto.",
     schema: productIdInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ variants: await storeAiBusinessService.getProductVariants(input.productId) }),
   }),
@@ -119,6 +129,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Lista categorias reales del catalogo.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ categories: await storeAiBusinessService.listCategories() }),
   }),
@@ -127,6 +138,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Lista lineas o audiencias del catalogo.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ lines: await storeAiBusinessService.listLines() }),
   }),
@@ -135,6 +147,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Lista colecciones o documentos de catalogo resumido configurados en conocimiento.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ collections: await storeAiBusinessService.listCollections() }),
   }),
@@ -143,6 +156,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene productos relacionados existentes dentro de la tienda.",
     schema: relatedProductsInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ products: await storeAiBusinessService.getRelatedProducts(input) }),
   }),
@@ -151,6 +165,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Devuelve el link canonico de un producto si la tienda publica esta configurada.",
     schema: productIdInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ url: await storeAiBusinessService.getProductLink(input.productId) }),
   }),
@@ -159,6 +174,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Busca preguntas frecuentes y respuestas oficiales de la tienda.",
     schema: searchFaqInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ results: await storeAiBusinessService.searchFaq(input.query) }),
   }),
@@ -167,6 +183,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene respuesta FAQ o bundle de conocimiento por tema.",
     schema: getFaqAnswerInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ knowledge: await storeAiBusinessService.getKnowledgeBundle(input.topic) }),
   }),
@@ -175,6 +192,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene la politica de envios y configuracion publica de envio.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ shipping: await storeAiBusinessService.getShippingInfo() }),
   }),
@@ -183,6 +201,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene la politica de cambios y devoluciones.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ policy: await storeAiBusinessService.getReturnPolicy() }),
   }),
@@ -191,6 +210,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene promociones activas configuradas para la tienda.",
     schema: promotionsInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async (input) => ({ promotions: await storeAiBusinessService.getPromotions(input.activeOnly ?? true) }),
   }),
@@ -199,6 +219,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene informacion de tienda, contacto, horarios y ubicacion fisica.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ store: await storeAiBusinessService.getStoreInfo() }),
   }),
@@ -207,6 +228,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Lista los metodos de pago soportados por la tienda.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: true,
     execute: async () => ({ paymentMethods: await storeAiBusinessService.getPaymentMethods() }),
   }),
@@ -215,6 +237,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Consulta el estado de un pedido con autorizacion valida.",
     schema: orderStatusInput,
     roles: customerRoles,
+    agentTypes: sharedReadAgentTypes,
     public: false,
     execute: async (input, context) => ({
       order: await storeAiBusinessService.getOrderStatus({
@@ -230,9 +253,11 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Intenta resolver el producto referido por imagen o adjunto reciente.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: true,
     execute: async (_input, context) => ({
       reference: await storeAiBusinessService.detectImageReferencedProduct({
+        userId: context.userId,
         sessionId: context.sessionId,
         attachments: context.attachments?.map((attachment) => ({
           assetId: attachment.assetId,
@@ -245,6 +270,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Escala la conversacion a soporte humano cuando el caso lo amerita.",
     schema: handoffInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: true,
     execute: async (input) => ({
       handoff: await storeAiBusinessService.handoffToHuman(input.reason),
@@ -255,6 +281,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene o crea el carrito del usuario autenticado.",
     schema: z.object({}).strict(),
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (_input, context) => ({ cart: await storeAiBusinessService.createCart(context.userId) }),
   }),
@@ -263,6 +290,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Agrega un producto real al carrito del usuario autenticado.",
     schema: addToCartInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (input, context) => ({ cart: await storeAiBusinessService.addToCart(context.userId, input) }),
   }),
@@ -271,6 +299,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Elimina un producto real del carrito del usuario autenticado.",
     schema: removeFromCartInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (input, context) => ({ cart: await storeAiBusinessService.removeFromCart(context.userId, input) }),
   }),
@@ -279,6 +308,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Solicita la creacion de una vista previa visual del producto para el usuario autenticado.",
     schema: createTryOnJobInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (input, context) => ({
       job: await tryOnWorkflowService.createJob({
@@ -298,11 +328,12 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Consulta el estado actual de un job de try-on propio.",
     schema: getTryOnStatusInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (input, context) => {
       const job = await tryOnWorkflowService.getJobStatus(input.jobId);
       if (job && job.userId !== context.userId && context.role !== RolUsuario.ADMIN) {
-        throw new Error("No tienes permisos para ver este job de try-on");
+        return { job: null };
       }
       return { job };
     },
@@ -312,14 +343,17 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Obtiene el link de descarga seguro de un try-on propio si ya termino.",
     schema: getTryOnLinkInput,
     roles: customerRoles,
+    agentTypes: shoppingAgentTypes,
     public: false,
     execute: async (input, context) => {
       const job = await tryOnWorkflowService.getJobStatus(input.jobId);
       if (job && job.userId !== context.userId && context.role !== RolUsuario.ADMIN) {
-        throw new Error("No tienes permisos para descargar este try-on");
+        return { jobId: input.jobId, status: null, downloadUrl: null };
       }
-      const downloadUrl = await tryOnWorkflowService.getDownloadUrl(input.jobId);
-      return { jobId: input.jobId, status: job?.status, downloadUrl };
+      const downloadUrl = job
+        ? await tryOnWorkflowService.getDownloadUrl(input.jobId)
+        : null;
+      return { jobId: input.jobId, status: job?.status ?? null, downloadUrl };
     },
   }),
   defineTool({
@@ -327,6 +361,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Actualiza stock real de un producto para operaciones internas.",
     schema: adminUpdateStockInput,
     roles: [RolUsuario.EMPLEADO, RolUsuario.ADMIN],
+    agentTypes: adminAgentTypes,
     capabilities: ["inventory", "admin"],
     public: false,
     execute: async (input, context) => ({ result: await storeAiBusinessService.adminUpdateStock({ ...input, usuarioId: context.userId }) }),
@@ -336,6 +371,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Consulta inventario interno y alertas privadas de un producto.",
     schema: productIdInput,
     roles: [RolUsuario.EMPLEADO, RolUsuario.ADMIN],
+    agentTypes: adminAgentTypes,
     capabilities: ["inventory", "admin"],
     public: false,
     execute: async (input) => ({ inventory: await storeAiBusinessService.adminViewPrivateInventory(input.productId) }),
@@ -345,6 +381,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Actualiza el precio publico de un producto.",
     schema: adminUpdatePriceInput,
     roles: [RolUsuario.ADMIN],
+    agentTypes: adminAgentTypes,
     capabilities: ["admin"],
     public: false,
     execute: async (input) => ({ product: await storeAiBusinessService.adminUpdatePrice(input) }),
@@ -354,6 +391,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Publica un producto en el catalogo activo.",
     schema: productIdInput,
     roles: [RolUsuario.ADMIN],
+    agentTypes: adminAgentTypes,
     capabilities: ["admin"],
     public: false,
     execute: async (input) => ({ product: await storeAiBusinessService.adminPublishProduct(input.productId) }),
@@ -363,6 +401,7 @@ const tools: RuntimeAiToolDefinition[] = [
     description: "Oculta un producto del catalogo activo.",
     schema: productIdInput,
     roles: [RolUsuario.ADMIN],
+    agentTypes: adminAgentTypes,
     capabilities: ["admin"],
     public: false,
     execute: async (input) => ({ product: await storeAiBusinessService.adminHideProduct(input.productId) }),

@@ -26,6 +26,7 @@ jest.mock("../src/services/ai/jobs/tryon-job.service", () => ({
   __esModule: true,
   default: {
     createJob: jest.fn(),
+    findRecentJobByIdempotencyKey: jest.fn(),
     getJobById: jest.fn(),
     claimJobForProcessing: jest.fn(),
     markProcessing: jest.fn(),
@@ -38,13 +39,6 @@ jest.mock("../src/services/ai/memory/session.service", () => ({
   __esModule: true,
   default: {
     getSessionById: jest.fn(),
-  },
-}));
-
-jest.mock("../src/services/product.service", () => ({
-  __esModule: true,
-  default: {
-    getProductById: jest.fn(),
   },
 }));
 
@@ -82,17 +76,26 @@ jest.mock("../src/services/ai/jobs/product-preview-policy.service", () => ({
   },
 }));
 
+jest.mock("../src/services/ai/jobs/tryon-eligibility.service", () => ({
+  __esModule: true,
+  default: {
+    requireEnabled: jest.fn(),
+    requireEligible: jest.fn(),
+  },
+}));
+
 import tryOnWorkflowService from "../src/services/ai/jobs/tryon-workflow.service";
 import aiStorageService from "../src/services/ai/storage/ai-storage.service";
 import tryOnAssetService from "../src/services/ai/jobs/tryon-asset.service";
 import tryOnJobService from "../src/services/ai/jobs/tryon-job.service";
 import aiSessionService from "../src/services/ai/memory/session.service";
-import productService from "../src/services/product.service";
 import vertexTryOnAdapter, {
   VertexTryOnError,
 } from "../src/services/ai/adapters/vertex-tryon.adapter";
 import vertexPreviewMockupAdapter from "../src/services/ai/adapters/vertex-preview-mockup.adapter";
 import productPreviewPolicyService from "../src/services/ai/jobs/product-preview-policy.service";
+import tryOnEligibilityService from "../src/services/ai/jobs/tryon-eligibility.service";
+import { AiRuntimeError } from "../src/services/ai/ai.error";
 import {
   ProductPreviewClassificationSource,
   ProductPreviewMode,
@@ -110,7 +113,6 @@ const mockedJobService = tryOnJobService as jest.Mocked<typeof tryOnJobService>;
 const mockedSessionService = aiSessionService as jest.Mocked<
   typeof aiSessionService
 >;
-const mockedProductService = productService as jest.Mocked<typeof productService>;
 const mockedVertexAdapter = vertexTryOnAdapter as jest.Mocked<
   typeof vertexTryOnAdapter
 >;
@@ -119,12 +121,16 @@ const mockedPreviewMockupAdapter = vertexPreviewMockupAdapter as jest.Mocked<
 >;
 const mockedPreviewPolicyService =
   productPreviewPolicyService as jest.Mocked<typeof productPreviewPolicyService>;
+const mockedEligibilityService =
+  tryOnEligibilityService as jest.Mocked<typeof tryOnEligibilityService>;
 
 describe("AI try-on workflow", () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    // Reset implementations and one-shot queues, not only call history. This
+    // keeps policy failures isolated when tests run alone or as a suite.
+    jest.resetAllMocks();
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: jest
@@ -140,6 +146,13 @@ describe("AI try-on workflow", () => {
         `gs://${bucketName || "e-comerce-leon-ai-private"}/${objectPath}`,
     );
     mockedStorage.getBucketName.mockReturnValue("e-comerce-leon-ai-private");
+    mockedJobService.findRecentJobByIdempotencyKey.mockResolvedValue(null);
+    mockedJobService.getJobById.mockResolvedValue(null);
+    mockedAssetService.getAssetById.mockResolvedValue(null);
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "session_1",
+      userId: "user_1",
+    } as never);
     mockedPreviewPolicyService.resolvePolicy.mockResolvedValue({
       previewMode: ProductPreviewMode.BODY_TRYON,
       productPreviewType: ProductPreviewType.APPAREL,
@@ -152,29 +165,49 @@ describe("AI try-on workflow", () => {
         productDescription: "Jersey Oficial 2024",
       },
     });
+    mockedEligibilityService.requireEligible.mockResolvedValue({
+      result: {
+        eligible: true,
+        mode: ProductPreviewMode.BODY_TRYON,
+        reason: null,
+        requirements: [],
+        disclaimer: "",
+      },
+      product: { id: "prod_1", clave: "BACKEND-SKU" },
+      asset: {
+        id: "asset_1",
+        userId: "user_1",
+        kind: TryOnAssetKind.USER_UPLOAD,
+        bucket: "e-comerce-leon-ai-private",
+        objectPath: "ai/uploads/user_1/photo.png",
+      },
+      policy: {
+        previewMode: ProductPreviewMode.BODY_TRYON,
+        productPreviewType: ProductPreviewType.APPAREL,
+        classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
+        productCategorySnapshot: {
+          categoryId: "jersey",
+          categoryName: "Jersey Oficial",
+          lineId: "caballero",
+          lineName: "Caballero",
+          productDescription: "Jersey Oficial 2024",
+        },
+      },
+      productImageGcsUri:
+        "gs://e-comerce-leon.appspot.com/productos/jersey.png",
+      userImageGeneration: "user-gen-1",
+      productImageGeneration: "product-gen-1",
+    } as never);
   });
 
   afterAll(() => {
     global.fetch = originalFetch;
   });
 
-  it("crea job y convierte firebase storage URL a gs://", async () => {
+  it("crea job usando el mismo contexto canonico de elegibilidad", async () => {
     mockedSessionService.getSessionById.mockResolvedValue({
       id: "session_1",
       userId: "user_1",
-    } as never);
-    mockedAssetService.getAssetById.mockResolvedValue({
-      id: "asset_1",
-      userId: "user_1",
-      kind: TryOnAssetKind.USER_UPLOAD,
-      bucket: "e-comerce-leon-ai-private",
-      objectPath: "ai/uploads/user_1/photo.png",
-    } as never);
-    mockedProductService.getProductById.mockResolvedValue({
-      id: "prod_1",
-      imagenes: [
-        "https://firebasestorage.googleapis.com/v0/b/e-comerce-leon.appspot.com/o/productos%2Fjersey.png?alt=media&token=abc",
-      ],
     } as never);
     mockedJobService.createJob.mockResolvedValue({
       id: "job_1",
@@ -184,9 +217,17 @@ describe("AI try-on workflow", () => {
       userId: "user_1",
       sessionId: "session_1",
       productId: "prod_1",
+      sku: "CLIENT-SKU",
       userImageAssetId: "asset_1",
       consentAccepted: true,
       requestedByRole: RolUsuario.CLIENTE,
+    });
+
+    expect(mockedEligibilityService.requireEligible).toHaveBeenCalledWith({
+      userId: "user_1",
+      sessionId: "session_1",
+      productId: "prod_1",
+      userImageAssetId: "asset_1",
     });
 
     expect(mockedJobService.createJob).toHaveBeenCalledWith(
@@ -195,11 +236,149 @@ describe("AI try-on workflow", () => {
           "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
         inputProductImageUrl:
           "gs://e-comerce-leon.appspot.com/productos/jersey.png",
+        sku: "BACKEND-SKU",
         previewMode: ProductPreviewMode.BODY_TRYON,
         productPreviewType: ProductPreviewType.APPAREL,
         classificationSource: ProductPreviewClassificationSource.CATEGORY_ID,
+        inputUserImageGeneration: "user-gen-1",
+        inputProductImageGeneration: "product-gen-1",
       }),
     );
+    expect(mockedAssetService.attachJob).not.toHaveBeenCalled();
+  });
+
+  it("reproduce el job exacto aunque el asset posprocesado ya no exista", async () => {
+    const existingJob = {
+      id: "job_existing",
+      userId: "user_1",
+      sessionId: "session_1",
+      productId: "prod_1",
+      inputUserImageAssetId: "asset_1",
+      consentAccepted: true,
+      requestedByRole: RolUsuario.CLIENTE,
+      idempotencyKey: "idem-key-123",
+      status: TryOnJobStatus.COMPLETED,
+    } as never;
+    mockedJobService.findRecentJobByIdempotencyKey.mockResolvedValue(existingJob);
+    mockedEligibilityService.requireEligible.mockRejectedValue(
+      new AiRuntimeError(
+        "AI_TRYON_ASSET_UNAVAILABLE",
+        "Imagen de usuario no disponible para probador virtual",
+        404,
+      ),
+    );
+
+    const result = await tryOnWorkflowService.createJob({
+      userId: "user_1",
+      sessionId: "session_1",
+      productId: "prod_1",
+      userImageAssetId: "asset_1",
+      consentAccepted: true,
+      idempotencyKey: "idem-key-123",
+      requestedByRole: RolUsuario.CLIENTE,
+    });
+
+    expect(result).toBe(existingJob);
+    expect(mockedSessionService.getSessionById).toHaveBeenCalledWith("session_1");
+    expect(mockedEligibilityService.requireEligible).not.toHaveBeenCalled();
+    expect(mockedJobService.findRecentJobByIdempotencyKey).toHaveBeenCalledTimes(1);
+    expect(mockedJobService.createJob).not.toHaveBeenCalled();
+  });
+
+  it("rechaza colision de idempotencia aunque pertenezca al mismo usuario", async () => {
+    mockedJobService.findRecentJobByIdempotencyKey.mockResolvedValue({
+      id: "job_other_payload",
+      userId: "user_1",
+      sessionId: "session_2",
+      productId: "prod_other",
+      inputUserImageAssetId: "asset_other",
+      consentAccepted: true,
+      requestedByRole: RolUsuario.CLIENTE,
+      idempotencyKey: "idem-key-123",
+      status: TryOnJobStatus.COMPLETED,
+    } as never);
+
+    await expect(
+      tryOnWorkflowService.createJob({
+        userId: "user_1",
+        sessionId: "session_1",
+        productId: "prod_1",
+        userImageAssetId: "asset_1",
+        consentAccepted: true,
+        idempotencyKey: "idem-key-123",
+        requestedByRole: RolUsuario.CLIENTE,
+      }),
+    ).rejects.toMatchObject({
+      code: "AI_TRYON_IDEMPOTENCY_CONFLICT",
+      statusCode: 409,
+    });
+    expect(mockedEligibilityService.requireEligible).not.toHaveBeenCalled();
+    expect(mockedSessionService.getSessionById).not.toHaveBeenCalled();
+    expect(mockedJobService.createJob).not.toHaveBeenCalled();
+  });
+
+  it("aplica la elegibilidad canonica a una solicitud idempotente nueva", async () => {
+    mockedEligibilityService.requireEligible.mockRejectedValue(
+      new AiRuntimeError(
+        "PRODUCT_PREVIEW_UNAVAILABLE",
+        "Producto no disponible para probador virtual",
+        404,
+      ),
+    );
+
+    await expect(
+      tryOnWorkflowService.createJob({
+        userId: "user_1",
+        sessionId: "session_1",
+        productId: "prod_1",
+        userImageAssetId: "asset_1",
+        consentAccepted: true,
+        idempotencyKey: "idem-key-123",
+        requestedByRole: RolUsuario.CLIENTE,
+      }),
+    ).rejects.toMatchObject({ code: "PRODUCT_PREVIEW_UNAVAILABLE" });
+    expect(mockedJobService.findRecentJobByIdempotencyKey).toHaveBeenCalledTimes(1);
+    expect(mockedEligibilityService.requireEligible).toHaveBeenCalledWith({
+      userId: "user_1",
+      sessionId: "session_1",
+      productId: "prod_1",
+      userImageAssetId: "asset_1",
+    });
+    expect(mockedJobService.createJob).not.toHaveBeenCalled();
+  });
+
+  it("no reproduce un job exacto si la sesion ya no pertenece al usuario", async () => {
+    mockedJobService.findRecentJobByIdempotencyKey.mockResolvedValue({
+      id: "job_existing",
+      userId: "user_1",
+      sessionId: "session_1",
+      productId: "prod_1",
+      inputUserImageAssetId: "asset_1",
+      consentAccepted: true,
+      requestedByRole: RolUsuario.CLIENTE,
+      idempotencyKey: "idem-key-123",
+      status: TryOnJobStatus.COMPLETED,
+    } as never);
+    mockedSessionService.getSessionById.mockResolvedValue({
+      id: "session_1",
+      userId: "other_user",
+    } as never);
+
+    await expect(
+      tryOnWorkflowService.createJob({
+        userId: "user_1",
+        sessionId: "session_1",
+        productId: "prod_1",
+        userImageAssetId: "asset_1",
+        consentAccepted: true,
+        idempotencyKey: "idem-key-123",
+        requestedByRole: RolUsuario.CLIENTE,
+      }),
+    ).rejects.toMatchObject({
+      code: "AI_TRYON_SESSION_UNAVAILABLE",
+      statusCode: 404,
+    });
+    expect(mockedEligibilityService.requireEligible).not.toHaveBeenCalled();
   });
 
   it("procesa job queued a completed y persiste referencia estable", async () => {
@@ -213,6 +392,8 @@ describe("AI try-on workflow", () => {
         "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
       inputProductImageUrl:
         "gs://e-comerce-leon.appspot.com/productos/jersey.png",
+      inputUserImageGeneration: "user-gen-1",
+      inputProductImageGeneration: "product-gen-1",
       status: TryOnJobStatus.PROCESSING,
       previewMode: ProductPreviewMode.BODY_TRYON,
       productPreviewType: ProductPreviewType.APPAREL,
@@ -230,11 +411,11 @@ describe("AI try-on workflow", () => {
       mimeType: "image/png",
       rawResponse: {},
     });
-    mockedStorage.downloadGcsFile.mockResolvedValue({
-      buffer: Buffer.from("person-image"),
+    mockedStorage.downloadGcsFile.mockImplementation(async (uri: string) => ({
+      buffer: Buffer.from(uri.includes("jersey") ? "garment-image" : "person-image"),
       mimeType: "image/png",
       sizeBytes: 12,
-    });
+    }));
     mockedStorage.uploadPrivateFile.mockResolvedValue({
       bucket: "e-comerce-leon-ai-private",
       objectPath: "ai/tryon-results/user_1/session_1/result.png",
@@ -253,6 +434,7 @@ describe("AI try-on workflow", () => {
     expect(mockedJobService.markProcessing).not.toHaveBeenCalled();
     expect(mockedStorage.downloadGcsFile).toHaveBeenCalledWith(
       "gs://e-comerce-leon-ai-private/ai/uploads/user_1/photo.png",
+      "user-gen-1",
     );
     expect(mockedVertexAdapter.runTryOn).toHaveBeenCalledWith({
       personImage: {
@@ -352,31 +534,13 @@ describe("AI try-on workflow", () => {
       id: "session_1",
       userId: "user_1",
     } as never);
-    mockedAssetService.getAssetById.mockResolvedValue({
-      id: "asset_1",
-      userId: "user_1",
-      kind: TryOnAssetKind.USER_UPLOAD,
-      bucket: "e-comerce-leon-ai-private",
-      objectPath: "ai/uploads/user_1/photo.png",
-    } as never);
-    mockedProductService.getProductById.mockResolvedValue({
-      id: "prod_unknown",
-      descripcion: "Producto misterioso",
-      categoriaId: "desconocido",
-      lineaId: "desconocida",
-      imagenes: [
-        "https://firebasestorage.googleapis.com/v0/b/e-comerce-leon.appspot.com/o/productos%2Funknown.png?alt=media",
-      ],
-    } as never);
-    mockedPreviewPolicyService.resolvePolicy.mockResolvedValue({
-      previewMode: ProductPreviewMode.UNSUPPORTED,
-      productPreviewType: ProductPreviewType.UNKNOWN,
-      classificationSource: ProductPreviewClassificationSource.UNCLASSIFIED,
-      productCategorySnapshot: {
-        categoryId: "desconocido",
-        productDescription: "Producto misterioso",
-      },
-    });
+    mockedEligibilityService.requireEligible.mockRejectedValue(
+      new AiRuntimeError(
+        "PRODUCT_PREVIEW_CLASSIFICATION_FAILED",
+        "No se pudo clasificar el producto para una vista previa confiable",
+        400,
+      ),
+    );
 
     await expect(
       tryOnWorkflowService.createJob({
@@ -397,11 +561,14 @@ describe("AI try-on workflow", () => {
   it("firma la descarga usando el bucket persistido en el asset de salida", async () => {
     mockedJobService.getJobById.mockResolvedValue({
       id: "job_1",
+      userId: "user_1",
       status: TryOnJobStatus.COMPLETED,
       outputAssetId: "asset_out_1",
     } as never);
     mockedAssetService.getAssetById.mockResolvedValue({
       id: "asset_out_1",
+      userId: "user_1",
+      jobId: "job_1",
       bucket: "custom-output-bucket",
       objectPath: "ai/tryon-results/user_1/session_1/job_1.png",
     } as never);

@@ -169,6 +169,17 @@ class ProductPreviewPolicyService {
       productDescription: product.descripcion,
     };
 
+    // A semantic identifier or free-form description is not sufficient proof
+    // that the referenced catalog records exist and are active. Category and
+    // line services already fail closed for missing/soft-deleted documents.
+    if (
+      !category ||
+      !line ||
+      (category.lineaId && category.lineaId !== product.lineaId)
+    ) {
+      return buildUnsupportedPolicy(snapshot);
+    }
+
     const normalizedLineId = normalizeToken(product.lineaId);
     const normalizedLineName = normalizeToken(line?.nombre);
     const normalizedCategoryId = normalizeToken(product.categoriaId);

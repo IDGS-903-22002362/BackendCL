@@ -32,12 +32,26 @@ jest.mock("../src/services/ai/knowledge/store-business.service", () => ({
   },
 }));
 
+jest.mock("../src/services/ai/jobs/tryon-workflow.service", () => ({
+  __esModule: true,
+  default: {
+    createJob: jest.fn(),
+    getJobStatus: jest.fn(),
+    getDownloadUrl: jest.fn(),
+  },
+}));
+
 import aiToolDefinitions from "../src/services/ai/tools/definitions";
 import storeAiBusinessService from "../src/services/ai/knowledge/store-business.service";
+import tryOnWorkflowService from "../src/services/ai/jobs/tryon-workflow.service";
+import { AiAgentType } from "../src/models/ai/ai.model";
 import { RolUsuario } from "../src/models/usuario.model";
 
 const mockedStoreAiBusinessService = storeAiBusinessService as jest.Mocked<
   typeof storeAiBusinessService
+>;
+const mockedTryOnWorkflowService = tryOnWorkflowService as jest.Mocked<
+  typeof tryOnWorkflowService
 >;
 
 describe("AI commerce tools", () => {
@@ -60,6 +74,7 @@ describe("AI commerce tools", () => {
         userId: "user-1",
         role: RolUsuario.CLIENTE,
         capabilities: ["customer"],
+        agentType: AiAgentType.SHOPPING,
         sessionMode: "authenticated",
       },
     );
@@ -71,5 +86,77 @@ describe("AI commerce tools", () => {
     expect(result).toEqual({
       products: [{ id: "prod_1" }],
     });
+  });
+
+  it("detect_image_referenced_product propaga el uid autenticado para validar ownership", async () => {
+    const tool = aiToolDefinitions.find(
+      (item) => item.name === "detect_image_referenced_product",
+    );
+    mockedStoreAiBusinessService.detectImageReferencedProduct.mockResolvedValue(
+      null,
+    );
+
+    await tool!.execute(
+      {},
+      {
+        userId: "user-1",
+        role: RolUsuario.CLIENTE,
+        capabilities: ["customer"],
+        agentType: AiAgentType.SHOPPING,
+        sessionId: "session-1",
+        sessionMode: "authenticated",
+        attachments: [
+          {
+            assetId: "asset-user-2",
+            mimeType: "image/jpeg",
+            kind: "user_upload" as never,
+          },
+        ],
+      },
+    );
+
+    expect(
+      mockedStoreAiBusinessService.detectImageReferencedProduct,
+    ).toHaveBeenCalledWith({
+      userId: "user-1",
+      sessionId: "session-1",
+      attachments: [{ assetId: "asset-user-2" }],
+    });
+  });
+
+  it("oculta por igual un job de try-on ajeno y uno inexistente al pedir descarga", async () => {
+    const tool = aiToolDefinitions.find(
+      (item) => item.name === "get_tryon_download_link",
+    );
+    const context = {
+      userId: "user-1",
+      role: RolUsuario.CLIENTE,
+      capabilities: ["customer"],
+      agentType: AiAgentType.SHOPPING,
+      sessionMode: "authenticated" as const,
+    };
+
+    mockedTryOnWorkflowService.getJobStatus
+      .mockResolvedValueOnce({
+        id: "job-user-2",
+        userId: "user-2",
+        status: "completed",
+      } as never)
+      .mockResolvedValueOnce(null);
+
+    const foreign = await tool!.execute({ jobId: "job-user-2" }, context);
+    const missing = await tool!.execute({ jobId: "job-missing" }, context);
+
+    expect(foreign).toEqual({
+      jobId: "job-user-2",
+      status: null,
+      downloadUrl: null,
+    });
+    expect(missing).toEqual({
+      jobId: "job-missing",
+      status: null,
+      downloadUrl: null,
+    });
+    expect(mockedTryOnWorkflowService.getDownloadUrl).not.toHaveBeenCalled();
   });
 });

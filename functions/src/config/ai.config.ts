@@ -193,7 +193,7 @@ export const aiConfig = {
     rateLimitWindowMs: toInt(process.env.AI_RATE_LIMIT_WINDOW_MS, 60000),
     rateLimitMax: toInt(process.env.AI_RATE_LIMIT_MAX, 30),
     enableSse: toBool(process.env.AI_ENABLE_SSE, true),
-    publicChatEnabled: toBool(process.env.AI_PUBLIC_CHAT_ENABLED, true),
+    publicChatEnabled: toBool(process.env.AI_PUBLIC_CHAT_ENABLED, false),
     publicChatRateLimitWindowMs: toInt(
       process.env.AI_PUBLIC_CHAT_RATE_LIMIT_WINDOW_MS,
       60000,

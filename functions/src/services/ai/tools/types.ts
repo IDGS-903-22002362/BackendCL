@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { FunctionDeclaration } from "@google/genai";
-import { AiAttachment } from "../../../models/ai/ai.model";
+import { AiAgentType, AiAttachment } from "../../../models/ai/ai.model";
 import { RolUsuario } from "../../../models/usuario.model";
 
 export interface AiToolExecutionContext {
@@ -9,6 +9,7 @@ export interface AiToolExecutionContext {
   role: RolUsuario;
   requestId?: string;
   capabilities: string[];
+  agentType: AiAgentType;
   sessionId?: string;
   sessionMode?: "authenticated" | "guest";
   attachments?: AiAttachment[];
@@ -31,6 +32,7 @@ export interface AiToolDefinition<TInput extends Record<string, unknown> = Recor
   description: string;
   schema: z.ZodType<TInput>;
   roles: RolUsuario[];
+  agentTypes: AiAgentType[];
   capabilities?: string[];
   public?: boolean;
   execute: (
@@ -44,6 +46,7 @@ export interface RuntimeAiToolDefinition {
   description: string;
   schema: z.ZodTypeAny;
   roles: RolUsuario[];
+  agentTypes: AiAgentType[];
   capabilities?: string[];
   public?: boolean;
   execute: (

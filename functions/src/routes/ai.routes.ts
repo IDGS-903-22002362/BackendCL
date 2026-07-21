@@ -17,10 +17,12 @@ import {
 } from "../middleware/validators/ai-public-chat.validator";
 import {
   createTryOnJobSchema,
+  tryOnEligibilitySchema,
   tryOnAssetIdParamSchema,
   tryOnJobIdParamSchema,
 } from "../middleware/validators/ai-tryon.validator";
 import {
+  aiAdminChatRateLimiter,
   aiChatRateLimiter,
   aiPublicChatRateLimiter,
   aiUploadRateLimiter,
@@ -32,6 +34,7 @@ import {
 } from "../middleware/ai-tryon.middleware";
 import { parseMultipartImages } from "../middleware/multipart.middleware";
 import { requireAiAdmin } from "../middleware/ai-authz.middleware";
+import { aiAppCheckMiddleware } from "../middleware/ai-app-check.middleware";
 import * as chatController from "../controllers/ai/chat.controller";
 import * as filesController from "../controllers/ai/files.controller";
 import * as tryonController from "../controllers/ai/tryon.controller";
@@ -39,6 +42,10 @@ import * as adminController from "../controllers/ai/admin.controller";
 
 const router = Router();
 const protectedRouter = Router();
+
+// App Check is independent from user authentication: a valid Bearer JWT never
+// bypasses attestation for chat, uploads, try-on, or AI admin endpoints.
+router.use(aiAppCheckMiddleware);
 
 if (aiConfig.api.publicChatEnabled) {
   router.post(
@@ -198,6 +205,36 @@ protectedRouter.post(
   asyncHandler(chatController.sendMessage),
 );
 
+// Admin Copilot has a separate route surface. The agent type is assigned by
+// the backend and is never accepted from request bodies.
+protectedRouter.post(
+  "/admin/chat/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(createAiSessionSchema),
+  asyncHandler(chatController.createAdminSession),
+);
+protectedRouter.get(
+  "/admin/chat/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  asyncHandler(chatController.listAdminSessions),
+);
+protectedRouter.get(
+  "/admin/chat/sessions/:id",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateParams(sessionIdParamSchema),
+  asyncHandler(chatController.getAdminSessionDetail),
+);
+protectedRouter.post(
+  "/admin/chat/messages",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(sendAiMessageSchema),
+  asyncHandler(chatController.sendAdminMessage),
+);
+
 /**
  * @swagger
  * /api/ai/files/upload:
@@ -243,6 +280,13 @@ protectedRouter.delete(
   requireTryOnEnabled,
   validateParams(tryOnAssetIdParamSchema),
   asyncHandler(filesController.deleteUserImage),
+);
+
+protectedRouter.post(
+  "/tryon/eligibility",
+  aiTryOnUserRateLimiter,
+  validateBody(tryOnEligibilitySchema),
+  asyncHandler(tryonController.getTryOnEligibility),
 );
 
 /**

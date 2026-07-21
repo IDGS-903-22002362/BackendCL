@@ -2,19 +2,17 @@ import path from "path";
 import aiConfig from "../../../config/ai.config";
 import { admin } from "../../../config/firebase.admin";
 import {
-  ProductPreviewClassificationSource,
+  AiSessionStatus,
   ProductPreviewMode,
   TryOnAssetKind,
   TryOnJob,
   TryOnJobStatus,
 } from "../../../models/ai/ai.model";
-import productService from "../../../services/product.service";
 import logger from "../../../utils/logger";
 import {
   AiRuntimeError,
-  AI_TRYON_DISABLED_CODE,
-  PRODUCT_PREVIEW_CLASSIFICATION_FAILED_CODE,
-  PRODUCT_PREVIEW_IMAGE_INVALID_CODE,
+  AI_TRYON_IDEMPOTENCY_CONFLICT_CODE,
+  AI_TRYON_SESSION_UNAVAILABLE_CODE,
   PRODUCT_PREVIEW_UNSUPPORTED_CODE,
 } from "../ai.error";
 import vertexTryOnAdapter, {
@@ -22,43 +20,9 @@ import vertexTryOnAdapter, {
 } from "../adapters/vertex-tryon.adapter";
 import aiSessionService from "../memory/session.service";
 import aiStorageService from "../storage/ai-storage.service";
-import productPreviewPolicyService from "./product-preview-policy.service";
 import tryOnAssetService from "./tryon-asset.service";
+import tryOnEligibilityService from "./tryon-eligibility.service";
 import tryOnJobService from "./tryon-job.service";
-
-const normalizeToGcsUri = (url: string): string | null => {
-  const gsMatch = url.match(/^gs:\/\/([^/]+)\/(.+)$/);
-  if (gsMatch) {
-    return url;
-  }
-
-  const publicMatch = url.match(/^https:\/\/storage.googleapis.com\/([^/]+)\/(.+)$/);
-  if (publicMatch) {
-    return `gs://${publicMatch[1]}/${decodeURI(publicMatch[2])}`;
-  }
-
-  if (url.startsWith("https://firebasestorage.googleapis.com/")) {
-    try {
-      const parsed = new URL(url);
-      const pathMatch = parsed.pathname.match(/\/v0\/b\/([^/]+)\/o\/(.+)$/);
-      if (!pathMatch) {
-        return null;
-      }
-
-      return `gs://${pathMatch[1]}/${decodeURIComponent(pathMatch[2])}`;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-};
-
-const encodeObjectPathForPublicUrl = (objectPath: string): string =>
-  objectPath
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
 
 const downloadHttpImage = async (
   url: string,
@@ -77,6 +41,7 @@ const downloadHttpImage = async (
 
 const resolveVertexImageInput = async (
   uri: string,
+  generation?: string,
 ): Promise<{ bytesBase64Encoded: string; mimeType?: string }> => {
   if (uri.startsWith("gs://")) {
     const match = uri.match(/^gs:\/\/([^/]+)\/(.+)$/);
@@ -85,16 +50,11 @@ const resolveVertexImageInput = async (
     }
 
     const [, bucketName, objectPath] = match;
-    if (bucketName === aiStorageService.getBucketName()) {
-      const downloaded = await aiStorageService.downloadGcsFile(uri);
-      return {
-        bytesBase64Encoded: downloaded.buffer.toString("base64"),
-        mimeType: downloaded.mimeType,
-      };
+    if (generation || bucketName === aiStorageService.getBucketName()) {
+      const downloaded = generation ? await aiStorageService.downloadGcsFile(uri, generation) : await aiStorageService.downloadGcsFile(uri);
+      return { bytesBase64Encoded: downloaded.buffer.toString("base64"), mimeType: downloaded.mimeType };
     }
-
-    const publicUrl = `https://storage.googleapis.com/${bucketName}/${encodeObjectPathForPublicUrl(objectPath)}`;
-    return downloadHttpImage(publicUrl);
+    return downloadHttpImage(`https://storage.googleapis.com/${bucketName}/${objectPath.split("/").map(encodeURIComponent).join("/")}`);
   }
 
   if (/^https?:\/\//.test(uri)) {
@@ -103,25 +63,6 @@ const resolveVertexImageInput = async (
 
   throw new Error("Fuente de imagen no compatible para try-on");
 };
-
-const resolvePreviewClassificationError = (
-  classificationSource: ProductPreviewClassificationSource,
-  categoryName?: string | null,
-  lineName?: string | null,
-) =>
-  classificationSource === ProductPreviewClassificationSource.UNCLASSIFIED &&
-  !categoryName &&
-  !lineName
-    ? new AiRuntimeError(
-        PRODUCT_PREVIEW_CLASSIFICATION_FAILED_CODE,
-        "No se pudo clasificar el producto para generar una vista previa confiable",
-        400,
-      )
-    : new AiRuntimeError(
-        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
-        "El producto seleccionado no es compatible con una vista previa AI confiable",
-        400,
-      );
 
 type ProviderImageResult = {
   outputImageBytesBase64?: string;
@@ -264,14 +205,6 @@ class TryOnWorkflowService {
     idempotencyKey?: string;
     requestedByRole: TryOnJob["requestedByRole"];
   }): Promise<TryOnJob> {
-    if (!aiConfig.tryOn.enabled) {
-      throw new AiRuntimeError(
-        AI_TRYON_DISABLED_CODE,
-        "El probador virtual no esta disponible temporalmente",
-        503,
-      );
-    }
-
     if (input.idempotencyKey) {
       const since = admin.firestore.Timestamp.fromMillis(
         Date.now() - aiConfig.tryOn.idempotencyWindowMs,
@@ -283,96 +216,71 @@ class TryOnWorkflowService {
       );
 
       if (existingJob) {
-        const isActiveJob =
-          existingJob.status === TryOnJobStatus.QUEUED ||
-          existingJob.status === TryOnJobStatus.PROCESSING ||
-          existingJob.status === TryOnJobStatus.COMPLETED;
-        const isPermanentQuotaFailure =
-          existingJob.status === TryOnJobStatus.FAILED &&
-          (existingJob.errorCode === "VERTEX_QUOTA_EXCEEDED" ||
-            existingJob.errorCode === "PRODUCT_PREVIEW_QUOTA_EXCEEDED");
+        const exactPayloadMatch =
+          existingJob.userId === input.userId &&
+          existingJob.sessionId === input.sessionId &&
+          existingJob.productId === input.productId &&
+          existingJob.inputUserImageAssetId === input.userImageAssetId &&
+          (existingJob.variantId ?? undefined) === (input.variantId ?? undefined) &&
+          existingJob.consentAccepted === input.consentAccepted &&
+          existingJob.requestedByRole === input.requestedByRole &&
+          existingJob.idempotencyKey === input.idempotencyKey;
 
-        if (isActiveJob || isPermanentQuotaFailure) {
-          return existingJob;
+        if (!exactPayloadMatch) {
+          throw new AiRuntimeError(
+            AI_TRYON_IDEMPOTENCY_CONFLICT_CODE,
+            "La llave de idempotencia ya fue utilizada con otra solicitud",
+            409,
+          );
         }
+
+        const session = await aiSessionService.getSessionById(input.sessionId);
+        if (!session || session.userId !== input.userId || (session.status && session.status !== AiSessionStatus.ACTIVE)) {
+          throw new AiRuntimeError(
+            AI_TRYON_SESSION_UNAVAILABLE_CODE,
+            "Sesion AI no disponible para probador virtual",
+            404,
+          );
+        }
+
+        // This is a replay of an operation already admitted and persisted,
+        // not a new policy decision. The worker may have intentionally deleted
+        // the input upload after completion, so re-reading that asset here
+        // would make an exact idempotent replay impossible.
+        return existingJob;
       }
     }
 
-    const [session, asset, product] = await Promise.all([
-      aiSessionService.getSessionById(input.sessionId),
-      tryOnAssetService.getAssetById(input.userImageAssetId),
-      productService.getProductById(input.productId),
-    ]);
-
-    if (!session || session.userId !== input.userId) {
-      throw new Error("Sesion AI invalida para crear try-on");
-    }
-
-    if (!asset || asset.userId !== input.userId) {
-      throw new Error("Asset de usuario invalido para crear try-on");
-    }
-
-    if (asset.kind !== TryOnAssetKind.USER_UPLOAD) {
-      throw new Error("El asset seleccionado no es una foto de usuario valida para try-on");
-    }
-
-    if (!product || !Array.isArray(product.imagenes) || product.imagenes.length === 0) {
-      throw new AiRuntimeError(
-        PRODUCT_PREVIEW_IMAGE_INVALID_CODE,
-        "El producto seleccionado no tiene imagen oficial utilizable para generar preview",
-        400,
-      );
-    }
-
-    if (product.activo === false) {
-      throw new AiRuntimeError(
-        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
-        "El producto seleccionado no esta disponible para probador virtual",
-        400,
-      );
-    }
-
-    const previewPolicy = await productPreviewPolicyService.resolvePolicy(product);
-    if (previewPolicy.previewMode !== ProductPreviewMode.BODY_TRYON) {
-      if (previewPolicy.previewMode === ProductPreviewMode.UNSUPPORTED) {
-        throw resolvePreviewClassificationError(
-          previewPolicy.classificationSource,
-          previewPolicy.productCategorySnapshot.categoryName,
-          previewPolicy.productCategorySnapshot.lineName,
-        );
-      }
-
-      throw new AiRuntimeError(
-        PRODUCT_PREVIEW_UNSUPPORTED_CODE,
-        "El probador virtual solo esta disponible para prendas de adulto",
-        400,
-      );
-    }
-
-    const productImageUrl = product.imagenes[0];
-    const productImageGcsUri = normalizeToGcsUri(productImageUrl);
-    if (!productImageGcsUri) {
-      throw new AiRuntimeError(
-        PRODUCT_PREVIEW_IMAGE_INVALID_CODE,
-        "La imagen oficial del producto no es compatible con el flujo de preview",
-        400,
-      );
-    }
+    // Every initial job creation is admitted by the canonical policy. No
+    // idempotency lookup may create a fresh job or bypass this gate.
+    const eligibility = await tryOnEligibilityService.requireEligible({
+      userId: input.userId,
+      sessionId: input.sessionId,
+      productId: input.productId,
+      userImageAssetId: input.userImageAssetId,
+    });
 
     const job = await tryOnJobService.createJob({
       ...input,
-      inputUserImageAssetId: asset.id!,
-      inputUserImageUrl: aiStorageService.buildGcsUri(asset.objectPath, asset.bucket),
-      inputProductImageUrl: productImageGcsUri,
+      // The catalog is authoritative for commercial identifiers; never persist
+      // a client-authored SKU as product truth.
+      sku: eligibility.product.clave || undefined,
+      inputUserImageAssetId: eligibility.asset.id!,
+      inputUserImageUrl: aiStorageService.buildGcsUri(
+        eligibility.asset.objectPath,
+        eligibility.asset.bucket,
+      ),
+      inputProductImageUrl: eligibility.productImageGcsUri,
+      inputUserImageGeneration: eligibility.userImageGeneration,
+      inputProductImageGeneration: eligibility.productImageGeneration,
       consentVersion: aiConfig.tryOn.consentVersion,
       consentAcceptedAt: admin.firestore.Timestamp.now(),
-      previewMode: previewPolicy.previewMode,
-      productPreviewType: previewPolicy.productPreviewType,
-      classificationSource: previewPolicy.classificationSource,
-      productCategorySnapshot: previewPolicy.productCategorySnapshot,
+      previewMode: eligibility.policy.previewMode,
+      productPreviewType: eligibility.policy.productPreviewType,
+      classificationSource: eligibility.policy.classificationSource,
+      productCategorySnapshot: eligibility.policy.productCategorySnapshot,
     });
 
-    await tryOnAssetService.attachJob(asset.id!, job.id!);
     return job;
   }
 
@@ -396,7 +304,11 @@ class TryOnWorkflowService {
     }
 
     const asset = await tryOnAssetService.getAssetById(job.outputAssetId);
-    return asset || null;
+    if (!asset || asset.userId !== job.userId || asset.jobId !== job.id) {
+      return null;
+    }
+
+    return asset;
   }
 
   async processQueuedJob(jobId: string): Promise<void> {
@@ -426,8 +338,8 @@ class TryOnWorkflowService {
       }
 
       const [personImage, productImage] = await Promise.all([
-        resolveVertexImageInput(job.inputUserImageUrl!),
-        resolveVertexImageInput(job.inputProductImageUrl),
+        resolveVertexImageInput(job.inputUserImageUrl!, job.inputUserImageGeneration),
+        resolveVertexImageInput(job.inputProductImageUrl, job.inputProductImageGeneration),
       ]);
       const providerResult = await vertexTryOnAdapter.runTryOn({
         personImage,

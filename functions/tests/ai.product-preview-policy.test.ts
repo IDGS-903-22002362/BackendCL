@@ -158,4 +158,41 @@ describe("AI product preview policy", () => {
       classificationSource: ProductPreviewClassificationSource.UNCLASSIFIED,
     });
   });
+
+  it("no clasifica por identificador o descripcion si faltan catalogos reales", async () => {
+    mockedCategoryService.getCategoryById.mockResolvedValue(null);
+    mockedLineService.getLineById.mockResolvedValue(null);
+
+    const result = await productPreviewPolicyService.resolvePolicy({
+      id: "prod_orphan",
+      categoriaId: "jersey",
+      lineaId: "caballero",
+      descripcion: "Jersey adulto",
+    } as never);
+
+    expect(result).toMatchObject({
+      previewMode: ProductPreviewMode.UNSUPPORTED,
+      classificationSource: ProductPreviewClassificationSource.UNCLASSIFIED,
+    });
+  });
+
+  it("rechaza una categoria vinculada a otra linea", async () => {
+    mockedCategoryService.getCategoryById.mockResolvedValue({
+      id: "jersey",
+      nombre: "Jersey",
+      lineaId: "infantil",
+    } as never);
+
+    const result = await productPreviewPolicyService.resolvePolicy({
+      id: "prod_mismatch",
+      categoriaId: "jersey",
+      lineaId: "caballero",
+      descripcion: "Jersey adulto",
+    } as never);
+
+    expect(result).toMatchObject({
+      previewMode: ProductPreviewMode.UNSUPPORTED,
+      classificationSource: ProductPreviewClassificationSource.UNCLASSIFIED,
+    });
+  });
 });

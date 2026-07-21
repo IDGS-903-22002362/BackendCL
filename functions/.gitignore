@@ -16,3 +16,4 @@ ui-debug.log*
 .env.*
 !.env.example
 !.env.e-comerce-leon
+.secret.local

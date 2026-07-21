@@ -25,6 +25,43 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Private AI data is managed exclusively by Cloud Functions through the
+    // Admin SDK. Recursive wildcards keep both root documents and any future
+    // subcollections blocked from every client context.
+    match /ai_sessions/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_messages/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_tool_calls/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_audit_logs/{document=**} {
+      allow read, write: if false;
+    }
+    match /tryon_jobs/{document=**} {
+      allow read, write: if false;
+    }
+    match /tryon_assets/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_admin_proposals/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_admin_operations/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_metrics/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_evals/{document=**} {
+      allow read, write: if false;
+    }
+    match /ai_traces/{document=**} {
+      allow read, write: if false;
+    }
+
     // Datos deportivos públicos de Liga MX (calendario, clasificación,
     // plantilla, jugadores y detalle de partidos). La app móvil los lee
     // directamente; solo el backend (Admin SDK, cron syncLigaMxData) escribe.

@@ -12,6 +12,18 @@ export enum AiSessionMode {
   GUEST = "guest",
 }
 
+export enum AiAgentType {
+  SHOPPING = "shopping",
+  ADMIN = "admin",
+}
+
+/**
+ * Legacy sessions predate agent separation. Unknown values deliberately fall
+ * back to the least-privileged Shopping Agent instead of granting admin tools.
+ */
+export const resolveAiAgentType = (value: unknown): AiAgentType =>
+  value === AiAgentType.ADMIN ? AiAgentType.ADMIN : AiAgentType.SHOPPING;
+
 export enum AiMessageRole {
   USER = "user",
   ASSISTANT = "assistant",
@@ -58,6 +70,29 @@ export enum TryOnAssetKind {
   USER_UPLOAD = "user_upload",
   PRODUCT_IMAGE = "product_image",
   OUTPUT_IMAGE = "output_image",
+}
+
+export enum TryOnEligibilityReason {
+  TRYON_DISABLED = "TRYON_DISABLED",
+  PRODUCT_UNAVAILABLE = "PRODUCT_UNAVAILABLE",
+  PRODUCT_OUT_OF_STOCK = "PRODUCT_OUT_OF_STOCK",
+  PRODUCT_IMAGE_UNAVAILABLE = "PRODUCT_IMAGE_UNAVAILABLE",
+  PRODUCT_UNSUPPORTED = "PRODUCT_UNSUPPORTED",
+  PRODUCT_UNCLASSIFIED = "PRODUCT_UNCLASSIFIED",
+  USER_IMAGE_UNAVAILABLE = "USER_IMAGE_UNAVAILABLE",
+}
+
+export enum TryOnEligibilityRequirement {
+  USER_IMAGE = "user_image",
+  CONSENT = "consent",
+}
+
+export interface TryOnEligibility {
+  eligible: boolean;
+  mode: ProductPreviewMode;
+  reason: TryOnEligibilityReason | null;
+  requirements: TryOnEligibilityRequirement[];
+  disclaimer: string;
 }
 
 export interface AiUsageMetrics {
@@ -182,6 +217,7 @@ export interface AiSession {
   userId: string;
   role: RolUsuario;
   mode: AiSessionMode;
+  agentType: AiAgentType;
   channel: string;
   title: string;
   status: AiSessionStatus;
@@ -261,6 +297,8 @@ export interface TryOnJob {
   inputUserImageAssetId: string;
   inputUserImageUrl?: string;
   inputProductImageUrl: string;
+  inputUserImageGeneration: string;
+  inputProductImageGeneration: string;
   outputAssetId?: string;
   // Stable storage reference (gs://...) persisted by backend; signed URLs are generated on demand.
   outputImageUrl?: string;
