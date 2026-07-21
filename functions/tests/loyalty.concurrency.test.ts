@@ -148,6 +148,7 @@ describe("loyalty concurrency", () => {
       usuariosApp: {
         member_1: {
           uid: "member_1",
+          nombre: "  Cliente   Uno  ",
           rol: RolUsuario.CLIENTE,
           puntosActuales: 0,
           createdAt: fixedNow,
@@ -173,11 +174,12 @@ describe("loyalty concurrency", () => {
   it("caso 1: reintentos con misma venta generan un solo movimiento", async () => {
     const input = {
       memberId: "member_1",
-      externalTransactionId: "FOLIO-ABC",
+      externalTransactionId: "staff-sale:store-a:member_1:FOLIO-ABC",
       amountCents: 10000,
       currency: "MXN" as const,
       channel: LoyaltyChannel.STORE,
       idempotencyKey: "earn:folio:ABC",
+      metadata: { saleId: "FOLIO-ABC", source: "staff-qr" },
       actor,
     };
 
@@ -187,6 +189,14 @@ describe("loyalty concurrency", () => {
     expect(first.transactionId).toBe(second.transactionId);
     expect(first.points).toBe(10);
     expect(first.balanceAfter).toBe(110);
+    expect(first.externalTransactionId).toBe(
+      "staff-sale:store-a:member_1:FOLIO-ABC",
+    );
+    expect(first.metadata).toEqual({
+      saleId: "FOLIO-ABC",
+      source: "staff-qr",
+      customerNameSnapshot: "Cliente Uno",
+    });
   });
 
   it("caso 3: misma clave con body distinto devuelve conflicto", async () => {

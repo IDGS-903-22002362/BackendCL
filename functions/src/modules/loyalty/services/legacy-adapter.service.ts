@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { createHash } from "crypto";
 import { logger } from "firebase-functions";
 import { ZodError } from "zod";
 import { RolUsuario } from "../../../models/usuario.model";
@@ -10,6 +11,7 @@ import loyaltyEngineService from "../services/loyalty-engine.service";
 import { buildActorContext } from "../services/loyalty-auth.service";
 import { requireLegacyAdapters } from "../services/loyalty-feature-flags.service";
 import { toDayKey } from "../../../utils/day-key.util";
+import staffAssignmentHistoryService from "./staff-assignment-history.service";
 
 /**
  * Mapea errores del Loyalty Engine al contrato legacy `{ success, message }`
@@ -21,7 +23,10 @@ function sendLegacyError(res: Response, error: unknown, fallbackMessage: string)
     return;
   }
   if (error instanceof ZodError) {
-    res.status(400).json({ success: false, message: "Datos de la solicitud inválidos" });
+    res.status(400).json({
+      success: false,
+      message: error.issues[0]?.message ?? "Datos de la solicitud inválidos",
+    });
     return;
   }
   res.status(500).json({ success: false, message: fallbackMessage });
@@ -40,6 +45,10 @@ function setDeprecation(res: Response): void {
   res.set("Deprecation", "true");
   res.set("Sunset", "2026-09-30");
   res.set("Link", '</api/loyalty/v1/earn-transactions>; rel="successor-version"');
+}
+
+function saleNamespacePart(value: string): string {
+  return createHash("sha256").update(value.trim()).digest("hex").slice(0, 12);
 }
 
 export async function legacyGetMyPoints(req: Request, res: Response) {
@@ -143,17 +152,34 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
     const { id } = req.params;
     const body = assignPointsBySaleSchema.parse(req.body);
     const actor = buildActorContext({ uid: req.user!.uid, rol: req.user!.rol });
+    if (body.folioVenta.toLowerCase() === id.trim().toLowerCase()) {
+      res.status(400).json({
+        success: false,
+        message: "El folio de venta debe ser distinto del ID del cliente",
+      });
+      return;
+    }
     const amountCents = Math.round(body.dinero * 100);
+    // El namespace evita colisiones del mismo folio entre empleados/tiendas y clientes.
+    // El folio capturado se conserva sin adornos en metadata para consulta/auditoria.
+    const rawLocationScope = String(
+      req.user!.sucursalId ?? req.user!.concesionId ?? actor.actorId,
+    ).trim();
+    const locationScope = rawLocationScope.slice(0, 120) || actor.actorId;
     const externalTransactionId =
-      req.header("Idempotency-Key")?.trim() ??
-      `legacy-sale:${id}:${amountCents}:${Date.now()}`;
+      `staff-sale:${saleNamespacePart(locationScope)}:${saleNamespacePart(id)}:${body.folioVenta}`;
     const txn = await loyaltyEngineService.earnFromSale({
       memberId: id,
       externalTransactionId,
       amountCents,
       currency: "MXN",
       channel: LoyaltyChannel.STORE,
+      locationId: locationScope,
       description: body.descripcion ?? `Puntos por venta de $${body.dinero}`,
+      metadata: {
+        saleId: body.folioVenta,
+        source: "staff-qr",
+      },
       idempotencyKey: externalTransactionId,
       actor,
     });
@@ -166,6 +192,8 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
         puntosAsignados: txn.points,
         puntosActuales: txn.balanceAfter,
         descripcion: body.descripcion,
+        folioVenta: body.folioVenta,
+        externalTransactionId: txn.externalTransactionId,
         origenId: actor.actorId,
       },
     });
@@ -182,25 +210,20 @@ export async function legacyGetAsignaciones(req: Request, res: Response) {
       req.user!.rol === RolUsuario.ADMIN && req.query.empleadoId
         ? String(req.query.empleadoId)
         : actor.actorId;
-    const result = await ledgerRepository.listAdmin({
-      limit: Math.min(Number(req.query.limit ?? 50), 100),
+    const result = await staffAssignmentHistoryService.list({
+      limit: Math.min(Number(req.query.limit ?? 20), 50),
       cursor: req.query.cursor as string | undefined,
       actorId,
-      channel: LoyaltyChannel.STORE,
+      search: req.query.search as string | undefined,
     });
     res.status(200).json({
       success: true,
-      data: result.items.map((t) => ({
-        id: t.transactionId,
-        usuarioId: t.memberId,
-        puntos: t.points,
-        descripcion: t.description,
-        origenId: t.actorId,
-        createdAt: t.createdAt.toDate().toISOString(),
-      })),
+      data: result.items,
       pagination: {
         nextCursor: result.nextCursor,
         hasMore: Boolean(result.nextCursor),
+        searchWindowLimited: result.searchWindowLimited,
+        scannedCount: result.scannedCount,
       },
     });
   } catch (error) {

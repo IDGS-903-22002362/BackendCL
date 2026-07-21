@@ -35,6 +35,12 @@ const USUARIOS = "usuariosApp";
 const MOVIMIENTOS = "movimientos_puntos";
 const ASIGNACIONES = "asignaciones_hechas";
 
+function normalizeCustomerNameSnapshot(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ").slice(0, 120);
+  return normalized || undefined;
+}
+
 export class LoyaltyEngineService {
   async getWallet(memberId: string): Promise<LoyaltyWallet> {
     try {
@@ -449,6 +455,7 @@ export class LoyaltyEngineService {
       return cached.responseBody as LoyaltyTransaction;
     }
 
+    let customerNameSnapshot: string | undefined;
     if (params.requireCustomerRecipient) {
       const recipient = await firestoreApp
         .collection(USUARIOS)
@@ -456,6 +463,14 @@ export class LoyaltyEngineService {
         .get();
       if (!recipient.exists || !isLoyaltyCustomerRecipient(recipient.data() ?? {})) {
         throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
+      }
+      if (
+        params.type === LoyaltyTransactionType.EARN &&
+        params.channel === LoyaltyChannel.STORE
+      ) {
+        customerNameSnapshot = normalizeCustomerNameSnapshot(
+          recipient.data()?.nombre,
+        );
       }
     }
 
@@ -582,7 +597,9 @@ export class LoyaltyEngineService {
         description: params.description,
         reasonCode: params.reasonCode,
         locationId: params.locationId,
-        metadata: params.metadata,
+        metadata: customerNameSnapshot
+          ? { ...params.metadata, customerNameSnapshot }
+          : params.metadata,
       });
 
       walletRepository.dualWriteLegacyBalanceInTx(

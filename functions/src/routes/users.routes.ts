@@ -22,7 +22,11 @@ import {
 import { idParamSchema } from "../middleware/validators/common.validator";
 import { historialOrdenesQuerySchema } from "../middleware/validators/orden.validator";
 import { verifySeasonPassSchema } from "../middleware/validators/season-pass.validator";
-import { assignPointsBySaleSchema, assignUserPointsSchema } from "../middleware/validators/user-points.validator";
+import {
+  assignPointsBySaleSchema,
+  assignUserPointsSchema,
+  staffAssignmentHistoryQuerySchema,
+} from "../middleware/validators/user-points.validator";
 import { ROLES_ASIGNACION_PUNTOS } from "../models/usuario.model";
 import {
   legacyAssignPoints,
@@ -829,6 +833,7 @@ router.get(
   "/puntos/asignaciones",
   authMiddleware,
   verifyRole([...ROLES_ASIGNACION_PUNTOS]),
+  validateQuery(staffAssignmentHistoryQuerySchema),
   legacyGetAsignaciones
 );
 
