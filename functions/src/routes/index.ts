@@ -106,6 +106,10 @@ router.use(
   "/loyalty/sandbox/v1",
   createLoyaltyPartnerRouter(LoyaltyEnvironment.SANDBOX),
 );
+// Las sesiones de la tienda usan JWT propio/Firebase. Mantenerlas en un
+// namespace distinto evita que el middleware OAuth de partners intercepte
+// estas rutas y responda 401 antes de llegar a loyaltyRoutes.
+router.use("/loyalty/internal/v1", loyaltyRoutes);
 router.use(
   "/loyalty/v1",
   createLoyaltyPartnerRouter(LoyaltyEnvironment.PRODUCTION),
