@@ -1,15 +1,24 @@
+import { createHash } from "crypto";
 import { admin } from "../../../config/firebase.admin";
 import { firestoreTienda } from "../../../config/firebase";
 import {
+  AiSession,
+  AiSessionStatus,
   ProductCategorySnapshot,
   ProductPreviewClassificationSource,
   ProductPreviewMode,
   ProductPreviewType,
   TryOnJob,
   TryOnJobStatus,
+  TryOnAsset,
+  TryOnAssetKind,
 } from "../../../models/ai/ai.model";
 import { RolUsuario } from "../../../models/usuario.model";
 import AI_COLLECTIONS from "../collections";
+import { AiRuntimeError, AI_TRYON_ASSET_UNAVAILABLE_CODE, AI_TRYON_IDEMPOTENCY_CONFLICT_CODE, AI_TRYON_SESSION_UNAVAILABLE_CODE } from "../ai.error";
+
+const jobIdFor = (userId: string, key: string): string =>
+  createHash("sha256").update(`${userId}\0${key}`).digest("hex");
 
 class TryOnJobService {
   async createJob(input: {
@@ -21,6 +30,8 @@ class TryOnJobService {
     inputUserImageAssetId: string;
     inputUserImageUrl?: string;
     inputProductImageUrl: string;
+    inputUserImageGeneration: string;
+    inputProductImageGeneration: string;
     consentAccepted: boolean;
     consentVersion?: string;
     consentAcceptedAt?: FirebaseFirestore.Timestamp;
@@ -39,8 +50,40 @@ class TryOnJobService {
       updatedAt: now,
     };
 
-    const ref = await firestoreTienda.collection(AI_COLLECTIONS.tryOnJobs).add(payload);
-    return { id: ref.id, ...payload };
+    const jobs = firestoreTienda.collection(AI_COLLECTIONS.tryOnJobs);
+    const ref = input.idempotencyKey
+      ? jobs.doc(jobIdFor(input.userId, input.idempotencyKey))
+      : jobs.doc();
+    return firestoreTienda.runTransaction(async (transaction) => {
+      const sessionRef = firestoreTienda.collection(AI_COLLECTIONS.sessions).doc(input.sessionId);
+      const assetRef = firestoreTienda.collection(AI_COLLECTIONS.tryOnAssets).doc(input.inputUserImageAssetId);
+      const [sessionSnap, jobSnap] = await Promise.all([
+        transaction.get(sessionRef), transaction.get(ref),
+      ]);
+      const session = sessionSnap.data() as Omit<AiSession, "id"> | undefined;
+      if (!sessionSnap.exists || session?.userId !== input.userId || session.status !== AiSessionStatus.ACTIVE) {
+        throw new AiRuntimeError(AI_TRYON_SESSION_UNAVAILABLE_CODE, "Sesion AI no disponible para probador virtual", 404);
+      }
+      if (jobSnap.exists) {
+        const existing = { id: ref.id, ...(jobSnap.data() as Omit<TryOnJob, "id">) };
+        const exact = existing.userId === input.userId && existing.sessionId === input.sessionId &&
+          existing.productId === input.productId && existing.inputUserImageAssetId === input.inputUserImageAssetId &&
+          (existing.variantId ?? undefined) === (input.variantId ?? undefined) &&
+          existing.consentAccepted === input.consentAccepted && existing.requestedByRole === input.requestedByRole &&
+          existing.idempotencyKey === input.idempotencyKey;
+        if (!exact) throw new AiRuntimeError(AI_TRYON_IDEMPOTENCY_CONFLICT_CODE, "La llave de idempotencia ya fue utilizada con otra solicitud", 409);
+        return existing;
+      }
+      const assetSnap = await transaction.get(assetRef);
+      const asset = assetSnap.data() as Omit<TryOnAsset, "id"> | undefined;
+      if (!assetSnap.exists || asset?.userId !== input.userId || asset.sessionId !== input.sessionId ||
+        asset.kind !== TryOnAssetKind.USER_UPLOAD || asset.jobId) {
+        throw new AiRuntimeError(AI_TRYON_ASSET_UNAVAILABLE_CODE, "Imagen de usuario no disponible para probador virtual", 404);
+      }
+      transaction.set(ref, payload);
+      transaction.update(assetRef, { jobId: ref.id, updatedAt: now });
+      return { id: ref.id, ...payload };
+    });
   }
 
   async getJobById(id: string): Promise<TryOnJob | null> {

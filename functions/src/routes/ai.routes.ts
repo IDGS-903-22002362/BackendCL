@@ -17,6 +17,7 @@ import {
 } from "../middleware/validators/ai-public-chat.validator";
 import {
   createTryOnJobSchema,
+  tryOnEligibilitySchema,
   tryOnAssetIdParamSchema,
   tryOnJobIdParamSchema,
 } from "../middleware/validators/ai-tryon.validator";
@@ -279,6 +280,13 @@ protectedRouter.delete(
   requireTryOnEnabled,
   validateParams(tryOnAssetIdParamSchema),
   asyncHandler(filesController.deleteUserImage),
+);
+
+protectedRouter.post(
+  "/tryon/eligibility",
+  aiTryOnUserRateLimiter,
+  validateBody(tryOnEligibilitySchema),
+  asyncHandler(tryonController.getTryOnEligibility),
 );
 
 /**

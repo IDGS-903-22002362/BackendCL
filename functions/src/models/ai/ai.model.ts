@@ -72,6 +72,29 @@ export enum TryOnAssetKind {
   OUTPUT_IMAGE = "output_image",
 }
 
+export enum TryOnEligibilityReason {
+  TRYON_DISABLED = "TRYON_DISABLED",
+  PRODUCT_UNAVAILABLE = "PRODUCT_UNAVAILABLE",
+  PRODUCT_OUT_OF_STOCK = "PRODUCT_OUT_OF_STOCK",
+  PRODUCT_IMAGE_UNAVAILABLE = "PRODUCT_IMAGE_UNAVAILABLE",
+  PRODUCT_UNSUPPORTED = "PRODUCT_UNSUPPORTED",
+  PRODUCT_UNCLASSIFIED = "PRODUCT_UNCLASSIFIED",
+  USER_IMAGE_UNAVAILABLE = "USER_IMAGE_UNAVAILABLE",
+}
+
+export enum TryOnEligibilityRequirement {
+  USER_IMAGE = "user_image",
+  CONSENT = "consent",
+}
+
+export interface TryOnEligibility {
+  eligible: boolean;
+  mode: ProductPreviewMode;
+  reason: TryOnEligibilityReason | null;
+  requirements: TryOnEligibilityRequirement[];
+  disclaimer: string;
+}
+
 export interface AiUsageMetrics {
   promptTokens?: number;
   responseTokens?: number;
@@ -274,6 +297,8 @@ export interface TryOnJob {
   inputUserImageAssetId: string;
   inputUserImageUrl?: string;
   inputProductImageUrl: string;
+  inputUserImageGeneration: string;
+  inputProductImageGeneration: string;
   outputAssetId?: string;
   // Stable storage reference (gs://...) persisted by backend; signed URLs are generated on demand.
   outputImageUrl?: string;

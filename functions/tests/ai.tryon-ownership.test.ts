@@ -16,6 +16,13 @@ jest.mock("../src/services/ai/storage/ai-storage.service", () => ({
   },
 }));
 
+jest.mock("../src/services/ai/jobs/tryon-eligibility.service", () => ({
+  __esModule: true,
+  default: {
+    getEligibility: jest.fn(),
+  },
+}));
+
 import { Request, Response } from "express";
 import {
   ProductPreviewMode,
@@ -25,12 +32,16 @@ import { RolUsuario } from "../src/models/usuario.model";
 import * as tryonController from "../src/controllers/ai/tryon.controller";
 import tryOnWorkflowService from "../src/services/ai/jobs/tryon-workflow.service";
 import aiStorageService from "../src/services/ai/storage/ai-storage.service";
+import tryOnEligibilityService from "../src/services/ai/jobs/tryon-eligibility.service";
 import { AiRuntimeError } from "../src/services/ai/ai.error";
 
 const mockedWorkflow = tryOnWorkflowService as jest.Mocked<
   typeof tryOnWorkflowService
 >;
 const mockedStorage = aiStorageService as jest.Mocked<typeof aiStorageService>;
+const mockedEligibility = tryOnEligibilityService as jest.Mocked<
+  typeof tryOnEligibilityService
+>;
 
 const createResponse = (): Response => {
   const res = {
@@ -68,6 +79,64 @@ describe("AI try-on ownership", () => {
       success: false,
     });
     expect(mockedWorkflow.getDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it("consulta elegibilidad solo con identidad autenticada e identificadores", async () => {
+    mockedEligibility.getEligibility.mockResolvedValue({
+      eligible: true,
+      mode: "body_tryon",
+      reason: null,
+      requirements: [],
+      disclaimer: "",
+    } as never);
+    const req = {
+      body: {
+        productId: "prod_1",
+        userImageAssetId: "asset_1",
+        sessionId: "session_1",
+        price: 1,
+        eligible: true,
+      },
+      user: { uid: "user_1", rol: RolUsuario.CLIENTE },
+      requestId: "request_1",
+    } as unknown as Request;
+    const res = createResponse();
+
+    await tryonController.getTryOnEligibility(req, res);
+
+    expect(mockedEligibility.getEligibility).toHaveBeenCalledWith({
+      userId: "user_1",
+      productId: "prod_1",
+      userImageAssetId: "asset_1",
+      sessionId: "session_1",
+    });
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(200);
+    expect((res.json as jest.Mock).mock.calls[0][0]).toEqual({
+      success: true,
+      data: expect.objectContaining({
+        eligible: true,
+        reason: null,
+      }),
+    });
+  });
+
+  it("no filtra errores internos de la comprobacion de elegibilidad", async () => {
+    mockedEligibility.getEligibility.mockRejectedValue(
+      new Error("secret firestore topology"),
+    );
+    const req = {
+      body: { productId: "prod_1" },
+      user: { uid: "user_1", rol: RolUsuario.CLIENTE },
+      requestId: "request_1",
+    } as unknown as Request;
+    const res = createResponse();
+
+    await tryonController.getTryOnEligibility(req, res);
+
+    expect((res.status as jest.Mock).mock.calls[0][0]).toBe(500);
+    expect(JSON.stringify((res.json as jest.Mock).mock.calls[0][0])).not.toContain(
+      "secret firestore topology",
+    );
   });
 
   it("expone previewMode al crear job y errores estables al fallar", async () => {

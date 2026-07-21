@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { createReadStream } from "fs";
 import { promises as fs } from "fs";
 import path from "path";
+import sharp from "sharp";
 import { v4 as uuidv4 } from "uuid";
 import aiConfig from "../../../config/ai.config";
 import { storageTienda } from "../../../config/firebase";
@@ -30,12 +31,18 @@ class AiStorageService {
     return this.bucket.name;
   }
 
+  /** Catalog uploads use the Firebase app's default bucket, not the private AI bucket. */
+  getCatalogBucketName(): string {
+    return storageTienda.bucket().name;
+  }
+
   buildGcsUri(objectPath: string, bucketName = this.bucket.name): string {
     return `gs://${bucketName}/${objectPath}`;
   }
 
   async downloadGcsFile(
     sourceUri: string,
+    expectedGeneration?: string,
   ): Promise<{ buffer: Buffer; mimeType?: string; sizeBytes: number }> {
     const match = sourceUri.match(/^gs:\/\/([^/]+)\/(.+)$/);
     if (!match) {
@@ -43,17 +50,51 @@ class AiStorageService {
     }
 
     const [, sourceBucket, sourceObjectPath] = match;
-    const file = storageTienda.bucket(sourceBucket).file(sourceObjectPath);
-    const [[buffer], [metadata]] = await Promise.all([
-      file.download(),
-      file.getMetadata(),
-    ]);
+    const inspected = await this.inspectImageObject(sourceObjectPath, sourceBucket, expectedGeneration);
+    const file = storageTienda.bucket(sourceBucket).file(sourceObjectPath, { generation: inspected.generation });
+    const [buffer] = await file.download({ validation: false, decompress: false });
+    const { fileTypeFromBuffer } = await import("file-type");
+    const detected = await fileTypeFromBuffer(buffer);
+    const cleanEnd = detected?.mime === "image/png" ? buffer.length >= 12 &&
+      buffer.subarray(-12, -8).equals(Buffer.alloc(4)) && buffer.subarray(-8, -4).toString("ascii") === "IEND"
+      : detected?.mime === "image/jpeg" ? buffer.length >= 2 && buffer.at(-2) === 0xff && buffer.at(-1) === 0xd9
+        : detected?.mime === "image/webp" ? buffer.length >= 12 && buffer.readUInt32LE(4) + 8 === buffer.length : false;
+    const decoded = await sharp(buffer, { sequentialRead: true, limitInputPixels: aiConfig.uploads.maxPixels }).metadata();
+    if (detected?.mime !== inspected.mimeType || !cleanEnd ||
+      decoded.width !== inspected.width || decoded.height !== inspected.height) {
+      throw new Error("El contenido de la imagen GCS cambio o no es compatible");
+    }
 
-    return {
-      buffer,
-      mimeType: metadata.contentType,
-      sizeBytes: Number(metadata.size || buffer.length),
-    };
+    return { buffer, mimeType: inspected.mimeType, sizeBytes: inspected.sizeBytes };
+  }
+
+  async inspectImageObject(
+    objectPath: string,
+    bucketName = this.bucket.name,
+    expectedGeneration?: string,
+  ): Promise<{ generation: string; sizeBytes: number; mimeType: string; width: number; height: number; sha256?: string }> {
+    const current = storageTienda.bucket(bucketName).file(objectPath,
+      expectedGeneration ? { generation: expectedGeneration } : undefined);
+    const [metadata] = await current.getMetadata();
+    const generation = String(metadata.generation || "");
+    const sizeBytes = Number(metadata.size || 0);
+    if (!generation || (expectedGeneration && generation !== expectedGeneration) ||
+      !Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > aiConfig.uploads.maxBytes) {
+      throw new Error("Objeto GCS no disponible para imagen AI");
+    }
+    const [prefix] = await storageTienda.bucket(bucketName).file(objectPath, { generation })
+      .download({ start: 0, end: Math.min(sizeBytes, 256 * 1024) - 1, validation: false, decompress: false });
+    const { fileTypeFromBuffer } = await import("file-type");
+    const detected = await fileTypeFromBuffer(prefix);
+    const image = detected && aiConfig.uploads.allowedMimeTypes.includes(detected.mime)
+      ? await sharp(prefix, { sequentialRead: true, limitInputPixels: aiConfig.uploads.maxPixels }).metadata()
+      : null;
+    if (!detected || !image?.width || !image.height || image.width < aiConfig.uploads.minWidth ||
+      image.height < aiConfig.uploads.minHeight || image.width * image.height > aiConfig.uploads.maxPixels) {
+      throw new Error("Tipo o dimensiones reales de imagen GCS no permitidas");
+    }
+    return { generation, sizeBytes, mimeType: detected.mime, width: image.width, height: image.height,
+      sha256: typeof metadata.metadata?.sha256 === "string" ? metadata.metadata.sha256 : undefined };
   }
 
   async uploadPrivateFile(input: {

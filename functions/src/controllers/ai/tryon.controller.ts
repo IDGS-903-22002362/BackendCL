@@ -1,13 +1,48 @@
 import { Request, Response } from "express";
 import { RolUsuario } from "../../models/usuario.model";
 import aiConfig from "../../config/ai.config";
-import { toAiErrorPayload } from "../../services/ai/ai.error";
+import {
+  AI_INTERNAL_ERROR_CODE,
+  toAiErrorPayload,
+} from "../../services/ai/ai.error";
 import aiStorageService from "../../services/ai/storage/ai-storage.service";
+import tryOnEligibilityService from "../../services/ai/jobs/tryon-eligibility.service";
 import tryOnWorkflowService from "../../services/ai/jobs/tryon-workflow.service";
 import tryOnJobService from "../../services/ai/jobs/tryon-job.service";
 import logger from "../../utils/logger";
 
 const tryOnControllerLogger = logger.child({ component: "tryon-controller" });
+
+export const getTryOnEligibility = async (req: Request, res: Response) => {
+  try {
+    const eligibility = await tryOnEligibilityService.getEligibility({
+      userId: req.user!.uid,
+      productId: req.body.productId,
+      userImageAssetId: req.body.userImageAssetId,
+      sessionId: req.body.sessionId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: eligibility,
+    });
+  } catch (error) {
+    tryOnControllerLogger.error("tryon_eligibility_failed", {
+      userId: req.user?.uid,
+      requestId: req.requestId,
+      error: error instanceof Error ? error.name : "unknown_error",
+    });
+
+    return res.status(500).json({
+      success: false,
+      message: "No se pudo verificar la disponibilidad del probador virtual",
+      error: {
+        code: AI_INTERNAL_ERROR_CODE,
+        message: "No se pudo verificar la disponibilidad del probador virtual",
+      },
+    });
+  }
+};
 
 export const createTryOnJob = async (req: Request, res: Response) => {
   try {
