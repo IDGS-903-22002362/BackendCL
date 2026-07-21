@@ -8,7 +8,7 @@ import {
   pagoIdParamSchema,
   refundPagoSchema,
 } from "../middleware/validators/pago.validator";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { authMiddleware, requireAdmin, requireCustomer } from "../utils/middlewares";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
@@ -229,6 +229,7 @@ router.post("/webhook", commandController.webhook);
 router.post(
   "/iniciar",
   authMiddleware,
+  requireCustomer,
   pagosRateLimit,
   validateBody(iniciarPagoSchema),
   commandController.iniciar,

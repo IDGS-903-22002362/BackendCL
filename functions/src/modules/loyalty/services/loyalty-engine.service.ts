@@ -29,6 +29,7 @@ import walletRepository from "../repositories/wallet.repository";
 import conversionRulesService from "./conversion-rules.service";
 import { requireLoyaltyWrites, loyaltyFeatureFlagsService } from "./loyalty-feature-flags.service";
 import pointsService from "../../../services/puntos.service";
+import { isCustomerOnlyAccount } from "../../../utils/usuario-roles";
 
 const USUARIOS = "usuariosApp";
 const MOVIMIENTOS = "movimientos_puntos";
@@ -84,6 +85,7 @@ export class LoyaltyEngineService {
       metadata: input.metadata,
       legacyTipo: TipoMovimientoPuntos.ACUMULACION,
       legacyOrigen: input.channel === LoyaltyChannel.ECOMMERCE ? "tienda" : "admin",
+      requireCustomerRecipient: true,
     });
   }
 
@@ -418,6 +420,7 @@ export class LoyaltyEngineService {
     lifetimeRedeemedDelta?: number;
     legacySkip?: boolean;
     skipIfDuplicate?: boolean;
+    requireCustomerRecipient?: boolean;
     postLedgerInTx?: (
       tx: FirebaseFirestore.Transaction,
       entry: LoyaltyTransaction,
@@ -444,6 +447,16 @@ export class LoyaltyEngineService {
         throw new LoyaltyProblemError("IDEMPOTENCY_CONFLICT");
       }
       return cached.responseBody as LoyaltyTransaction;
+    }
+
+    if (params.requireCustomerRecipient) {
+      const recipient = await firestoreApp
+        .collection(USUARIOS)
+        .doc(params.memberId)
+        .get();
+      if (!recipient.exists || !isCustomerOnlyAccount(recipient.data() ?? {})) {
+        throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
+      }
     }
 
     await walletRepository.ensureExpirationProcessed(params.memberId);
@@ -499,6 +512,14 @@ export class LoyaltyEngineService {
       const userRef = firestoreApp.collection(USUARIOS).doc(params.memberId);
       const userSnap = await tx.get(userRef);
       if (!userSnap.exists) {
+        throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
+      }
+      if (
+        params.requireCustomerRecipient &&
+        !isCustomerOnlyAccount(userSnap.data() ?? {})
+      ) {
+        // Mismo error que un QR desconocido: no filtrar la existencia ni el rol
+        // de cuentas internas a operadores del escáner.
         throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
       }
 

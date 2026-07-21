@@ -35,6 +35,12 @@ export const hasRole = (
 export const isTrabajadorClub = (usuario: UsuarioRolesInput): boolean =>
   hasRole(usuario, ROL_TRABAJADOR_CLUBLEON);
 
+/** Una cuenta compradora no puede conservar ningún rol interno adicional. */
+export const isCustomerOnlyAccount = (usuario: UsuarioRolesInput): boolean => {
+  const roles = getEffectiveRoles(usuario);
+  return roles.length > 0 && roles.every((role) => role === RolUsuario.CLIENTE);
+};
+
 export const canAddAsTrabajadorClub = (
   usuario: UsuarioRolesInput & { activo?: boolean },
 ): { ok: true } | { ok: false; code: string; message: string } => {

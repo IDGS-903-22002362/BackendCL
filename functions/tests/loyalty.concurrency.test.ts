@@ -1,6 +1,7 @@
 ﻿import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { Timestamp } from "firebase-admin/firestore";
 import { LoyaltyActorType, LoyaltyChannel } from "../src/modules/loyalty/models/loyalty.enums";
+import { RolUsuario } from "../src/models/usuario.model";
 
 type DocData = Record<string, unknown>;
 
@@ -147,6 +148,7 @@ describe("loyalty concurrency", () => {
       usuariosApp: {
         member_1: {
           uid: "member_1",
+          rol: RolUsuario.CLIENTE,
           puntosActuales: 0,
           createdAt: fixedNow,
           updatedAt: fixedNow,
@@ -209,5 +211,34 @@ describe("loyalty concurrency", () => {
         actor,
       }),
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("rechaza una venta si el destinatario dejó de ser CLIENTE", async () => {
+    fakeFirestore = createFakeFirestore({
+      usuariosApp: {
+        internal_1: {
+          uid: "internal_1",
+          rol: RolUsuario.CLIENTE,
+          roles: [RolUsuario.CLIENTE, RolUsuario.TRABAJADOR_CLUBLEON],
+          puntosActuales: 0,
+          createdAt: fixedNow,
+          updatedAt: fixedNow,
+        },
+      },
+    });
+
+    await expect(
+      loyaltyEngineService.earnFromSale({
+        memberId: "internal_1",
+        externalTransactionId: "FOLIO-INTERNAL",
+        amountCents: 10000,
+        currency: "MXN",
+        channel: LoyaltyChannel.STORE,
+        idempotencyKey: "internal-sale",
+        actor,
+      }),
+    ).rejects.toMatchObject({ code: "MEMBER_NOT_FOUND" });
+
+    expect(fakeFirestore.count("loyalty_transactions")).toBe(0);
   });
 });

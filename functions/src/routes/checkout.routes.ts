@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as checkoutController from "../controllers/checkout/checkout.controller";
-import { authMiddleware } from "../utils/middlewares";
+import { authMiddleware, requireCustomer } from "../utils/middlewares";
 import { validateBody, validateParams } from "../middleware/validation.middleware";
 import { startCheckoutAttemptSchema } from "../middleware/validators/carrito.validator";
 import { z } from "zod";
@@ -21,6 +21,7 @@ const attemptIdParamSchema = z.object({
 router.post(
   "/attempts",
   authMiddleware,
+  requireCustomer,
   checkoutRateLimit,
   validateBody(startCheckoutAttemptSchema),
   checkoutController.startCheckout,

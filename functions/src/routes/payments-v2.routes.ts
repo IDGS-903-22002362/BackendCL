@@ -12,7 +12,10 @@ import {
   listAplazoRefundRequestsQuerySchema,
   paymentAttemptStatusParamSchema,
 } from "../middleware/validators/payments-v2.validator";
-import { paymentAuthMiddleware } from "../middleware/payments-auth.middleware";
+import {
+  paymentAuthMiddleware,
+  paymentCustomerMiddleware,
+} from "../middleware/payments-auth.middleware";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
 
 const router = Router();
@@ -53,6 +56,7 @@ const paymentsRateLimit = createSimpleRateLimiter({
 router.post(
   "/aplazo/online/create",
   paymentAuthMiddleware,
+  paymentCustomerMiddleware,
   paymentsRateLimit,
   validateBody(aplazoOnlineCreateSchema),
   paymentsController.createAplazoOnline,

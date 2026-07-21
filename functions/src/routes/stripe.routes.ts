@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as stripeController from "../controllers/stripe/stripe.controller";
-import { authMiddleware, requireAdmin } from "../utils/middlewares";
+import { authMiddleware, requireAdmin, requireCustomer } from "../utils/middlewares";
 import { validateBody, validateParams } from "../middleware/validation.middleware";
 import {
   createStripeBillingPortalSchema,
@@ -61,6 +61,7 @@ router.post("/webhook", stripeController.webhook);
 router.post(
   "/payment-intents",
   authMiddleware,
+  requireCustomer,
   criticalRateLimit,
   validateBody(createStripePaymentIntentSchema),
   stripeController.createPaymentIntent,
@@ -102,6 +103,7 @@ router.get(
 router.post(
   "/checkout-sessions",
   authMiddleware,
+  requireCustomer,
   criticalRateLimit,
   validateBody(createStripeCheckoutSessionSchema),
   stripeController.createCheckoutSession,

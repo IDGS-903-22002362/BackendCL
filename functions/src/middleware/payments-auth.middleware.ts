@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { firestoreApp } from "../config/app.firebase";
 import { RolUsuario } from "../models/usuario.model";
+import { isCustomerOnlyAccount } from "../utils/usuario-roles";
 
 const respondAuthError = (
   res: Response,
@@ -115,6 +116,29 @@ export const paymentStaffMiddleware = (
       403,
       "PAYMENT_FORBIDDEN",
       "Acceso denegado para este flujo de pagos",
+    );
+    return;
+  }
+
+  next();
+};
+
+export const paymentCustomerMiddleware = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  if (!req.user) {
+    respondAuthError(res, 401, "PAYMENT_AUTH_REQUIRED", "No autenticado");
+    return;
+  }
+
+  if (!isCustomerOnlyAccount(req.user)) {
+    respondAuthError(
+      res,
+      403,
+      "CUSTOMER_ACCOUNT_REQUIRED",
+      "Este flujo de pago está disponible solo para cuentas de cliente",
     );
     return;
   }

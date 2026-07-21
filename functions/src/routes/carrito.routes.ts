@@ -24,7 +24,7 @@ import {
   createCartFedexQuoteSchema,
 } from "../middleware/validators/carrito.validator";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
-import { authMiddleware, optionalAuthMiddleware } from "../utils/middlewares";
+import { authMiddleware, optionalAuthMiddleware, requireCustomer } from "../utils/middlewares";
 
 const router = Router();
 
@@ -521,6 +521,7 @@ router.post(
 router.post(
   "/checkout",
   authMiddleware,
+  requireCustomer,
   checkoutRateLimit,
   validateBody(checkoutCarritoSchema),
   commandController.checkout,

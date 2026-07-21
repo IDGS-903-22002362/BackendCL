@@ -7,6 +7,8 @@ import walletRepository from "../repositories/wallet.repository";
 import conversionRulesService from "../services/conversion-rules.service";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { actorHasPermission } from "../services/loyalty-auth.service";
+import { firestoreApp } from "../../../config/app.firebase";
+import { isCustomerOnlyAccount } from "../../../utils/usuario-roles";
 
 function requireActor(req: Request) {
   if (!req.loyaltyActor) {
@@ -62,6 +64,33 @@ export async function getMemberWalletAdmin(req: Request, res: Response, next: Ne
     const memberId = req.params.memberId;
     const wallet = await loyaltyEngineService.getWallet(memberId);
     res.status(200).json({ wallet: walletRepository.toResponseDto(wallet) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getQrMemberSummary(req: Request, res: Response, next: NextFunction) {
+  try {
+    const memberId = req.params.memberId;
+    const userSnap = await firestoreApp.collection("usuariosApp").doc(memberId).get();
+    const userData = userSnap.data();
+
+    if (!userSnap.exists || !isCustomerOnlyAccount(userData ?? {})) {
+      throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
+    }
+
+    const wallet = await loyaltyEngineService.getWallet(memberId);
+    const fullName =
+      typeof userData?.nombre === "string" && userData.nombre.trim()
+        ? userData.nombre.trim()
+        : "Cliente";
+    res.status(200).json({
+      member: {
+        memberId,
+        fullName,
+        currentPoints: wallet.availablePoints,
+      },
+    });
   } catch (error) {
     next(error);
   }

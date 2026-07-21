@@ -4,6 +4,7 @@ import { getAppCheck } from "firebase-admin/app-check";
 import { firestoreApp, authAppOficial } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import { RolUsuario } from "../models/usuario.model";
+import { isCustomerOnlyAccount } from "./usuario-roles";
 
 // Middleware de autenticación con JWT propio
 export const authMiddleware = async (
@@ -459,6 +460,33 @@ export const requireStaff = async (
     res.status(403).json({
       success: false,
       message: "Acceso denegado. Se requieren permisos de personal autorizado.",
+    });
+    return;
+  }
+
+  next();
+};
+
+/**
+ * Autoriza exclusivamente cuentas de cliente para operaciones que crean una
+ * compra. La función de autenticación ya refresca el rol desde Firestore, por
+ * lo que un rol interno no puede reutilizar un JWT emitido cuando era cliente.
+ */
+export const requireCustomer = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: "No autenticado" });
+    return;
+  }
+
+  if (!isCustomerOnlyAccount(req.user)) {
+    res.status(403).json({
+      success: false,
+      code: "CUSTOMER_ACCOUNT_REQUIRED",
+      message: "Esta operación está disponible solo para cuentas de cliente.",
     });
     return;
   }

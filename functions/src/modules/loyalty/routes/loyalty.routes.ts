@@ -70,6 +70,13 @@ router.get(
 );
 
 router.get(
+  "/staff/qr-members/:memberId",
+  validateParams(memberIdParamSchema),
+  requireLoyaltyPermission(LoyaltyPermission.WALLET_READ_ANY),
+  loyaltyController.getQrMemberSummary,
+);
+
+router.get(
   "/earn-preview",
   validateQuery(earnPreviewQuerySchema),
   loyaltyController.previewEarnPoints,
