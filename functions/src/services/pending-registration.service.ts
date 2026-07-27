@@ -100,15 +100,25 @@ class PendingRegistrationService {
       const docRef = firestoreApp.collection(COLLECTION).doc(normalizedEmail);
       const docSnap = await docRef.get();
 
+      // remainingAttempts: 0 indica al cliente que debe solicitar un código nuevo
+      // en lugar de reintentar con el mismo registro pendiente.
       if (!docSnap.exists) {
-        return { valid: false, message: "Código inválido o expirado" };
+        return {
+          valid: false,
+          message: "Código inválido o expirado",
+          remainingAttempts: 0,
+        };
       }
 
       const data = docSnap.data() as PendingRegistrationDoc;
       const now = admin.firestore.Timestamp.now();
 
       if (data.isUsed) {
-        return { valid: false, message: "Este código ya fue utilizado" };
+        return {
+          valid: false,
+          message: "Este código ya fue utilizado",
+          remainingAttempts: 0,
+        };
       }
 
       if (data.expiresAt < now) {
@@ -116,6 +126,7 @@ class PendingRegistrationService {
         return {
           valid: false,
           message: "El código ha expirado. Solicita uno nuevo",
+          remainingAttempts: 0,
         };
       }
 
@@ -124,6 +135,7 @@ class PendingRegistrationService {
         return {
           valid: false,
           message: "Demasiados intentos fallidos. Solicita un nuevo código",
+          remainingAttempts: 0,
         };
       }
 

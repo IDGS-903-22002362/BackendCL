@@ -109,6 +109,8 @@ class OTPService {
                 .limit(1)
                 .get();
 
+            // Sin remainingAttempts: la consulta filtra por código, así que un simple
+            // error de tecleo llega aquí y el usuario debe poder reintentar.
             if (snapshot.empty) {
                 return { valid: false, message: "Código inválido o expirado" };
             }
@@ -117,16 +119,24 @@ class OTPService {
             const data = doc.data();
             const now = admin.firestore.Timestamp.now();
 
-            // Verificar expiración
+            // remainingAttempts: 0 indica al cliente que debe solicitar un código nuevo.
             if (data.expiresAt < now) {
                 await doc.ref.delete(); // Eliminar documento expirado
-                return { valid: false, message: "El código ha expirado. Solicita uno nuevo" };
+                return {
+                    valid: false,
+                    message: "El código ha expirado. Solicita uno nuevo",
+                    remainingAttempts: 0,
+                };
             }
 
             // Verificar intentos
             if (data.attempts >= data.maxAttempts) {
                 await doc.ref.delete();
-                return { valid: false, message: "Demasiados intentos fallidos. Solicita un nuevo código" };
+                return {
+                    valid: false,
+                    message: "Demasiados intentos fallidos. Solicita un nuevo código",
+                    remainingAttempts: 0,
+                };
             }
 
             // Incrementar intentos
