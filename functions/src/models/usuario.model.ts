@@ -57,7 +57,7 @@ export interface UsuarioApp {
   fechaNacimiento?: Date; // Para promociones de cumpleaños
   perfilCompleto: boolean; // Status que indica si el perfil está completado o no
   edad: number; // se autocalcula cuando nos dan fecha de nacimiento.
-  genero: string // sexo de la persona.
+  genero?: string; // Sexo de la persona (opcional)
   activo: boolean; // Si la cuenta está activa
   /** true si el usuario fue creado/gestionado desde el POS de concesiones. */
   from_concesion?: boolean;
@@ -99,7 +99,7 @@ export interface CrearUsuarioAppDTO {
   telefono?: string;
   fechaNacimiento?: Date;
   edad: number;
-  genero: string;
+  genero?: string;
   password: string;  // ← AGREGAR ESTO
 }
 

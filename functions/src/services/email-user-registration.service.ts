@@ -78,7 +78,8 @@ export async function createEmailUser(
 ): Promise<UsuarioApp> {
   const normalizedEmail = input.email.toLowerCase().trim();
   const edad = calcularEdad(input.fechaNacimiento);
-  const perfilCompleto = !!(input.nombre && input.telefono);
+  // Nombre es el único dato obligatorio; teléfono, fecha y género son opcionales.
+  const perfilCompleto = !!input.nombre?.trim();
 
   const authUser = await authAppOficial.createUser({
     email: normalizedEmail,

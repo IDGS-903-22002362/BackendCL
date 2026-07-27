@@ -295,10 +295,10 @@ export const registerOrLogin = async (req: Request, res: Response) => {
       // 👤 NUEVO USUARIO
       const now = admin.firestore.Timestamp.now();
       const edad = calcularEdad(fechaNacimiento);
+      // Teléfono, fecha de nacimiento y género son opcionales.
+      // En email basta el nombre; en social se completa después en /complete-profile.
       const perfilCompleto =
-        provider === "email"
-          ? !!(nombre && telefono)
-          : false;
+        provider === "email" ? !!String(nombre ?? name ?? "").trim() : false;
 
       const nuevoUsuario: Omit<UsuarioApp, "id"> = {
         uid,
