@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { obtenerNombreTorneo, obtenerPerfilDivision } from "../../config/liga-mx.config";
+import { fechaPartidoApiToIsoString } from "./liga-mx.datetime";
 import {
   CalendarioLigaMxDoc,
   ClasificacionLigaMxDoc,
@@ -118,21 +119,6 @@ const aTextoNullable = (value: unknown): string | null => {
   return trimmed ? trimmed : null;
 };
 
-const aIsoString = (value: unknown): string | null => {
-  const normalized = aTextoNullable(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const candidate = normalized.includes("T")
-    ? normalized
-    : normalized.replace(" ", "T");
-  const date = new Date(candidate);
-
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-};
-
 const normalizarTextoComparacion = (value: string | null | undefined): string => {
   return (value || "")
     .normalize("NFD")
@@ -242,7 +228,8 @@ export const normalizarPartidoCalendario = (
       numero: aNumeroNullable(raw.numeroJornada),
     },
     fechaHoraPartido:
-      aIsoString(raw.matchDate) || aIsoString(`${raw.fecha} ${raw.horaLocal}`),
+      fechaPartidoApiToIsoString(raw.matchDate) ||
+      fechaPartidoApiToIsoString(`${raw.fecha} ${raw.horaLocal}`),
     fecha: aTextoNullable(raw.fecha),
     hora: aTextoNullable(raw.hora),
     estado,
@@ -279,7 +266,7 @@ export const normalizarPartidoCalendario = (
       asistente2: aTextoNullable(raw.arbitroAsistente2),
       cuartoArbitro: aTextoNullable(raw.cuartoArbitro),
     },
-    actualizadoFuente: aIsoString(raw.mrcdFchaMdfc),
+    actualizadoFuente: fechaPartidoApiToIsoString(raw.mrcdFchaMdfc),
     sincronizadoEn,
   };
 

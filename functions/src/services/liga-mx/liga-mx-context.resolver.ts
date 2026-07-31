@@ -3,7 +3,10 @@ import {
   ID_TORNEO_APERTURA,
   ID_TORNEO_CLAUSURA,
 } from "../../config/liga-mx.config";
+import { parsearFechaPartidoApiMs } from "./liga-mx.datetime";
 import { ResumenTemporada } from "./liga-mx.types";
+
+export { parsearFechaPartidoApiMs };
 
 const TEMPORADA_NOMBRE_RE = /^(\d{4})-(\d{4})$/;
 const MIN_EQUIPOS_TABLA = 10;
@@ -32,25 +35,6 @@ export interface ContextoActivoResuelto {
   temporadaActual: ResumenTemporada;
   idTorneoActual: number;
 }
-
-export const parsearFechaPartidoApiMs = (value: unknown): number | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  const normalized = String(value).trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  const candidate = normalized.includes("T")
-    ? normalized
-    : normalized.replace(" ", "T");
-  const date = new Date(candidate);
-
-  return Number.isNaN(date.getTime()) ? null : date.getTime();
-};
 
 const obtenerAnioCalendario = (
   now = new Date(),
