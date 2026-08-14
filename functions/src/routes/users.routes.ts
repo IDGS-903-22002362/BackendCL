@@ -34,6 +34,7 @@ import {
   legacyGetAsignaciones,
   legacyGetMyHistorial,
   legacyGetMyPoints,
+  legacyClaimFichajeBonus,
   legacySumarStreakPoints,
 } from "../modules/loyalty/services/legacy-adapter.service";
 import { checkInRacha, getRacha } from "../controllers/racha/racha.controller";
@@ -741,6 +742,12 @@ router.post(
   "/me/puntos/sumar",
   authMiddleware,
   legacySumarStreakPoints,
+);
+
+router.post(
+  "/me/puntos/fichaje",
+  authMiddleware,
+  legacyClaimFichajeBonus,
 );
 
 
