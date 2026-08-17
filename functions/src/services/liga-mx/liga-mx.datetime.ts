@@ -3,6 +3,8 @@ import { configuracionLigaMx } from "../../config/liga-mx.config";
 const FECHA_HORA_SIN_ZONA_RE =
   /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?)?$/;
 const TIENE_ZONA_EXPLICITA_RE = /(?:[zZ]|[+-]\d{2}:\d{2})$/;
+const SUFIJO_Z_FALSO_RE = /[zZ]$/;
+const TIENE_OFFSET_EXPLICITO_RE = /[+-]\d{2}:\d{2}$/;
 
 interface ComponentesFechaHoraLocal {
   year: number;
@@ -97,9 +99,22 @@ const parsearComponentesFechaHoraLocal = (
   };
 };
 
+const esSufijoZUtcFalsoDeApi = (value: string): boolean => {
+  return (
+    SUFIJO_Z_FALSO_RE.test(value) &&
+    !TIENE_OFFSET_EXPLICITO_RE.test(value) &&
+    FECHA_HORA_SIN_ZONA_RE.test(value.replace(SUFIJO_Z_FALSO_RE, ""))
+  );
+};
+
+const quitarSufijoZUtcFalso = (value: string): string => {
+  return value.replace(SUFIJO_Z_FALSO_RE, "");
+};
+
 /**
  * Convierte fechas de la API de Liga MX (hora local MX sin offset) a epoch UTC.
- * Si la cadena ya trae zona horaria explícita, se respeta tal cual.
+ * Si la cadena trae offset real (+/-), se respeta. Un sufijo `Z` aislado se trata
+ * como hora local de México mal etiquetada (no UTC real).
  */
 export const parsearFechaPartidoApiMs = (
   value: unknown,
@@ -109,6 +124,17 @@ export const parsearFechaPartidoApiMs = (
 
   if (!normalized) {
     return null;
+  }
+
+  if (esSufijoZUtcFalsoDeApi(normalized)) {
+    const componentes = parsearComponentesFechaHoraLocal(
+      quitarSufijoZUtcFalso(normalized),
+    );
+
+    if (componentes) {
+      const utcDate = convertirFechaHoraLocalAZonaUtc(componentes, timeZone);
+      return utcDate && !Number.isNaN(utcDate.getTime()) ? utcDate.getTime() : null;
+    }
   }
 
   if (TIENE_ZONA_EXPLICITA_RE.test(normalized)) {

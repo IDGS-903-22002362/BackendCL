@@ -116,6 +116,31 @@ describe("liga-mx mapper", () => {
     expect(match.hashFuente).toBeTruthy();
   });
 
+  it("prefers fecha + horaLocal over a mislabeled UTC matchDate", () => {
+    const match = normalizarPartidoCalendario(
+      {
+        idPartido: 151500,
+        idDivision: 1,
+        idTemporada: 77,
+        idTorneo: 1,
+        idClubLocal: 12570,
+        clubLocal: "Necaxa",
+        idClubVisita: 9,
+        clubVisita: "León",
+        matchDate: "2026-08-17T19:00:00.000Z",
+        fecha: "2026-08-17",
+        hora: "19:00",
+        horaLocal: "19:00",
+      },
+      "varonil",
+      "2026-08-16T12:00:00.000Z",
+    );
+
+    expect(match.fechaHoraPartido).toBe("2026-08-18T01:00:00.000Z");
+    expect(match.fecha).toBe("2026-08-17");
+    expect(match.hora).toBe("19:00");
+  });
+
   it("builds normalized context and live window checks", () => {
     const payload = construirContextoActual(
       { id: 76, nombre: "2025-2026" },
