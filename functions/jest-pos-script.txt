@@ -1,0 +1,33 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+En línea: 1 Carácter: 1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\luisr\AppData\Roaming\ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+> test:pos
+> jest --runInBand --testPathPatterns="pos.domain" && jest --runInBand --testPathPatterns="pos.flow" && jest --runInBand --testPathPatterns="pos.security" && jest --runInBand --testPathPatterns="pos.concurrency"
+
+
+Test Suites: 5 passed, 5 total
+Tests:       63 passed, 63 total
+Snapshots:   0 total
+Time:        3.076 s
+Ran all test suites matching pos.domain.
+Test Suites: 1 passed, 1 total
+Tests:       15 passed, 15 total
+Snapshots:   0 total
+Time:        3.564 s, estimated 4 s
+Ran all test suites matching pos.flow.
+Test Suites: 1 passed, 1 total
+Tests:       29 passed, 29 total
+Snapshots:   0 total
+Time:        3.758 s, estimated 6 s
+Ran all test suites matching pos.security.
+Test Suites: 1 passed, 1 total
+Tests:       12 passed, 12 total
+Snapshots:   0 total
+Time:        3.664 s, estimated 4 s
+Ran all test suites matching pos.concurrency.

@@ -144,3 +144,25 @@ curl -X POST http://localhost:3000/api/stripe/refunds \
 - Pago fallido (`4000 0000 0000 9995`).
 - Reembolso.
 - Verificar que `ordenes` y `pagos` cambian estado solo via webhook.
+
+## Punto de Venta (POS)
+
+Documentación:
+
+- [`docs/POS_BACKEND_ARCHITECTURE.md`](docs/POS_BACKEND_ARCHITECTURE.md)
+- [`docs/POS_BACKEND_IMPLEMENTATION_PLAN.md`](docs/POS_BACKEND_IMPLEMENTATION_PLAN.md)
+- [`docs/POS_BACKEND_OPERATIONS.md`](docs/POS_BACKEND_OPERATIONS.md)
+- OpenAPI: `functions/src/modules/pos/openapi/pos-v1.openapi.yaml`
+
+Comandos:
+
+```bash
+cd functions
+npm run build
+npm run test:pos
+npm run validate:pos-openapi
+npm run pos:seed:emulator
+npm run pos:migrate:dry-run
+```
+
+API base: `/api/pos/v1` (JWT staff + App Check + Idempotency-Key en comandos).

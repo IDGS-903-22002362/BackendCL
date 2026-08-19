@@ -143,7 +143,7 @@ export interface MovimientoInventario {
   ventaPosId?: string;
   usuarioId?: string;
   rolUsuario?: string;
-  origen?: "manual" | "checkout" | "pago" | "sistema" | "migracion";
+  origen?: "manual" | "checkout" | "pago" | "sistema" | "migracion" | "pos";
   idempotencyKey?: string;
   createdAt: Date;
 }

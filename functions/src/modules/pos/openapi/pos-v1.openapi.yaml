@@ -1,0 +1,792 @@
+openapi: 3.0.3
+info:
+  title: Club León POS API
+  version: 1.0.0
+  description: |
+    API de Punto de Venta presencial (`/api/pos/v1`).
+
+    Autenticación con JWT de staff (`Authorization: Bearer`), App Check obligatorio
+    en producción (`X-Firebase-AppCheck`) e `Idempotency-Key` en comandos con efectos.
+    Todos los importes son enteros en centavos MXN (`*Minor`). No incluye facturación fiscal.
+servers:
+  - url: https://us-central1-e-comerce-leon.cloudfunctions.net/api/pos/v1
+  - url: http://localhost:3000/api/pos/v1
+tags:
+  - name: Context
+  - name: Registers
+  - name: Sessions
+  - name: Shifts
+  - name: Sales
+  - name: Payments
+  - name: Tickets
+  - name: Returns
+  - name: CashMovements
+  - name: Cuts
+  - name: DailyClose
+  - name: Incidents
+  - name: Reports
+  - name: Audit
+  - name: Config
+security:
+  - bearerAuth: []
+    appCheck: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    appCheck:
+      type: apiKey
+      in: header
+      name: X-Firebase-AppCheck
+    IdempotencyKey:
+      type: apiKey
+      in: header
+      name: Idempotency-Key
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 200
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string }
+        instance: { type: string }
+        requestId: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+    MoneyMinor:
+      type: integer
+      description: Importe en centavos MXN (entero no negativo)
+      minimum: 0
+    Pagination:
+      type: object
+      properties:
+        nextCursor: { type: string, nullable: true }
+        hasMore: { type: boolean }
+    Actor:
+      type: object
+      properties:
+        uid: { type: string }
+        name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        baseRole: { type: string }
+        posRole:
+          type: string
+          enum: [CASHIER, SENIOR_CASHIER, SUPERVISOR, ADMIN, SUPER_ADMIN]
+        capabilities:
+          type: array
+          items: { type: string }
+  responses:
+    ProblemResponse:
+      description: Error RFC 7807
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+paths:
+  /context:
+    get:
+      tags: [Context]
+      summary: Contexto operativo del actor (turno, caja, límites)
+      responses:
+        '200':
+          description: OK
+        '401':
+          $ref: '#/components/responses/ProblemResponse'
+        '403':
+          $ref: '#/components/responses/ProblemResponse'
+  /capabilities:
+    get:
+      tags: [Context]
+      summary: Capacidades del actor autenticado
+      responses:
+        '200':
+          description: OK
+  /settings:
+    get:
+      tags: [Config]
+      summary: Configuración completa (admin)
+      responses:
+        '200':
+          description: OK
+        '403':
+          $ref: '#/components/responses/ProblemResponse'
+    patch:
+      tags: [Config]
+      summary: Actualizar configuración con versión optimista
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, patch]
+              additionalProperties: false
+              properties:
+                expectedVersion: { type: integer, minimum: 1 }
+                patch: { type: object }
+      responses:
+        '200':
+          description: OK
+        '409':
+          $ref: '#/components/responses/ProblemResponse'
+  /operators:
+    get:
+      tags: [Config]
+      summary: Listar operadores POS
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: OK
+  /operators/{uid}:
+    get:
+      tags: [Config]
+      summary: Obtener operador
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/ProblemResponse'
+    put:
+      tags: [Config]
+      summary: Crear o actualizar operador EMPLEADO
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [posRole, active, reason]
+              additionalProperties: false
+              properties:
+                posRole:
+                  type: string
+                  enum: [CASHIER, SENIOR_CASHIER, SUPERVISOR]
+                active: { type: boolean }
+                defaultRegisterId: { type: string, nullable: true }
+                reason: { type: string, minLength: 5 }
+      responses:
+        '200':
+          description: OK
+  /registers:
+    get:
+      tags: [Registers]
+      summary: Listar cajas
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Registers]
+      summary: Crear caja
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Creada
+  /registers/{registerId}:
+    get:
+      tags: [Registers]
+      summary: Detalle de caja
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+    patch:
+      tags: [Registers]
+      summary: Actualizar configuración permitida de caja
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /registers/{registerId}/open:
+    post:
+      tags: [Registers]
+      summary: Abrir caja con fondo inicial e iniciar turno
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '409':
+          $ref: '#/components/responses/ProblemResponse'
+  /registers/{registerId}/block:
+    post:
+      tags: [Registers]
+      summary: Bloquear caja
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /registers/{registerId}/unblock:
+    post:
+      tags: [Registers]
+      summary: Desbloquear caja
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /registers/{registerId}/close:
+    post:
+      tags: [Registers]
+      summary: Cerrar caja
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /registers/{registerId}/force-close:
+    post:
+      tags: [Registers]
+      summary: Cierre forzado con motivo e incidencia
+      parameters:
+        - name: registerId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /register-sessions:
+    get:
+      tags: [Sessions]
+      summary: Listar sesiones
+      responses:
+        '200':
+          description: OK
+  /register-sessions/{sessionId}:
+    get:
+      tags: [Sessions]
+      summary: Detalle de sesión
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /register-sessions/{sessionId}/shifts:
+    post:
+      tags: [Shifts]
+      summary: Iniciar turno en sesión abierta
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /shifts:
+    get:
+      tags: [Shifts]
+      summary: Listar turnos
+      responses:
+        '200':
+          description: OK
+  /shifts/{shiftId}:
+    get:
+      tags: [Shifts]
+      summary: Detalle de turno
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /shifts/{shiftId}/request-handoff:
+    post:
+      tags: [Shifts]
+      summary: Solicitar entrega de turno
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /shifts/{shiftId}/complete-handoff:
+    post:
+      tags: [Shifts]
+      summary: Confirmar recepción de turno
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /shifts/{shiftId}/start-count:
+    post:
+      tags: [Cuts]
+      summary: Iniciar arqueo del turno
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /shifts/{shiftId}/cash-counts:
+    post:
+      tags: [Cuts]
+      summary: Crear conteo ciego (denominaciones)
+      parameters:
+        - name: shiftId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /cash-counts/{countId}/submit:
+    post:
+      tags: [Cuts]
+      summary: Enviar conteo y generar corte
+      parameters:
+        - name: countId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /cuts:
+    get:
+      tags: [Cuts]
+      summary: Listar cortes
+      responses:
+        '200':
+          description: OK
+  /cuts/{cutId}:
+    get:
+      tags: [Cuts]
+      summary: Detalle de corte (ciego para el cajero propio antes de revisión)
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /cuts/{cutId}/approve:
+    post:
+      tags: [Cuts]
+      summary: Aprobar corte (no self-approval)
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '403':
+          $ref: '#/components/responses/ProblemResponse'
+  /cuts/{cutId}/reject:
+    post:
+      tags: [Cuts]
+      summary: Rechazar corte
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /cuts/{cutId}/request-second-count:
+    post:
+      tags: [Cuts]
+      summary: Solicitar segundo conteo (nueva versión)
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /cuts/{cutId}/escalate:
+    post:
+      tags: [Cuts]
+      summary: Escalar corte
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /cuts/{cutId}/reopen:
+    post:
+      tags: [Cuts]
+      summary: Reabrir corte aprobado (admin)
+      parameters:
+        - name: cutId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /sales:
+    get:
+      tags: [Sales]
+      summary: Listar ventas
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Sales]
+      summary: Crear venta borrador
+      responses:
+        '201':
+          description: Creada
+  /sales/{saleId}:
+    get:
+      tags: [Sales]
+      summary: Detalle de venta
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/items:
+    post:
+      tags: [Sales]
+      summary: Agregar línea (precio calculado en backend)
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/checkout-preview:
+    post:
+      tags: [Sales]
+      summary: Revalidar precios e inventario antes de cobrar
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/payments/cash:
+    post:
+      tags: [Payments]
+      summary: Pagar en efectivo (atómico con inventario)
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '409':
+          $ref: '#/components/responses/ProblemResponse'
+  /sales/{saleId}/payments/card-external:
+    post:
+      tags: [Payments]
+      summary: Registrar pago de terminal externa
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/payments/mixed:
+    post:
+      tags: [Payments]
+      summary: Pago mixto atómico
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/ticket:
+    get:
+      tags: [Tickets]
+      summary: Ticket comercial no fiscal
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+  /sales/{saleId}/returns:
+    post:
+      tags: [Returns]
+      summary: Solicitar devolución/reembolso
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /cash-movements:
+    get:
+      tags: [CashMovements]
+      summary: Listar movimientos de efectivo
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [CashMovements]
+      summary: Solicitar movimiento de efectivo
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /daily-close/{operationalDate}/readiness:
+    get:
+      tags: [DailyClose]
+      summary: Checklist de bloqueos para cierre del día
+      parameters:
+        - name: operationalDate
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-\d{2}$'
+      responses:
+        '200':
+          description: OK
+  /daily-close/{operationalDate}/preview:
+    post:
+      tags: [DailyClose]
+      summary: Vista previa consolidada
+      parameters:
+        - name: operationalDate
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-\d{2}$'
+      responses:
+        '200':
+          description: OK
+  /daily-close/{operationalDate}/close:
+    post:
+      tags: [DailyClose]
+      summary: Cerrar día (único e idempotente)
+      parameters:
+        - name: operationalDate
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-\d{2}$'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+        '409':
+          $ref: '#/components/responses/ProblemResponse'
+  /daily-close/{operationalDate}/force-close:
+    post:
+      tags: [DailyClose]
+      summary: Cierre forzado con motivo e incidencia
+      parameters:
+        - name: operationalDate
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}-\d{2}$'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /incidents:
+    get:
+      tags: [Incidents]
+      summary: Listar incidencias
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [Incidents]
+      summary: Crear incidencia
+      responses:
+        '201':
+          description: Creada
+  /reports/shifts:
+    get:
+      tags: [Reports]
+      summary: Reporte de turnos
+      responses:
+        '200':
+          description: OK
+  /reports/registers:
+    get:
+      tags: [Reports]
+      summary: Reporte de cajas
+      responses:
+        '200':
+          description: OK
+  /reports/cash-movements:
+    get:
+      tags: [Reports]
+      summary: Reporte de movimientos de efectivo
+      responses:
+        '200':
+          description: OK
+  /reports/differences:
+    get:
+      tags: [Reports]
+      summary: Reporte de diferencias de corte
+      responses:
+        '200':
+          description: OK
+  /reports/daily-summary:
+    get:
+      tags: [Reports]
+      summary: Resumen diario
+      responses:
+        '200':
+          description: OK
+  /reports/payment-reconciliation:
+    get:
+      tags: [Reports]
+      summary: Conciliación por método de pago
+      responses:
+        '200':
+          description: OK
+  /exports:
+    post:
+      tags: [Reports]
+      summary: Crear exportación CSV
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: OK
+  /audit-events:
+    get:
+      tags: [Audit]
+      summary: Consultar auditoría append-only
+      responses:
+        '200':
+          description: OK
+  /tickets/{token}:
+    get:
+      tags: [Tickets]
+      summary: Consulta pública de ticket por token (sin auth)
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/ProblemResponse'

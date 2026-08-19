@@ -47,6 +47,7 @@ import ofertasRoutes from "./ofertas.routes";
 import codigofertasRoutes from "./codigos-promocion.routes";
 import recomendacionesRoutes from "./recomendaciones.routes";
 import loyaltyRoutes from "../modules/loyalty/routes/loyalty.routes";
+import posRoutes from "../modules/pos/routes/pos.routes";
 import createLoyaltyPartnerRouter from "../modules/loyalty/partner/routes/loyalty-partner.routes";
 import { LoyaltyEnvironment } from "../modules/loyalty/models/loyalty.enums";
 import { createSimpleRateLimiter } from "../middleware/rate-limit.middleware";
@@ -115,6 +116,9 @@ router.use(
   createLoyaltyPartnerRouter(LoyaltyEnvironment.PRODUCTION),
 );
 router.use("/loyalty/v1", loyaltyRoutes);
+// Punto de venta presencial. Mantiene su propio App Check, errores problem+json e
+// idempotencia; no comparte middleware con el ecommerce más allá de la autenticación.
+router.use("/pos/v1", posRoutes);
 
 // Futuros módulos:
 

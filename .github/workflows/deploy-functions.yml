@@ -43,6 +43,18 @@ jobs:
           npm test -- --passWithNoTests 2>&1 | tail -30
         continue-on-error: true
 
+      - name: Run POS tests
+        run: |
+          cd functions
+          npm run test:pos
+        continue-on-error: true
+
+      - name: Validate POS OpenAPI
+        run: |
+          cd functions
+          npm run validate:pos-openapi
+        continue-on-error: true
+
       - name: Build Functions
         run: |
           cd functions

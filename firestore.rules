@@ -94,6 +94,72 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---------------------------------------------------------------- POS
+    // Colecciones operativas del punto de venta. Solo el backend (Admin SDK)
+    // lee y escribe; los clientes nunca acceden directamente. El bloque
+    // explícito documenta la intención y sobrevive a cambios futuros del
+    // catch-all.
+    match /posSettings/{document=**} {
+      allow read, write: if false;
+    }
+    match /posOperators/{document=**} {
+      allow read, write: if false;
+    }
+    match /posRegisters/{document=**} {
+      allow read, write: if false;
+    }
+    match /posRegisterSessions/{document=**} {
+      allow read, write: if false;
+    }
+    match /posShifts/{document=**} {
+      allow read, write: if false;
+    }
+    match /posShiftLocks/{document=**} {
+      allow read, write: if false;
+    }
+    match /posSales/{document=**} {
+      allow read, write: if false;
+    }
+    match /posPayments/{document=**} {
+      allow read, write: if false;
+    }
+    match /posCashMovements/{document=**} {
+      allow read, write: if false;
+    }
+    match /posCashCounts/{document=**} {
+      allow read, write: if false;
+    }
+    match /posCuts/{document=**} {
+      allow read, write: if false;
+    }
+    match /posCutVersions/{document=**} {
+      allow read, write: if false;
+    }
+    match /posReturns/{document=**} {
+      allow read, write: if false;
+    }
+    match /posDailyClosures/{document=**} {
+      allow read, write: if false;
+    }
+    match /posIncidents/{document=**} {
+      allow read, write: if false;
+    }
+    match /posAuditEvents/{document=**} {
+      allow read, write: if false;
+    }
+    match /posIdempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /posSequences/{document=**} {
+      allow read, write: if false;
+    }
+    match /posExports/{document=**} {
+      allow read, write: if false;
+    }
+    match /posLocks/{document=**} {
+      allow read, write: if false;
+    }
+
     // Todo lo demás sigue bloqueado: acceso vía Cloud Functions.
     match /{document=**} {
       allow read, write: if false;
