@@ -163,6 +163,30 @@ const construirResumenTorneo = (idTorneo: number): ResumenTorneo => ({
   nombre: obtenerNombreTorneo(idTorneo),
 });
 
+const resolverFechaHoraPartidoDesdeApi = (
+  raw: Record<string, unknown>,
+): string | null => {
+  const fecha = aTextoNullable(raw.fecha);
+  const horaLocal = aTextoNullable(raw.horaLocal);
+  const hora = aTextoNullable(raw.hora);
+
+  if (fecha && horaLocal) {
+    const desdeHoraLocal = fechaPartidoApiToIsoString(`${fecha} ${horaLocal}`);
+    if (desdeHoraLocal) {
+      return desdeHoraLocal;
+    }
+  }
+
+  if (fecha && hora) {
+    const desdeHora = fechaPartidoApiToIsoString(`${fecha} ${hora}`);
+    if (desdeHora) {
+      return desdeHora;
+    }
+  }
+
+  return fechaPartidoApiToIsoString(raw.matchDate);
+};
+
 export const construirContextoActual = (
   temporadaActual: ResumenTemporada,
   idTorneoActual: number,
@@ -227,9 +251,7 @@ export const normalizarPartidoCalendario = (
       nombreCorto: aTextoNullable(raw.jornadaAbreviada),
       numero: aNumeroNullable(raw.numeroJornada),
     },
-    fechaHoraPartido:
-      fechaPartidoApiToIsoString(raw.matchDate) ||
-      fechaPartidoApiToIsoString(`${raw.fecha} ${raw.horaLocal}`),
+    fechaHoraPartido: resolverFechaHoraPartidoDesdeApi(raw),
     fecha: aTextoNullable(raw.fecha),
     hora: aTextoNullable(raw.hora),
     estado,

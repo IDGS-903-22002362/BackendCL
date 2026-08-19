@@ -17,8 +17,17 @@ describe("liga-mx datetime", () => {
     );
   });
 
-  it("keeps explicit timezone values unchanged", () => {
-    expect(fechaPartidoApiToIsoString("2026-01-11T01:00:00.000Z")).toBe(
+  it("treats trailing Z on API matchDate as Mexico local, not UTC", () => {
+    expect(fechaPartidoApiToIsoString("2026-08-17T19:00:00.000Z")).toBe(
+      "2026-08-18T01:00:00.000Z",
+    );
+    expect(fechaPartidoApiToIsoString("2026-01-10 19:00:00.000Z")).toBe(
+      "2026-01-11T01:00:00.000Z",
+    );
+  });
+
+  it("keeps explicit offset timezone values unchanged", () => {
+    expect(fechaPartidoApiToIsoString("2026-01-11T01:00:00.000+00:00")).toBe(
       "2026-01-11T01:00:00.000Z",
     );
   });

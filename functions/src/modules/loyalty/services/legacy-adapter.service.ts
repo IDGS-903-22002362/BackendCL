@@ -96,6 +96,30 @@ export async function legacySumarStreakPoints(req: Request, res: Response) {
   }
 }
 
+export async function legacyClaimFichajeBonus(req: Request, res: Response) {
+  try {
+    await requireLegacyAdapters();
+    setDeprecation(res);
+    const uid = req.user!.uid;
+    const txn = await loyaltyEngineService.applyFichajeBonus(uid);
+    const wallet = await loyaltyEngineService.getWallet(uid);
+    res.status(200).json({
+      success: true,
+      alreadyClaimed: txn === null,
+      puntosAsignados: txn?.points ?? 0,
+      puntos: wallet.availablePoints,
+      data: {
+        puntosActuales: wallet.availablePoints,
+        puntosAsignados: txn?.points ?? 0,
+      },
+    });
+    logLegacyUse(req, "POST /me/puntos/fichaje", 200);
+  } catch (error) {
+    logLegacyUse(req, "POST /me/puntos/fichaje", 500);
+    sendLegacyError(res, error, "Error al reclamar recompensa del fichaje");
+  }
+}
+
 export async function legacyGetMyHistorial(req: Request, res: Response) {
   try {
     setDeprecation(res);

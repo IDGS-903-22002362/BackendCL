@@ -146,6 +146,40 @@ export class LoyaltyEngineService {
     }
   }
 
+  async applyFichajeBonus(
+    memberId: string,
+    actorId = "fichaje-promo",
+  ): Promise<LoyaltyTransaction | null> {
+    const idempotencyKey = `fichaje:fc27:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.SERVICE,
+          actorId,
+          roles: ["SERVICE"],
+          permissions: [],
+        },
+        points: LOYALTY_DEFAULTS.FICHAJE_BONUS_POINTS,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.ECOMMERCE,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/fichaje",
+        description: "Bonificación por descubrir el nuevo fichaje",
+        reasonCode: "FICHAJE",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async applyProfileCompletionBonus(
     memberId: string,
     actorId = "system",
