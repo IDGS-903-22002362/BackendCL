@@ -454,7 +454,10 @@ router.post("/", authMiddleware, requireAdmin, commandController.create);
  * /api/usuarios/completar-perfil:
  *   put:
  *     summary: Completar perfil de usuario
- *     description: Permite al usuario completar su informaci?n de perfil. Requiere autenticaci?n.
+ *     description: >
+ *       Permite al usuario completar su información de perfil. Requiere autenticación.
+ *       Al completarlo por primera vez otorga 15 puntos una sola vez
+ *       (bono social para Google/Apple o bono de perfil para registro manual).
  *     tags: [Users]
  *     security:
  *       - BearerAuth: []
@@ -474,7 +477,20 @@ router.post("/", authMiddleware, requireAdmin, commandController.create);
  *                 format: date
  *     responses:
  *       200:
- *         description: Perfil actualizado exitosamente
+ *         description: Perfil actualizado exitosamente (y bono de 15 pts otorgado si aplica)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                 bonoOtorgado:
+ *                   type: boolean
+ *                 puntosBonificados:
+ *                   type: number
  *       401:
  *         $ref: '#/components/responses/401Unauthorized'
  *       400:
@@ -486,6 +502,52 @@ router.put(
   "/completar-perfil",
   authMiddleware,
   commandController.completarPerfil,
+);
+
+/**
+ * @swagger
+ * /api/usuarios/completar-datos-perfil:
+ *   put:
+ *     summary: Completar datos demográficos (bono registro email)
+ *     description: >
+ *       Guarda teléfono, fecha de nacimiento y género para usuarios de registro manual
+ *       y otorga 15 puntos una sola vez. No aplica a Google/Apple.
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [telefono, fechaNacimiento, genero]
+ *             properties:
+ *               nombre:
+ *                 type: string
+ *               telefono:
+ *                 type: string
+ *               fechaNacimiento:
+ *                 type: string
+ *                 format: date
+ *               genero:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Datos actualizados (y bono otorgado si aplica)
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.put(
+  "/completar-datos-perfil",
+  authMiddleware,
+  commandController.completarDatosPerfil,
 );
 
 router.put(

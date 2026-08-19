@@ -200,6 +200,9 @@ export class UserAppService {
         edad: data.edad,
         genero: data.genero,
         activo: data.activo,
+        bonoBienvenidaOtorgadoAt: data.bonoBienvenidaOtorgadoAt,
+        bonoPerfilCompletadoAt: data.bonoPerfilCompletadoAt,
+        bonoSocialRegistroAt: data.bonoSocialRegistroAt,
         createdAt: data.createdAt,
         updatedAt: data.updatedAt,
       } as UsuarioApp;

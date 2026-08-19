@@ -107,6 +107,8 @@ const buildUsuarioFromDoc = (
     activo: data.activo ?? true,
     historialPuntos: data.historialPuntos,
     bonoBienvenidaOtorgadoAt: data.bonoBienvenidaOtorgadoAt,
+    bonoPerfilCompletadoAt: data.bonoPerfilCompletadoAt,
+    bonoSocialRegistroAt: data.bonoSocialRegistroAt,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
   } as UsuarioApp;

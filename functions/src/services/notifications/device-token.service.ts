@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
+import { firestoreApp } from "../../config/app.firebase";
 import notificationConfig, {
   resolveOptionalNotificationTimezone,
 } from "../../config/notification.config";
@@ -194,6 +195,42 @@ class DeviceTokenService {
         ...(doc.data() as DevicePushToken),
       }))
       .filter((device) => Boolean(device.token?.trim()));
+  }
+
+  /**
+   * Lista dispositivos push activos.
+   * Si `userIds` viene vacío/undefined, consulta collection group `dispositivosPush`.
+   */
+  async listActiveDevices(userIds?: string[]): Promise<DevicePushToken[]> {
+    const filteredUserIds = [
+      ...new Set(
+        (userIds || [])
+          .map((userId) => userId.trim())
+          .filter((userId) => userId.length > 0),
+      ),
+    ];
+
+    if (filteredUserIds.length > 0) {
+      const batches = await Promise.all(
+        filteredUserIds.map((userId) => this.getActiveTokens(userId)),
+      );
+      return batches.flat();
+    }
+
+    const snapshot = await firestoreApp
+      .collectionGroup(notificationCollections.userDeviceTokens)
+      .where("enabled", "==", true)
+      .get();
+
+    return snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        ...(doc.data() as DevicePushToken),
+      }))
+      .filter(
+        (device) =>
+          Boolean(device.token?.trim()) && Boolean(device.userId?.trim()),
+      );
   }
 
   async markTokenInvalid(

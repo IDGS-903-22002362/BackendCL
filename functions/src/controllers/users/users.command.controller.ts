@@ -12,6 +12,12 @@ import seasonPassVerificationService, {
 } from "../../services/season-pass-verification.service";
 import loyaltyEngineService from "../../modules/loyalty/services/loyalty-engine.service";
 import { LoyaltyActorType } from "../../modules/loyalty/models/loyalty.enums";
+import {
+    PUNTOS_BONO_PERFIL,
+    normalizeGenero,
+    shouldAwardSocialSignupBonus,
+    validateRequiredDemographics,
+} from "../../utils/profile-completion.util";
 
 /**
  * Controller: Users Command (Escritura)
@@ -167,12 +173,18 @@ export const update = async (req: Request, res: Response) => {
 export const actualizarPerfil = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
-        const { nombre, telefono } = req.body;
+        const genero = normalizeGenero(
+            typeof req.body?.genero === "string" ? req.body.genero : undefined,
+        );
 
-        const usuario = await userAppService.updateByUid(uid, {
-            nombre,
-            telefono
-        });
+        if (!genero) {
+            return res.status(400).json({
+                success: false,
+                message: "Solo puedes actualizar el género",
+            });
+        }
+
+        const usuario = await userAppService.updateByUid(uid, { genero });
 
         return res.status(200).json({
             success: true,
@@ -209,28 +221,152 @@ const calcularEdad = (fechaNacimiento?: string | Date): number | null => {
 export const completarPerfil = async (req: Request, res: Response) => {
     try {
         const uid = (req as any).user.uid;
-        const { nombre, telefono, fechaNacimiento, genero } = req.body;
+        const existing = await userAppService.getUserByUid(uid);
 
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: "Usuario no encontrado",
+            });
+        }
+
+        // Gate Apple/Google: exigir demográficos solo mientras el perfil esté incompleto.
+        // Si ya está completo, permite actualizar campos enviados (edición de perfil).
+        if (!existing.perfilCompleto) {
+            const validated = validateRequiredDemographics(req.body, {
+                requireNombre: true,
+            });
+
+            if (!validated.ok) {
+                return res.status(400).json({
+                    success: false,
+                    message: validated.message,
+                });
+            }
+
+            const { nombre, telefono, fechaNacimiento, genero } = validated.data;
+            const edad = calcularEdad(fechaNacimiento);
+
+            await userAppService.updateByUid(uid, {
+                nombre,
+                telefono,
+                fechaNacimiento,
+                genero,
+                edad,
+                perfilCompleto: true,
+            });
+
+            let bonoOtorgado = false;
+
+            if (existing.provider === "email" && !existing.bonoPerfilCompletadoAt) {
+                const bono = await loyaltyEngineService.applyProfileCompletionBonus(uid);
+                bonoOtorgado = bono !== null;
+            }
+
+            if (shouldAwardSocialSignupBonus(existing)) {
+                const bono = await loyaltyEngineService.applySocialSignupBonus(uid);
+                bonoOtorgado = bonoOtorgado || bono !== null;
+            }
+
+            const usuario = await userAppService.getUserByUid(uid);
+
+            return res.status(200).json({
+                success: true,
+                data: usuario,
+                bonoOtorgado,
+                puntosBonificados: bonoOtorgado ? PUNTOS_BONO_PERFIL : 0,
+            });
+        }
+
+        const genero = normalizeGenero(
+            typeof req.body?.genero === "string" ? req.body.genero : undefined,
+        );
+
+        if (!genero) {
+            return res.status(400).json({
+                success: false,
+                message: "Solo puedes actualizar el género",
+            });
+        }
+
+        const usuario = await userAppService.updateByUid(uid, { genero });
+
+        return res.status(200).json({
+            success: true,
+            data: usuario,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: "Error completando perfil",
+        });
+    }
+};
+
+/**
+ * Completa datos demográficos para registro manual y otorga +15 pts una sola vez.
+ * No aplica a Google/Apple (usan completarPerfil sin este bono).
+ */
+export const completarDatosPerfil = async (req: Request, res: Response) => {
+    try {
+        const uid = (req as any).user.uid;
+        const existing = await userAppService.getUserByUid(uid);
+
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: "Usuario no encontrado",
+            });
+        }
+
+        if (existing.provider !== "email") {
+            return res.status(403).json({
+                success: false,
+                message:
+                    "Este bono solo está disponible para registro con correo",
+            });
+        }
+
+        const validated = validateRequiredDemographics(req.body, {
+            requireNombre: false,
+        });
+
+        if (!validated.ok) {
+            return res.status(400).json({
+                success: false,
+                message: validated.message,
+            });
+        }
+
+        const { nombre, telefono, fechaNacimiento, genero } = validated.data;
         const edad = calcularEdad(fechaNacimiento);
+        const alreadyClaimed = Boolean(existing.bonoPerfilCompletadoAt);
 
-        const usuario = await userAppService.updateByUid(uid, {
-            nombre,
+        await userAppService.updateByUid(uid, {
+            ...(nombre ? { nombre } : {}),
             telefono,
             fechaNacimiento,
             genero,
             edad,
-            perfilCompleto: true
         });
+
+        if (!alreadyClaimed) {
+            await loyaltyEngineService.applyProfileCompletionBonus(uid);
+        }
+
+        const usuario = await userAppService.getUserByUid(uid);
 
         return res.status(200).json({
             success: true,
-            data: usuario
+            data: usuario,
+            bonoOtorgado: !alreadyClaimed,
+            puntosBonificados: alreadyClaimed ? 0 : PUNTOS_BONO_PERFIL,
         });
-
     } catch (error) {
+        console.error("Error en completarDatosPerfil:", error);
         return res.status(500).json({
             success: false,
-            message: "Error completando perfil"
+            message: "Error completando datos de perfil",
         });
     }
 };

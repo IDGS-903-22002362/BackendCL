@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import deviceTokenService from "../../services/notifications/device-token.service";
+import notificationBroadcastService from "../../services/notifications/notification-broadcast.service";
 import notificationEventService from "../../services/notifications/notification-event.service";
 import notificationPreferencesService from "../../services/notifications/notification-preferences.service";
 import notificationProcessingService from "../../services/notifications/notification-processing.service";
@@ -157,6 +158,40 @@ export const sendTestNotification = async (req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: "Error al procesar la notificación de prueba",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const sendBroadcastNotification = async (req: Request, res: Response) => {
+  try {
+    const { title, body, deeplink, screen, priority, userIds } = req.body as {
+      title: string;
+      body: string;
+      deeplink?: string;
+      screen?: string;
+      priority?: "normal" | "high";
+      userIds?: string[];
+    };
+
+    const result = await notificationBroadcastService.broadcast({
+      title,
+      body,
+      deeplink,
+      screen,
+      priority,
+      userIds,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Broadcast de notificación procesado",
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error al procesar el broadcast de notificación",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }

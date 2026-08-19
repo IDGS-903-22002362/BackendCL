@@ -18,7 +18,8 @@ export type NotificationEventType =
   | "promo_campaign"
   | "matchday_campaign"
   | "probable_repurchase"
-  | "manual_test";
+  | "manual_test"
+  | "manual_broadcast";
 
 export type NotificationCategory =
   | "order"

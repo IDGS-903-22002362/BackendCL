@@ -106,6 +106,7 @@ class NotificationEventService {
           input.sourceData?.referenceOrderId || "repurchase",
         );
       case "manual_test":
+      case "manual_broadcast":
         return buildNotificationFingerprint(
           input.eventType,
           input.userId,

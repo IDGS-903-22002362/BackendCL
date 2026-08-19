@@ -172,18 +172,27 @@ class NotificationAiService {
           reasoningTag: "probable_repurchase",
         };
       case "manual_test":
+      case "manual_broadcast":
         return {
           ...base,
           title:
             this.truncate(event.sourceData?.title, 80) ||
-            "Prueba de notificaciones Club León",
+            (event.eventType === "manual_broadcast"
+              ? "Club León"
+              : "Prueba de notificaciones Club León"),
           body:
             this.truncate(event.sourceData?.body, 180) ||
-            "Esta es una notificación de prueba desde el backend.",
+            (event.eventType === "manual_broadcast"
+              ? "Entra para ver novedades."
+              : "Esta es una notificación de prueba desde el backend."),
           deeplink:
-            this.truncate(event.sourceData?.deeplink, 200) || deepLink.deeplink,
+            this.truncate(event.sourceData?.deeplink, 200) ||
+            (event.eventType === "manual_broadcast"
+              ? "clubleon://shop/home"
+              : deepLink.deeplink),
           screen:
-            this.truncate(event.sourceData?.screen, 80) || deepLink.screen,
+            this.truncate(event.sourceData?.screen, 80) ||
+            (event.eventType === "manual_broadcast" ? "home" : deepLink.screen),
           category:
             (this.truncate(event.sourceData?.category, 20) as NotificationCategory) ||
             "test",
@@ -191,7 +200,7 @@ class NotificationAiService {
             this.truncate(event.sourceData?.priority, 10) === "high"
               ? "high"
               : "normal",
-          reasoningTag: "manual_test",
+          reasoningTag: event.eventType,
         };
       default:
         return {

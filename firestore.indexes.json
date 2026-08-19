@@ -1264,6 +1264,16 @@
       ]
     },
     {
+      "collectionGroup": "dispositivosPush",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "enabled",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "loyalty_transactions",
       "queryScope": "COLLECTION",
       "fields": [

@@ -70,6 +70,10 @@ export interface UsuarioApp {
   solicitudEliminacion?: SolicitudEliminacion; // Información sobre solicitud de eliminación de cuenta
   historialPuntos?: HistorialPuntosUsuario;
   bonoBienvenidaOtorgadoAt?: Timestamp;
+  /** Timestamp del bono de +15 pts por completar datos demográficos (solo registro email). */
+  bonoPerfilCompletadoAt?: Timestamp;
+  /** Timestamp del bono de +15 pts por registro con Google/Apple. */
+  bonoSocialRegistroAt?: Timestamp;
   createdAt: Timestamp; // Fecha de registro
   updatedAt: Timestamp; // Última actualización
 }

@@ -284,6 +284,7 @@ class NotificationEligibilityService {
       case "probable_repurchase":
         return { allowed: true };
       case "manual_test":
+      case "manual_broadcast":
       default:
         return { allowed: true };
     }
@@ -335,7 +336,12 @@ class NotificationEligibilityService {
     const now = new Date();
     const localDayKey = getNotificationDayKey(now, timezone);
 
+    const bypassQuietHours =
+      event.eventType === "manual_test" ||
+      event.eventType === "manual_broadcast";
+
     if (
+      !bypassQuietHours &&
       !isTransactionalNotification(event.eventType) &&
       isWithinQuietHours(now, timezone, preference.quietHours)
     ) {

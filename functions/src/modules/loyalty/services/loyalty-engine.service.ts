@@ -146,6 +146,74 @@ export class LoyaltyEngineService {
     }
   }
 
+  async applyProfileCompletionBonus(
+    memberId: string,
+    actorId = "system",
+  ): Promise<LoyaltyTransaction | null> {
+    const idempotencyKey = `profile-bonus:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.SERVICE,
+          actorId,
+          roles: ["SERVICE"],
+          permissions: [],
+        },
+        points: LOYALTY_DEFAULTS.PROFILE_COMPLETION_POINTS,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/profile-completion",
+        description: "Bonificación por completar perfil",
+        reasonCode: "PROFILE_COMPLETION",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async applySocialSignupBonus(
+    memberId: string,
+    actorId = "system",
+  ): Promise<LoyaltyTransaction | null> {
+    const idempotencyKey = `social-signup-bonus:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.SERVICE,
+          actorId,
+          roles: ["SERVICE"],
+          permissions: [],
+        },
+        points: LOYALTY_DEFAULTS.SOCIAL_SIGNUP_BONUS_POINTS,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/social-signup",
+        description: "Bonificación por registro con Google o Apple",
+        reasonCode: "SOCIAL_SIGNUP",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async applyDailyStreakBonus(
     memberId: string,
     dayKey: string,
@@ -613,6 +681,22 @@ export class LoyaltyEngineService {
         tx.set(
           userRef,
           { bonoBienvenidaOtorgadoAt: Timestamp.now() },
+          { merge: true },
+        );
+      }
+
+      if (params.type === LoyaltyTransactionType.BONUS && params.reasonCode === "PROFILE_COMPLETION") {
+        tx.set(
+          userRef,
+          { bonoPerfilCompletadoAt: Timestamp.now() },
+          { merge: true },
+        );
+      }
+
+      if (params.type === LoyaltyTransactionType.BONUS && params.reasonCode === "SOCIAL_SIGNUP") {
+        tx.set(
+          userRef,
+          { bonoSocialRegistroAt: Timestamp.now() },
           { merge: true },
         );
       }

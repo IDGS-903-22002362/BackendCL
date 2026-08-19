@@ -19,6 +19,7 @@ const notificationEventTypeEnum: [NotificationEventType, ...NotificationEventTyp
     "matchday_campaign",
     "probable_repurchase",
     "manual_test",
+    "manual_broadcast",
   ];
 
 const notificationDeliveryModeEnum: [
@@ -92,6 +93,17 @@ export const manualNotificationTestSchema = z
     deeplink: z.string().trim().min(1).max(200).optional(),
     screen: z.string().trim().min(1).max(80).optional(),
     priority: z.enum(["normal", "high"]).optional(),
+  })
+  .strict();
+
+export const broadcastNotificationSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    body: z.string().trim().min(1).max(180),
+    deeplink: z.string().trim().min(1).max(200).optional(),
+    screen: z.string().trim().min(1).max(80).optional(),
+    priority: z.enum(["normal", "high"]).optional(),
+    userIds: z.array(z.string().trim().min(1).max(120)).max(5000).optional(),
   })
   .strict();
 

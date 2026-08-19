@@ -170,6 +170,7 @@ class NotificationPreferencesService {
       case "probable_repurchase":
         return preference.marketingEnabled && preference.recommendationsEnabled;
       case "manual_test":
+      case "manual_broadcast":
         return true;
       default:
         return false;

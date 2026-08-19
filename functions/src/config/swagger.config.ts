@@ -83,6 +83,7 @@ import {
 import { createTryOnJobSchema } from "../middleware/validators/ai-tryon.validator";
 import { uploadAiFileBodySchema } from "../middleware/validators/ai-file.validator";
 import {
+  broadcastNotificationSchema,
   enqueueNotificationEventSchema,
   manualNotificationTestSchema,
   registerDeviceTokenSchema,
@@ -373,6 +374,7 @@ const swaggerDefinition = {
         updateNotificationPreferencesSchema,
       ),
       ManualNotificationTest: zodToJsonSchema(manualNotificationTestSchema),
+      BroadcastNotification: zodToJsonSchema(broadcastNotificationSchema),
       EnqueueNotificationEvent: zodToJsonSchema(
         enqueueNotificationEventSchema,
       ),
@@ -1359,6 +1361,18 @@ const swaggerDefinition = {
           nivel: { type: "string", example: "Oro" },
           fechaNacimiento: { type: "string", format: "date" },
           perfilCompleto: { type: "boolean", example: true },
+          bonoPerfilCompletadoAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "Si existe, el usuario email ya reclamó el bono de completar perfil",
+          },
+          bonoSocialRegistroAt: {
+            type: "string",
+            format: "date-time",
+            description:
+              "Si existe, el usuario Google/Apple ya recibió el bono de registro social",
+          },
           activo: { type: "boolean", example: true },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" },

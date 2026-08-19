@@ -8,6 +8,7 @@ import {
 import {
   deviceIdParamSchema,
   enqueueNotificationEventSchema,
+  broadcastNotificationSchema,
   manualNotificationTestSchema,
   registerDeviceTokenSchema,
   updateDeviceTokenSchema,
@@ -227,6 +228,52 @@ router.post(
   requireAdmin,
   validateBody(manualNotificationTestSchema),
   commandController.sendTestNotification,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/broadcast:
+ *   post:
+ *     summary: Enviar una notificación push broadcast
+ *     description: >
+ *       Endpoint administrativo para enviar un mensaje ad-hoc a todos los
+ *       dispositivos activos, o solo a una lista de userIds.
+ *       Si `userIds` está vacío u omitido, se incluyen todos los usuarios con
+ *       al menos un dispositivo push habilitado.
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BroadcastNotification'
+ *           example:
+ *             title: "Hola"
+ *             body: "Entra para ver novedades"
+ *             deeplink: "clubleon://shop/home"
+ *             screen: "home"
+ *             priority: "high"
+ *             userIds: []
+ *     responses:
+ *       200:
+ *         description: Broadcast procesado
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/broadcast",
+  authMiddleware,
+  requireAdmin,
+  validateBody(broadcastNotificationSchema),
+  commandController.sendBroadcastNotification,
 );
 
 /**

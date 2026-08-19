@@ -49,6 +49,7 @@ export const resolveNotificationCategory = (
     case "probable_repurchase":
       return "recommendation";
     case "manual_test":
+    case "manual_broadcast":
       return "test";
     default:
       return "promo";
@@ -120,6 +121,7 @@ export const resolveNotificationEntity = (
     case "inactive_user":
     case "probable_repurchase":
     case "manual_test":
+    case "manual_broadcast":
       return { entityType: "user", entityId: input.userId };
     default:
       return { entityType: "notification", entityId: input.userId };
