@@ -8,6 +8,7 @@ const PRODUCTION_CORS_ORIGINS = [
   "https://clubleon-developer-portal--e-comerce-leon.us-central1.hosted.app",
   "http://localhost:3001",
   "http://localhost:3002",
+  "http://localhost:9002",
 ] as const;
 
 function parseOrigins(raw: string | undefined): string[] {

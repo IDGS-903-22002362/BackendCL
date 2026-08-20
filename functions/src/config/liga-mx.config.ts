@@ -2,8 +2,8 @@ import { DivisionKey, PerfilDivision } from "../services/liga-mx/liga-mx.types";
 
 const URL_BASE_POR_DEFECTO = "https://clubes.apilmx.com";
 const ZONA_HORARIA_POR_DEFECTO = "America/Mexico_City";
-// Domingo y miercoles por la noche, ejecutado a las 00:00 del lunes y jueves.
-const PROGRAMACION_SEMANAL_POR_DEFECTO = "0 0 * * 1,4";
+// Cada hora revisa si algún partido (varonil/femenil) cumplió +3 h desde su hora programada.
+const PROGRAMACION_POR_PARTIDO_POR_DEFECTO = "0 * * * *";
 export const ID_TORNEO_APERTURA = 1;
 export const ID_TORNEO_CLAUSURA = 2;
 
@@ -34,10 +34,10 @@ export const configuracionLigaMx = {
   apiKey: limpiarTexto(process.env.LMX_API_KEY),
   zonaHoraria: limpiarTexto(process.env.LMX_TIMEZONE) || ZONA_HORARIA_POR_DEFECTO,
   programacion:
-    limpiarTexto(process.env.LMX_SCHEDULE) || PROGRAMACION_SEMANAL_POR_DEFECTO,
+    limpiarTexto(process.env.LMX_SCHEDULE) || PROGRAMACION_POR_PARTIDO_POR_DEFECTO,
   ttlMs: {
     contexto: 24 * 60 * 60 * 1000,
-    calendario: 4 * 60 * 60 * 1000,
+    calendario: 7 * 24 * 60 * 60 * 1000,
     clasificacion: 12 * 60 * 60 * 1000,
     plantilla: 24 * 60 * 60 * 1000,
     perfilJugador: 30 * 24 * 60 * 60 * 1000,
@@ -48,8 +48,9 @@ export const configuracionLigaMx = {
   },
   ventanaEnVivoAntesMs: 90 * 60 * 1000,
   ventanaEnVivoDespuesMs: 3 * 60 * 60 * 1000,
-  ventanaSeguimientoResultadoInicioMs: 105 * 60 * 1000,
-  ventanaSeguimientoResultadoFinMs: 225 * 60 * 1000,
+  /** 3 h después de la hora programada del partido (zona México). */
+  ventanaSeguimientoResultadoInicioMs: 3 * 60 * 60 * 1000,
+  ventanaSeguimientoResultadoFinMs: 6 * 60 * 60 * 1000,
   presupuestoSincronizacion: {
     perfilesJugadorPorCorrida: 4,
     detallesPartidoPorCorrida: 2,

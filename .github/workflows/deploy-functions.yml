@@ -163,7 +163,7 @@ jobs:
           FEDEX_AUTO_CREATE_LABEL_ON_PAID=false
 
           LMX_TIMEZONE=America/Mexico_City
-          LMX_SCHEDULE=every 6 hours
+          LMX_SCHEDULE=0 * * * *
           NOTIFICATIONS_DEFAULT_TIMEZONE=America/Mexico_City
           NOTIFICATIONS_DEFAULT_LOCALE=es-MX
           NOTIFICATIONS_QUIET_HOURS_ENABLED=true

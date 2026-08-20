@@ -83,7 +83,7 @@ class LigaMxService {
 
   async runScheduledSync(): Promise<ResumenEjecucionSincronizacion> {
     await this.limpiarColeccionesLegado();
-    const { contexto, cambioContexto } = await this.sincronizarContextoActual(true);
+    const { contexto, cambioContexto } = await this.sincronizarContextoActual(false);
 
     if (cambioContexto) {
       await firestoreApp.collection(COLECCIONES.contextoActual).doc("actual").set(contexto);

@@ -1,6 +1,6 @@
 /**
  * Script para ejecutar la sincronización de Liga MX manualmente
- * Esto simula lo que haría el cron programado (lunes y jueves 00:00)
+ * Esto simula lo que haría el cron programado (cada hora, sync post-partido +3 h)
  */
 
 import "../config/env.bootstrap";

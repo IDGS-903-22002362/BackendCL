@@ -180,6 +180,47 @@ export class LoyaltyEngineService {
     }
   }
 
+  async applyBeneficioClaimBonus(
+    memberId: string,
+    beneficioId: string,
+    points: number,
+    beneficioTitulo: string,
+    actorId = memberId,
+  ): Promise<LoyaltyTransaction | null> {
+    if (points <= 0 || !Number.isInteger(points)) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT");
+    }
+
+    const idempotencyKey = `beneficio-claim:${beneficioId}:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.USER,
+          actorId,
+          roles: ["CLIENTE"],
+          permissions: [],
+        },
+        points,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/beneficio-claim",
+        description: `Recompensa por beneficio: ${beneficioTitulo}`,
+        reasonCode: "BENEFICIO_CLAIM",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async applyProfileCompletionBonus(
     memberId: string,
     actorId = "system",

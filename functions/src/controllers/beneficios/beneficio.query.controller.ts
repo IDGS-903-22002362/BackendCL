@@ -8,13 +8,36 @@ export const getAll = async (_req: Request, res: Response) => {
     return res.status(200).json({
       success: true,
       count: beneficios.length,
-      data: beneficios,
+      data: beneficios.map((item) =>
+        beneficioService.serializeBeneficioForApi(item),
+      ),
     });
   } catch (error) {
     console.error("Error en GET /api/beneficios:", error);
     return res.status(500).json({
       success: false,
       message: "Error al obtener los beneficios",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const getMyReclamados = async (req: Request, res: Response) => {
+  try {
+    const memberId = req.user!.uid;
+    const reclamados = await beneficioService.listReclamadosByMember(memberId);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        reclamados,
+      },
+    });
+  } catch (error) {
+    console.error("Error en GET /api/beneficios/me/reclamados:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al obtener beneficios reclamados",
       error: error instanceof Error ? error.message : "Error desconocido",
     });
   }
@@ -34,7 +57,7 @@ export const getById = async (req: Request, res: Response) => {
 
     return res.status(200).json({
       success: true,
-      data: beneficio,
+      data: beneficioService.serializeBeneficioForApi(beneficio),
     });
   } catch (error) {
     console.error("Error en GET /api/beneficios/:id:", error);

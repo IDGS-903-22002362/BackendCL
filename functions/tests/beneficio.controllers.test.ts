@@ -7,7 +7,15 @@ jest.mock("../src/services/beneficio.service", () => ({
     getBeneficioById: jest.fn(),
     createBeneficio: jest.fn(),
     updateBeneficio: jest.fn(),
+    appendBeneficioImagenes: jest.fn(),
+    updateBeneficioMedia: jest.fn(),
+    removeBeneficioImagen: jest.fn(),
+    clearBeneficioMedia: jest.fn(),
+    collectMediaUrls: jest.fn(),
     deleteBeneficio: jest.fn(),
+    permanentlyDeleteBeneficio: jest.fn(),
+    listReclamadosByMember: jest.fn(),
+    claimBeneficioPoints: jest.fn(),
   },
 }));
 
@@ -15,6 +23,7 @@ jest.mock("../src/services/storageApp.service", () => ({
   __esModule: true,
   default: {
     uploadFile: jest.fn(),
+    deleteFile: jest.fn(),
   },
 }));
 
@@ -143,12 +152,14 @@ describe("beneficio controllers", () => {
     mockedStorageAppService.uploadFile.mockResolvedValue(
       "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
     );
-    mockedBeneficioService.updateBeneficio.mockResolvedValue({
+    mockedBeneficioService.appendBeneficioImagenes.mockResolvedValue({
       id: "benefit-1",
       titulo: "Descuento especial",
       descripcion: "Descripcion del beneficio",
-      imagen:
+      imagenes: [
         "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      ],
+      mediaTipo: "imagen",
       estatus: true,
       createdAt: new Date("2026-04-30T12:00:00Z"),
       updatedAt: new Date("2026-04-30T12:05:00Z"),
@@ -176,17 +187,153 @@ describe("beneficio controllers", () => {
       "beneficios",
       "image/png",
     );
-    expect(mockedBeneficioService.updateBeneficio).toHaveBeenCalledWith(
+    expect(mockedBeneficioService.appendBeneficioImagenes).toHaveBeenCalledWith(
       "benefit-1",
-      {
-        imagen:
-          "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
-      },
+      [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      ],
     );
     expect((res as any).status).toHaveBeenCalledWith(200);
   });
 
-  it("remove elimina un beneficio", async () => {
+  it("uploadVideo sube video y actualiza el beneficio", async () => {
+    mockedBeneficioService.getBeneficioById.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:00:00Z"),
+    } as never);
+    mockedStorageAppService.uploadFile.mockResolvedValue(
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/video.mp4",
+    );
+    mockedBeneficioService.updateBeneficioMedia.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      video:
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/video.mp4",
+      mediaTipo: "video",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:05:00Z"),
+    } as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+      files: [
+        {
+          buffer: Buffer.from("video"),
+          originalname: "video.mp4",
+          mimetype: "video/mp4",
+        },
+      ],
+    } as unknown as Parameters<typeof commandController.uploadVideo>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.uploadVideo
+    >[1];
+
+    await commandController.uploadVideo(req, res);
+
+    expect(mockedStorageAppService.uploadFile).toHaveBeenCalledWith(
+      Buffer.from("video"),
+      "video.mp4",
+      "beneficios",
+      "video/mp4",
+    );
+    expect(mockedBeneficioService.updateBeneficioMedia).toHaveBeenCalledWith(
+      "benefit-1",
+      "video",
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/video.mp4",
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("removeMedia elimina la media del beneficio", async () => {
+    mockedBeneficioService.getBeneficioById.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      imagenes: [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      ],
+      mediaTipo: "imagen",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:00:00Z"),
+    } as never);
+    mockedBeneficioService.collectMediaUrls.mockReturnValue([
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+    ]);
+    mockedBeneficioService.clearBeneficioMedia.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:05:00Z"),
+    } as never);
+    mockedStorageAppService.deleteFile.mockResolvedValue(undefined as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+    } as unknown as Parameters<typeof commandController.removeMedia>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.removeMedia
+    >[1];
+
+    await commandController.removeMedia(req, res);
+
+    expect(mockedBeneficioService.clearBeneficioMedia).toHaveBeenCalledWith(
+      "benefit-1",
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("removeImage elimina una imagen del beneficio", async () => {
+    mockedBeneficioService.getBeneficioById.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      imagenes: [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      ],
+      mediaTipo: "imagen",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:00:00Z"),
+    } as never);
+    mockedBeneficioService.removeBeneficioImagen.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      estatus: true,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:05:00Z"),
+    } as never);
+    mockedStorageAppService.deleteFile.mockResolvedValue(undefined as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+      body: {
+        url: "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      },
+    } as unknown as Parameters<typeof commandController.removeImage>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.removeImage
+    >[1];
+
+    await commandController.removeImage(req, res);
+
+    expect(mockedBeneficioService.removeBeneficioImagen).toHaveBeenCalledWith(
+      "benefit-1",
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("remove desactiva un beneficio", async () => {
     mockedBeneficioService.deleteBeneficio.mockResolvedValue(undefined as never);
 
     const req = {
@@ -200,5 +347,131 @@ describe("beneficio controllers", () => {
       "benefit-1",
     );
     expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("destroyPermanently elimina el beneficio y su media", async () => {
+    mockedBeneficioService.getBeneficioById.mockResolvedValue({
+      id: "benefit-1",
+      titulo: "Descuento especial",
+      descripcion: "Descripcion del beneficio",
+      imagenes: [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+      ],
+      mediaTipo: "imagen",
+      estatus: false,
+      createdAt: new Date("2026-04-30T12:00:00Z"),
+      updatedAt: new Date("2026-04-30T12:00:00Z"),
+    } as never);
+    mockedBeneficioService.permanentlyDeleteBeneficio.mockResolvedValue([
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+    ]);
+    mockedStorageAppService.deleteFile.mockResolvedValue(undefined as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+    } as unknown as Parameters<typeof commandController.destroyPermanently>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.destroyPermanently
+    >[1];
+
+    await commandController.destroyPermanently(req, res);
+
+    expect(mockedBeneficioService.permanentlyDeleteBeneficio).toHaveBeenCalledWith(
+      "benefit-1",
+    );
+    expect(mockedStorageAppService.deleteFile).toHaveBeenCalledWith(
+      "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/beneficios/image.png",
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+  });
+
+  it("getMyReclamados responde con ids reclamados", async () => {
+    mockedBeneficioService.listReclamadosByMember.mockResolvedValue([
+      "benefit-1",
+      "benefit-2",
+    ] as never);
+
+    const req = {
+      user: { uid: "user-1" },
+    } as unknown as Parameters<typeof queryController.getMyReclamados>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof queryController.getMyReclamados
+    >[1];
+
+    await queryController.getMyReclamados(req, res);
+
+    expect(mockedBeneficioService.listReclamadosByMember).toHaveBeenCalledWith(
+      "user-1",
+    );
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: true,
+      data: {
+        reclamados: ["benefit-1", "benefit-2"],
+      },
+    });
+  });
+
+  it("claimPoints otorga puntos del beneficio", async () => {
+    mockedBeneficioService.claimBeneficioPoints.mockResolvedValue({
+      alreadyClaimed: false,
+      puntosAsignados: 50,
+      puntosActuales: 150,
+      beneficioId: "benefit-1",
+    } as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+      user: { uid: "user-1" },
+    } as unknown as Parameters<typeof commandController.claimPoints>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.claimPoints
+    >[1];
+
+    await commandController.claimPoints(req, res);
+
+    expect(mockedBeneficioService.claimBeneficioPoints).toHaveBeenCalledWith(
+      "benefit-1",
+      "user-1",
+    );
+    expect((res as any).status).toHaveBeenCalledWith(200);
+    expect((res as any).json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        data: expect.objectContaining({
+          puntosAsignados: 50,
+          puntosActuales: 150,
+        }),
+      }),
+    );
+  });
+
+  it("claimPoints responde alreadyClaimed sin otorgar puntos extra", async () => {
+    mockedBeneficioService.claimBeneficioPoints.mockResolvedValue({
+      alreadyClaimed: true,
+      puntosAsignados: 0,
+      puntosActuales: 150,
+      beneficioId: "benefit-1",
+    } as never);
+
+    const req = {
+      params: { id: "benefit-1" },
+      user: { uid: "user-1" },
+    } as unknown as Parameters<typeof commandController.claimPoints>[0];
+    const res = createMockResponse() as unknown as Parameters<
+      typeof commandController.claimPoints
+    >[1];
+
+    await commandController.claimPoints(req, res);
+
+    expect((res as any).json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: true,
+        message: "Ya reclamaste los puntos de este beneficio",
+        data: expect.objectContaining({
+          alreadyClaimed: true,
+          puntosAsignados: 0,
+        }),
+      }),
+    );
   });
 });

@@ -1140,6 +1140,47 @@ const swaggerDefinition = {
             type: "string",
             example: "Presenta tu membresia y recibe un beneficio exclusivo.",
           },
+          imagen: {
+            type: "string",
+            format: "uri",
+            example: "https://storage.googleapis.com/.../beneficios/image.png",
+            description: "Primera imagen (compatibilidad). Preferir imagenes.",
+          },
+          imagenes: {
+            type: "array",
+            items: { type: "string", format: "uri" },
+            example: [
+              "https://storage.googleapis.com/.../beneficios/image-1.png",
+              "https://storage.googleapis.com/.../beneficios/image-2.png",
+            ],
+          },
+          video: {
+            type: "string",
+            format: "uri",
+            example: "https://storage.googleapis.com/.../beneficios/video.mp4",
+          },
+          mediaTipo: {
+            type: "string",
+            enum: ["imagen", "video"],
+            example: "imagen",
+          },
+          redireccion: {
+            type: "object",
+            properties: {
+              modulo: {
+                type: "string",
+                enum: [
+                  "none",
+                  "home",
+                  "rewards",
+                  "plantilla",
+                  "calendario",
+                  "galeria",
+                  "tienda",
+                ],
+              },
+            },
+          },
           estatus: { type: "boolean", example: true },
           createdAt: {
             type: "string",

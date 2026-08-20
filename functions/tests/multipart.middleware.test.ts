@@ -285,4 +285,108 @@ describe("handleMultipart", () => {
       buffer: Buffer.from("fake-gallery-video"),
     });
   });
+
+  it("conserva el orden de multiples archivos en el multipart", async () => {
+    const form = new FormData();
+    form.append("imagen", Buffer.from("first-image"), {
+      filename: "01-first.jpg",
+      contentType: "image/jpeg",
+    });
+    form.append("imagen", Buffer.from("second-image"), {
+      filename: "02-second.jpg",
+      contentType: "image/jpeg",
+    });
+    form.append("imagen", Buffer.from("third-image"), {
+      filename: "03-third.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      rawBody: Buffer;
+      body: Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      rawBody: form.getBuffer(),
+      body: {},
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 10,
+      maxFileSize: 20 * 1024 * 1024,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    const files = req.files as Express.Multer.File[];
+    expect(files).toHaveLength(3);
+    expect(files.map((file) => file.originalname)).toEqual([
+      "01-first.jpg",
+      "02-second.jpg",
+      "03-third.jpg",
+    ]);
+    expect(files.map((file) => file.buffer.toString())).toEqual([
+      "first-image",
+      "second-image",
+      "third-image",
+    ]);
+  });
+
+  it("procesa video de beneficios desde req.body con campo video", async () => {
+    const form = new FormData();
+    form.append("video", Buffer.from("fake-beneficio-video"), {
+      filename: "refuerzo.mp4",
+      contentType: "video/mp4",
+    });
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 1,
+      maxFileSize: 50 * 1024 * 1024,
+      allowedMimeTypes: [
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+        "video/x-msvideo",
+        "application/octet-stream",
+      ],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "video",
+      originalname: "refuerzo.mp4",
+      mimetype: "video/mp4",
+      buffer: Buffer.from("fake-beneficio-video"),
+    });
+  });
 });
