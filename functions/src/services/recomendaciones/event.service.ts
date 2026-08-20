@@ -46,10 +46,40 @@ class EventService {
     return false;
   }
 
+  /**
+   * Id determinista para eventos que no deben contarse dos veces.
+   * Una recarga de la pantalla de confirmacion o un reintento del cliente
+   * reenvian la misma compra: se reutiliza el id de la orden como clave de
+   * idempotencia para que la analitica no duplique conversiones.
+   */
+  private buildDedupeId(input: TrackEventInput): string | null {
+    if (input.tipo !== RecomendacionEventoTipo.COMPRA) {
+      return null;
+    }
+
+    const ordenId = input.metadata?.ordenId ?? input.metadata?.orderId;
+    if (typeof ordenId !== "string" || !ordenId.trim()) {
+      return null;
+    }
+
+    const normalized = ordenId.trim().replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 100);
+    return normalized ? `compra_${normalized}` : null;
+  }
+
   async trackEvent(input: TrackEventInput): Promise<{ accepted: boolean }> {
     const rateKey = `${input.usuarioId || input.sessionId || "unknown"}:${input.tipo}`;
     if (this.isRateLimited(rateKey)) {
       return { accepted: false };
+    }
+
+    const coleccion = firestoreTienda.collection(recomendacionCollections.eventos);
+    const dedupeId = this.buildDedupeId(input);
+
+    if (dedupeId) {
+      const existing = await coleccion.doc(dedupeId).get();
+      if (existing.exists) {
+        return { accepted: true };
+      }
     }
 
     const config = await configService.getConfig();
@@ -71,7 +101,12 @@ class EventService {
       expiresAt,
     };
 
-    await firestoreTienda.collection(recomendacionCollections.eventos).add(payload);
+    if (dedupeId) {
+      await coleccion.doc(dedupeId).set(payload);
+    } else {
+      await coleccion.add(payload);
+    }
+
     await metricsService.incrementFromEvent(payload);
 
     if (input.tipo === RecomendacionEventoTipo.VISTA_PRODUCTO) {

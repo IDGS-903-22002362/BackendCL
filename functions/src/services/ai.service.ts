@@ -1,51 +1,50 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import dotenv from "dotenv";
-
-dotenv.config();
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+import aiConfig from "../config/ai.config";
+import logger from "../utils/logger";
+import geminiAdapter from "./ai/adapters/gemini.adapter";
 
 class AIService {
+  private readonly baseLogger = logger.child({ component: "news-ai-service" });
 
-  //ia
-
-  private model = genAI.getGenerativeModel({
-    model: "gemini-pro-latest"
-  });
-
-  async generarContenidoIA(contenido: string): Promise<any> {
+  async generarContenidoIA(contenido: string): Promise<{ resumen: string }> {
     if (!contenido) throw new Error("Contenido nulo");
 
-    // 1. Pedimos explícitamente un JSON
-    const prompt = `
-Actúa como un editor profesional de noticias deportivas.
+    const result = await geminiAdapter.generateStructured<{ resumen: string }>({
+      model: aiConfig.gemini.summaryModel,
+      purpose: "summary",
+      systemInstruction:
+        "Actua como un editor profesional de noticias deportivas. Responde solo JSON valido.",
+      prompt: `
 Analiza el siguiente contenido y devuelve EXCLUSIVAMENTE un objeto JSON con este formato exacto:
 
 {
-  "resumen": "Tu resumen aquí, máximo 200 caracteres, sin saltos de línea"
+  "resumen": "Tu resumen aqui, maximo 200 caracteres, sin saltos de linea"
 }
 
 Contenido:
 ${contenido}
-`;
-
-    // 2. Usamos generationConfig para asegurar que sea JSON
-    const result = await this.model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json" // Esto es clave
-      }
+`,
+      responseJsonSchema: {
+        type: "object",
+        properties: {
+          resumen: { type: "string" },
+        },
+        required: ["resumen"],
+      },
     });
 
-    const text = result.response.text();
-
-    try {
-      // 3. Ahora sí, esto funcionará porque la respuesta será un JSON real
-      return JSON.parse(text);
-    } catch (error) {
-      console.error("Error parseando:", text);
+    if (!result?.resumen || typeof result.resumen !== "string") {
+      this.baseLogger.warn("news_ai_invalid_payload", {
+        provider: "gemini",
+        model: aiConfig.gemini.summaryModel,
+        purpose: "summary",
+        success: false,
+      });
       throw new Error("La IA no devolvió un JSON válido");
     }
+
+    return {
+      resumen: result.resumen.trim().slice(0, 200),
+    };
   }
 }
 

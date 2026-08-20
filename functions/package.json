@@ -16,6 +16,8 @@
     "start": "npm run shell",
     "deploy": "firebase deploy --only functions",
     "test": "jest --runInBand",
+    "test:gemini:smoke": "node scripts/gemini-smoke-test.mjs",
+    "test:admin-assistant:smoke": "npm run build && node lib/scripts/admin-assistant-smoke-test.js",
     "test:firestore:rules": "npx -y firebase-tools@latest emulators:exec --only firestore --project demo-backendcl-ai-rules --config ../firebase.rules-test.json \"jest --runInBand --runTestsByPath tests/firestore.ai-rules.emulator.test.ts\"",
     "migrate:size-inventory": "ts-node-dev --transpile-only src/scripts/migrate-size-inventory.ts",
     "backfill:search-text": "npm run build && node lib/scripts/backfill-product-search-text.js",
@@ -46,8 +48,7 @@
     "e2e:sandbox:battery": "node scripts/e2e-sandbox-live-battery.mjs"
   },
   "dependencies": {
-    "@google/genai": "^1.44.0",
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.52.0",
     "@sendinblue/client": "^3.3.1",
     "axios": "^1.16.1",
     "busboy": "^1.6.0",

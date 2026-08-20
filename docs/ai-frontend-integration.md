@@ -474,7 +474,7 @@ Respuesta exitosa `200`:
         "userId": "uid_123",
         "role": "assistant",
         "content": "Te ayudo a buscarlo",
-        "model": "gemini-2.5-pro",
+        "model": "gemini-3.7-flash",
         "latencyMs": 1320,
         "createdAt": "<Timestamp Firestore serializado>"
       }
@@ -598,7 +598,7 @@ Respuesta exitosa `200`:
         "status": "success"
       }
     ],
-    "model": "gemini-2.5-pro",
+    "model": "gemini-3.7-flash",
     "latencyMs": 1460
   }
 }

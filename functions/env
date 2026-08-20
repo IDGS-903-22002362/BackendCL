@@ -26,7 +26,8 @@ JWT_EXPIRES_IN=7d
 # OPENAI_API_KEY=your_openai_api_key_here
 
 # --- AI / Gemini ---
-GEMINI_MODEL_PRIMARY=gemini-2.5-pro
+GEMINI_MODEL_MAIN=gemini-3.7-flash
+GEMINI_MODEL_PRIMARY=gemini-3.7-flash
 
 # --- Firebase (solo si no usas serviceAccountKey.json) ---
 # SERVICE_ACCOUNT_KEY=<JSON completo del service account>
