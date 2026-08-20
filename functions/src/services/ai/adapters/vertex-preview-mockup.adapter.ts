@@ -214,8 +214,18 @@ class VertexPreviewMockupAdapter {
   });
   private readonly clients = new Map<string, GoogleGenAI>();
 
-  private getClient(location: string, apiVersion?: string): GoogleGenAI {
-    const cacheKey = `${location}:${apiVersion || "default"}`;
+  /**
+   * Vertex Imagen recontext is opt-in only (`AI_PREVIEW_MOCKUP_PROVIDER=vertex`).
+   * The default production path is Gemini Developer API + GEMINI_API_KEY.
+   */
+  private usesVertexRecontext(): boolean {
+    return (
+      process.env.AI_PREVIEW_MOCKUP_PROVIDER?.trim().toLowerCase() === "vertex"
+    );
+  }
+
+  private getVertexClient(location: string, apiVersion?: string): GoogleGenAI {
+    const cacheKey = `vertex:${location}:${apiVersion || "default"}`;
     const existingClient = this.clients.get(cacheKey);
     if (existingClient) {
       return existingClient;
@@ -225,6 +235,30 @@ class VertexPreviewMockupAdapter {
       vertexai: true,
       project: aiConfig.previewMockup.project,
       location,
+      apiVersion,
+    });
+    this.clients.set(cacheKey, client);
+
+    return client;
+  }
+
+  private getGeminiApiClient(apiVersion?: string): GoogleGenAI {
+    const cacheKey = `gemini-api:${apiVersion || "default"}`;
+    const existingClient = this.clients.get(cacheKey);
+    if (existingClient) {
+      return existingClient;
+    }
+
+    const apiKey = aiConfig.gemini?.apiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new VertexPreviewMockupError(
+        "PRODUCT_PREVIEW_AUTH_FAILED",
+        "GEMINI_API_KEY es requerido para generar mockup con Gemini Developer API",
+      );
+    }
+
+    const client = new GoogleGenAI({
+      apiKey,
       apiVersion,
     });
     this.clients.set(cacheKey, client);
@@ -303,8 +337,7 @@ class VertexPreviewMockupAdapter {
     input: VertexPreviewMockupInput,
     controller: AbortController,
   ): Promise<VertexPreviewMockupResult> {
-    const fallbackClient = this.getClient(
-      aiConfig.previewMockup.fallbackRegion,
+    const fallbackClient = this.getGeminiApiClient(
       aiConfig.previewMockup.fallbackApiVersion,
     );
     const response = await fallbackClient.models.generateContent({
@@ -322,7 +355,6 @@ class VertexPreviewMockupAdapter {
       config: {
         abortSignal: controller.signal,
         responseModalities: [Modality.IMAGE],
-        temperature: 0.2,
         imageConfig: {
           aspectRatio: "3:4",
           imageSize: "1K",
@@ -341,6 +373,14 @@ class VertexPreviewMockupAdapter {
       );
     }
 
+    this.baseLogger.info("vertex_preview_mockup_gemini_fallback_completed", {
+      provider: "gemini-api",
+      model: aiConfig.previewMockup.fallbackModel,
+      purpose: "image",
+      success: true,
+      mimeType: generatedImage.inlineData.mimeType,
+    });
+
     return {
       outputImageBytesBase64: generatedImage.inlineData.data,
       mimeType: generatedImage.inlineData.mimeType,
@@ -351,10 +391,6 @@ class VertexPreviewMockupAdapter {
   async generateMockup(
     input: VertexPreviewMockupInput,
   ): Promise<VertexPreviewMockupResult> {
-    const client = this.getClient(
-      aiConfig.previewMockup.region,
-      aiConfig.previewMockup.apiVersion,
-    );
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -362,6 +398,15 @@ class VertexPreviewMockupAdapter {
     );
 
     try {
+      if (!this.usesVertexRecontext()) {
+        return await this.runGeminiImageFallback(input, controller);
+      }
+
+      const client = this.getVertexClient(
+        aiConfig.previewMockup.region,
+        aiConfig.previewMockup.apiVersion,
+      );
+
       try {
         return await this.runRecontextRequest(input, client, controller);
       } catch (error) {
@@ -370,10 +415,12 @@ class VertexPreviewMockupAdapter {
         }
 
         this.baseLogger.warn("vertex_preview_mockup_recontext_unavailable", {
+          provider: "vertex",
           primaryModel: aiConfig.previewMockup.model,
           primaryRegion: aiConfig.previewMockup.region,
           fallbackModel: aiConfig.previewMockup.fallbackModel,
           fallbackRegion: aiConfig.previewMockup.fallbackRegion,
+          purpose: "image",
           message: resolveErrorMessage(error),
           status: resolveErrorStatus(error),
         });

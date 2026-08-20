@@ -58,6 +58,7 @@ class ChatPlannerService {
 
       const rawPlan = await geminiAdapter.generateStructured<ChatPlan>({
         model: aiConfig.gemini.fastModel,
+        purpose: "fast",
         systemInstruction: getAiPlannerInstructions(input.agentType),
         prompt: JSON.stringify(
           {
@@ -76,13 +77,25 @@ class ChatPlannerService {
       });
 
       const parsed = chatPlanSchema.parse(rawPlan);
+      this.baseLogger.info("chat_planner_completed", {
+        provider: "gemini-api",
+        purpose: "planner",
+        source: "gemini",
+        model: aiConfig.gemini.fastModel,
+        requestId: input.requestId,
+        success: true,
+      });
       return {
         normalized,
         plan: parsed,
       };
     } catch (error) {
       this.baseLogger.warn("chat_planner_fallback", {
+        provider: "gemini-api",
+        purpose: "planner",
+        source: "local_fallback",
         requestId: input.requestId,
+        success: false,
         message: error instanceof Error ? error.message : String(error),
       });
 

@@ -228,6 +228,7 @@ class NotificationAiService {
         z.infer<typeof generatedPushCopySchema>
       >({
         model: aiConfig.gemini.fastModel,
+        purpose: "fast",
         systemInstruction: [
           "Eres el copywriter de notificaciones push de la tienda oficial del Club León.",
           "Responde solo JSON válido que siga el schema.",
@@ -265,6 +266,9 @@ class NotificationAiService {
       };
     } catch (error) {
       this.baseLogger.warn("notification_ai_fallback", {
+        provider: "gemini-api",
+        purpose: "fast",
+        source: "local_fallback",
         eventId: event.id,
         eventType: event.eventType,
         reason: error instanceof Error ? error.message : String(error),

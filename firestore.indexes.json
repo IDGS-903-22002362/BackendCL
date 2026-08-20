@@ -852,6 +852,34 @@
       ]
     },
     {
+      "collectionGroup": "ai_admin_assistant_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "updatedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ai_admin_assistant_turns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "sessionId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "tryon_jobs",
       "queryScope": "COLLECTION",
       "fields": [
@@ -894,16 +922,6 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "tryon_assets",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "createdAt",
-          "order": "ASCENDING"
         }
       ]
     },
@@ -962,6 +980,20 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "recomendacionEventos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "tipo",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
         }
       ]
     },
@@ -1204,20 +1236,6 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "idempotencyKey",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "checkoutAttempts",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
           "fieldPath": "userId",
           "order": "ASCENDING"
         },
@@ -1249,26 +1267,6 @@
         },
         {
           "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "adminNotificaciones",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "createdAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "dispositivosPush",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        {
-          "fieldPath": "enabled",
           "order": "ASCENDING"
         }
       ]
@@ -1330,16 +1328,6 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "loyalty_transactions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "externalTransactionId",
-          "order": "ASCENDING"
         }
       ]
     },

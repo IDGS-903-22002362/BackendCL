@@ -16,6 +16,11 @@ import {
   sendPublicAiMessageSchema,
 } from "../middleware/validators/ai-public-chat.validator";
 import {
+  adminAssistantSessionIdParamSchema,
+  askAdminAssistantSchema,
+  createAdminAssistantSessionSchema,
+} from "../middleware/validators/ai-admin-assistant.validator";
+import {
   createTryOnJobSchema,
   tryOnEligibilitySchema,
   tryOnAssetIdParamSchema,
@@ -39,6 +44,7 @@ import * as chatController from "../controllers/ai/chat.controller";
 import * as filesController from "../controllers/ai/files.controller";
 import * as tryonController from "../controllers/ai/tryon.controller";
 import * as adminController from "../controllers/ai/admin.controller";
+import * as adminAssistantController from "../controllers/ai/admin-assistant.controller";
 
 const router = Router();
 const protectedRouter = Router();
@@ -233,6 +239,74 @@ protectedRouter.post(
   aiAdminChatRateLimiter,
   validateBody(sendAiMessageSchema),
   asyncHandler(chatController.sendAdminMessage),
+);
+
+// Asistente Administrativo (analitica read-only). Mismo stack de seguridad que
+// el resto de rutas admin AI: App Check + JWT + rol admin verificado en backend
+// + rate limit.
+/**
+ * @swagger
+ * /api/ai/admin/assistant/sessions:
+ *   post:
+ *     summary: Crear sesion del Asistente Administrativo
+ *     tags: [AI Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       201:
+ *         $ref: '#/components/responses/201Created'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ */
+protectedRouter.post(
+  "/admin/assistant/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(createAdminAssistantSessionSchema),
+  asyncHandler(adminAssistantController.createSession),
+);
+protectedRouter.get(
+  "/admin/assistant/sessions",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  asyncHandler(adminAssistantController.listSessions),
+);
+protectedRouter.get(
+  "/admin/assistant/sessions/:id",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateParams(adminAssistantSessionIdParamSchema),
+  asyncHandler(adminAssistantController.getSessionDetail),
+);
+/**
+ * @swagger
+ * /api/ai/admin/assistant/messages:
+ *   post:
+ *     summary: Consultar al Asistente Administrativo
+ *     description: |
+ *       Ejecuta el agente de analitica read-only. Con stream=true responde SSE
+ *       con eventos `status` -> `final` -> `done`.
+ *     tags: [AI Admin]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         $ref: '#/components/responses/200Success'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ */
+protectedRouter.post(
+  "/admin/assistant/messages",
+  requireAiAdmin,
+  aiAdminChatRateLimiter,
+  validateBody(askAdminAssistantSchema),
+  asyncHandler(adminAssistantController.ask),
 );
 
 /**
