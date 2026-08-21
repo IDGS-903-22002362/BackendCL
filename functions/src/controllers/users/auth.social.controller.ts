@@ -82,6 +82,24 @@ const isAlreadyExistsError = (error: unknown): boolean => {
   return code === "6" || code === "already-exists" || code === "ALREADY_EXISTS";
 };
 
+/**
+ * Los ID token emitidos con `signInWithCustomToken` llegan con
+ * `sign_in_provider: "custom"`, que es como la app móvil abre la sesión de
+ * Firebase cuando el login fue con email/password. El provider real es el que ya
+ * quedó guardado al registrarse, así que se reutiliza en lugar de rechazar el
+ * login por un provider desconocido.
+ */
+const resolveStoredProvider = (
+  docSnap: FirebaseFirestore.DocumentSnapshot,
+): UsuarioApp["provider"] | undefined => {
+  if (!docSnap.exists) return undefined;
+
+  const stored = docSnap.data()?.provider;
+  return stored === "google" || stored === "apple" || stored === "email"
+    ? stored
+    : undefined;
+};
+
 const buildUsuarioFromDoc = (
   docSnap: FirebaseFirestore.DocumentSnapshot,
 ): UsuarioApp => {
@@ -272,24 +290,27 @@ export const registerOrLogin = async (req: Request, res: Response) => {
         .json({ success: false, message: "El usuario no tiene email" });
     }
 
-    // 4. Detectar provider
+    // 4. Referencia al documento del usuario
+    const docRef = firestoreApp.collection("usuariosApp").doc(uid);
+    const docSnap = await docRef.get();
+
+    // 5. Detectar provider
     const providerSource = firebaseProvider ?? "password";
     const providerMap: Record<string, "google" | "email" | "apple"> = {
       "google.com": "google",
       password: "email",
       "apple.com": "apple",
     };
-    const provider = providerMap[providerSource];
+    const mappedProvider = providerMap[providerSource] as
+      | UsuarioApp["provider"]
+      | undefined;
+    const provider = mappedProvider ?? resolveStoredProvider(docSnap);
     if (!provider) {
       return res.status(400).json({
         success: false,
         message: `Provider no soportado: ${providerSource}`,
       });
     }
-
-    // 5. Referencia al documento del usuario
-    const docRef = firestoreApp.collection("usuariosApp").doc(uid);
-    const docSnap = await docRef.get();
 
     let usuario: UsuarioApp;
 
