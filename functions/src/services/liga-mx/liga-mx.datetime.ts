@@ -111,6 +111,45 @@ const quitarSufijoZUtcFalso = (value: string): string => {
   return value.replace(SUFIJO_Z_FALSO_RE, "");
 };
 
+const DIAS_SEMANA_EN_US = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Día de la semana (0 domingo … 6 sábado) y hora en la zona indicada.
+ */
+export const obtenerMomentoEnZona = (
+  ahoraMs = Date.now(),
+  timeZone = configuracionLigaMx.zonaHoraria,
+): { diaSemana: number; hora: number } => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(ahoraMs));
+  const weekday = parts.find((part) => part.type === "weekday")?.value ?? "";
+
+  return {
+    diaSemana: DIAS_SEMANA_EN_US.indexOf(weekday),
+    hora: Number(parts.find((part) => part.type === "hour")?.value ?? -1),
+  };
+};
+
+/**
+ * Ventana semanal de clasificación: noches de miércoles y domingo (hora México),
+ * para recoger los resultados del resto de la liga entre partidos del club.
+ */
+export const esVentanaSemanalClasificacion = (
+  ahoraMs = Date.now(),
+  timeZone = configuracionLigaMx.zonaHoraria,
+): boolean => {
+  const { diaSemana, hora } = obtenerMomentoEnZona(ahoraMs, timeZone);
+
+  return (
+    configuracionLigaMx.ventanasClasificacion.diasSemana.includes(diaSemana) &&
+    hora === configuracionLigaMx.ventanasClasificacion.hora
+  );
+};
+
 /**
  * Convierte fechas de la API de Liga MX (hora local MX sin offset) a epoch UTC.
  * Si la cadena trae offset real (+/-), se respeta. Un sufijo `Z` aislado se trata

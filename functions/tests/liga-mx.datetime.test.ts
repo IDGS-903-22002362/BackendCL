@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@jest/globals";
 import {
+  esVentanaSemanalClasificacion,
   fechaPartidoApiToIsoString,
+  obtenerMomentoEnZona,
   parsearFechaPartidoApiMs,
 } from "../src/services/liga-mx/liga-mx.datetime";
 
@@ -42,5 +44,26 @@ describe("liga-mx datetime", () => {
     expect(parsearFechaPartidoApiMs(null)).toBeNull();
     expect(parsearFechaPartidoApiMs("")).toBeNull();
     expect(fechaPartidoApiToIsoString(undefined)).toBeNull();
+  });
+
+  it("reads weekday and hour in Mexico City", () => {
+    // 2026-08-27T04:30:00Z = miércoles 26 de agosto, 22:30 en México.
+    expect(obtenerMomentoEnZona(Date.parse("2026-08-27T04:30:00.000Z"))).toEqual({
+      diaSemana: 3,
+      hora: 22,
+    });
+  });
+
+  it("only opens the standings window on Wednesday and Sunday nights", () => {
+    const enVentana = (iso: string) =>
+      esVentanaSemanalClasificacion(Date.parse(iso));
+
+    // Miércoles 23:30 y domingo 23:05 (hora México).
+    expect(enVentana("2026-08-27T05:30:00.000Z")).toBe(true);
+    expect(enVentana("2026-08-31T05:05:00.000Z")).toBe(true);
+
+    // Miércoles 22:30 (aún no) y jueves 23:30 (otro día).
+    expect(enVentana("2026-08-27T04:30:00.000Z")).toBe(false);
+    expect(enVentana("2026-08-28T05:30:00.000Z")).toBe(false);
   });
 });
