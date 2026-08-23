@@ -1,3 +1,4 @@
+import { logger } from "firebase-functions";
 import { QueryDocumentSnapshot, Timestamp } from "firebase-admin/firestore";
 import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
@@ -309,6 +310,18 @@ class PointsService {
     if (!Number.isFinite(points) || points === 0) {
       throw new Error("La cantidad de puntos debe ser distinta de cero");
     }
+
+    // Este camino mueve puntosActuales sin pasar por el ledger ni por
+    // loyalty_wallets, que es exactamente lo que provocó el incidente POS.
+    // Hoy ningún endpoint montado llega hasta aquí; si alguno vuelve a
+    // hacerlo queremos enterarnos por alerta y no por saldos desaparecidos.
+    logger.error("loyalty_legacy_direct_write", {
+      uid,
+      points,
+      tipo: options.tipo,
+      origen: options.origen,
+      origenId: options.origenId,
+    });
 
     const diasExpiracion = await this.obtenerDiasExpiracionPuntos();
     await this.procesarExpiracionUsuario(uid, diasExpiracion);

@@ -17,3 +17,9 @@ ui-debug.log*
 !.env.example
 !.env.e-comerce-leon
 .secret.local
+
+# Reportes y respaldos de reparación de loyalty: llevan datos de socios reales
+# (uid, correo, teléfono, saldos). No deben versionarse.
+/reports/
+/backups/
+/.incident-tmp/

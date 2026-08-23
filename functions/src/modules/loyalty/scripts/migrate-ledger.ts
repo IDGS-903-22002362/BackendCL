@@ -15,8 +15,15 @@ import { TipoMovimientoPuntos } from "../../../models/usuario.model";
 
 const USUARIOS_COLLECTION = "usuariosApp";
 const MOVIMIENTOS_SUBCOLLECTION = "movimientos_puntos";
-const DRY_RUN = process.argv.includes("--dry-run");
+// Antes escribir era el comportamiento por defecto y `--dry-run` la excepción.
+// Se invirtió: escribir exige `--apply` explícito. `--dry-run` se mantiene
+// aceptado para no romper runbooks existentes.
+const DRY_RUN = !process.argv.includes("--apply");
 const BATCH_LIMIT = 400;
+// Los movimientos del POS se reparan con `repair-pos-ledger`, que los indexa
+// como `pos-sale:<ventaId>`. Si esta migración también los importara bajo
+// `legacy-migration:*` la misma venta quedaría acreditada dos veces.
+const POS_MOVEMENT_PREFIX = "pos_acc_";
 
 type MigrateReport = {
   generatedAt: string;
@@ -28,6 +35,7 @@ type MigrateReport = {
   legacyMovementsFound: number;
   movementsToMigrate: number;
   movementsSkippedExisting: number;
+  movementsSkippedPos: number;
   legacyBalanceTotal: number;
   errors: string[];
 };
@@ -87,12 +95,16 @@ async function migrateLedger(): Promise<void> {
     legacyMovementsFound: 0,
     movementsToMigrate: 0,
     movementsSkippedExisting: 0,
+    movementsSkippedPos: 0,
     legacyBalanceTotal: 0,
     errors: [],
   };
 
   console.log(
     `\nMigracion ledger legacy -> loyalty (${DRY_RUN ? "DRY-RUN" : "EJECUCION"})`,
+  );
+  console.log(
+    `Movimientos ${POS_MOVEMENT_PREFIX}* excluidos: los repara repair-pos-ledger.`,
   );
 
   const usersSnap = await firestoreApp.collection(USUARIOS_COLLECTION).get();
@@ -158,6 +170,11 @@ async function migrateLedger(): Promise<void> {
     report.legacyMovementsFound += movementsSnap.size;
 
     for (const movementDoc of movementsSnap.docs) {
+      if (movementDoc.id.startsWith(POS_MOVEMENT_PREFIX)) {
+        report.movementsSkippedPos += 1;
+        continue;
+      }
+
       const movement = movementDoc.data();
       const transactionId = legacyTransactionDocId(memberId, movementDoc.id);
       const existing = await firestoreApp
@@ -222,8 +239,12 @@ async function migrateLedger(): Promise<void> {
   }
 
   console.log(
-    `Wallets a crear: ${report.walletsToCreate}, transacciones a migrar: ${report.movementsToMigrate}, omitidas: ${report.movementsSkippedExisting}`,
+    `Wallets a crear: ${report.walletsToCreate}, transacciones a migrar: ${report.movementsToMigrate}, omitidas: ${report.movementsSkippedExisting}, POS excluidos: ${report.movementsSkippedPos}`,
   );
+
+  if (DRY_RUN) {
+    console.log("DRY-RUN: no se escribió nada. Usa --apply para ejecutar.");
+  }
 }
 
 migrateLedger().catch((error) => {

@@ -7,6 +7,8 @@ import { assignPointsBySaleSchema, assignUserPointsSchema } from "../../../middl
 import LoyaltyProblemError from "../errors/loyalty-problem.error";
 import { LoyaltyChannel } from "../models/loyalty.enums";
 import ledgerRepository from "../repositories/ledger.repository";
+import { externalTxnRepository } from "../repositories/idempotency.repository";
+import conversionRulesService from "../services/conversion-rules.service";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { buildActorContext } from "../services/loyalty-auth.service";
 import { requireLegacyAdapters } from "../services/loyalty-feature-flags.service";
@@ -190,8 +192,26 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
       req.user!.sucursalId ?? req.user!.concesionId ?? actor.actorId,
     ).trim();
     const locationScope = rawLocationScope.slice(0, 120) || actor.actorId;
+    // Un origen con ID de venta propio (el POS de concesiones) manda su clave:
+    // así la acumulación en vivo, el reproceso de su cola de pendientes y la
+    // reparación histórica colisionan a propósito en el índice externo y solo
+    // acreditan una vez. Sin clave explícita seguimos namespaciando el folio
+    // tecleado por sucursal y cliente, que es el caso del QR de staff.
     const externalTransactionId =
+      body.externalTransactionId ??
       `staff-sale:${saleNamespacePart(locationScope)}:${saleNamespacePart(id)}:${body.folioVenta}`;
+    // Consultado antes de mutar para poder responder ALREADY_PROCESSED: el
+    // motor deduplica solo, pero devuelve la transacción original sin decir que
+    // fue un replay y el POS necesita distinguirlo para cerrar su pendiente.
+    const alreadyProcessed = Boolean(
+      await externalTxnRepository.get(
+        conversionRulesService.buildExternalTxnKey(
+          LoyaltyChannel.STORE,
+          externalTransactionId,
+        ),
+      ),
+    );
+
     const txn = await loyaltyEngineService.earnFromSale({
       memberId: id,
       externalTransactionId,
@@ -202,14 +222,18 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
       description: body.descripcion ?? `Puntos por venta de $${body.dinero}`,
       metadata: {
         saleId: body.folioVenta,
-        source: "staff-qr",
+        source: body.externalTransactionId ? "pos-concesion" : "staff-qr",
       },
       idempotencyKey: externalTransactionId,
       actor,
     });
     res.status(200).json({
       success: true,
-      message: "Puntos asignados exitosamente por monto de venta",
+      message: alreadyProcessed
+        ? "La venta ya tenía puntos acreditados"
+        : "Puntos asignados exitosamente por monto de venta",
+      alreadyProcessed,
+      code: alreadyProcessed ? "ALREADY_PROCESSED" : undefined,
       data: {
         id,
         montoVenta: body.dinero,
@@ -218,6 +242,7 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
         descripcion: body.descripcion,
         folioVenta: body.folioVenta,
         externalTransactionId: txn.externalTransactionId,
+        alreadyProcessed,
         origenId: actor.actorId,
       },
     });
