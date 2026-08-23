@@ -14,8 +14,10 @@ ui-debug.log*
 # Environment
 .env
 .env.*
-!.env.example
-!.env.e-comerce-leon
+.env *
+env
+env.*
+env.example
 .secret.local
 
 # Reportes y respaldos de reparación de loyalty: llevan datos de socios reales
