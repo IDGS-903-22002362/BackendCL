@@ -193,6 +193,7 @@ jobs:
 
           batches=(
             "functions:api,functions:processTryOnJob,functions:processNotificationEvent"
+            "functions:processBroadcastChunk"
             "functions:processPaymentEvent,functions:userLevelSyncFunction,functions:scheduledAccountDeletionFunction"
             "functions:syncInstagramPostsFunction,functions:reconcileAplazoPaymentsFunction"
             "functions:lowStockDailyDigest,functions:abandonedCartNotifications,functions:inactiveUserNotifications"

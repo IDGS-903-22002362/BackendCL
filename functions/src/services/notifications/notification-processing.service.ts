@@ -28,21 +28,22 @@ class NotificationProcessingService {
   }
 
   async processQueuedEvent(eventId: string): Promise<NotificationProcessingResult> {
-    const lockedEvent = await notificationEventService.markProcessing(eventId);
+    const lock = await notificationEventService.markProcessing(eventId);
 
-    if (!lockedEvent) {
+    if (!lock.event) {
       return this.buildNoopResult(eventId, "failed", "event_not_found");
     }
 
-    if (lockedEvent.status !== "processing") {
+    // Otro proceso ya tomo el evento; reprocesarlo aqui duplicaria el push.
+    if (!lock.acquired) {
       return this.buildNoopResult(
         eventId,
-        lockedEvent.status,
-        lockedEvent.skipReason,
+        lock.event.status,
+        lock.event.skipReason || "already_locked",
       );
     }
 
-    return this.processLockedEvent(lockedEvent);
+    return this.processLockedEvent(lock.event);
   }
 
   async processLockedEvent(

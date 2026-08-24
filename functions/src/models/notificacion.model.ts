@@ -203,6 +203,78 @@ export interface NotificationEligibilityResult {
   timezone: string;
 }
 
+export type NotificationBroadcastStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type NotificationBroadcastChunkStatus =
+  | "queued"
+  | "processing"
+  | "done"
+  | "failed";
+
+/** Texto ya resuelto de un broadcast. Se congela al crear el job. */
+export interface NotificationBroadcastCopy {
+  title: string;
+  body: string;
+  deeplink: string;
+  screen: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+}
+
+export interface NotificationBroadcastTarget {
+  userId: string;
+  deviceId: string;
+  token: string;
+}
+
+export interface NotificationBroadcastJob {
+  id?: string;
+  status: NotificationBroadcastStatus;
+  copy: NotificationBroadcastCopy;
+  requestedUserIds: string[];
+  targetedUsers: number;
+  totalTokens: number;
+  totalChunks: number;
+  chunksCompleted: number;
+  sent: number;
+  failed: number;
+  invalidTokens: number;
+  createdBy?: string;
+  lastError?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
+export interface NotificationBroadcastChunk {
+  id?: string;
+  broadcastId: string;
+  chunkIndex: number;
+  status: NotificationBroadcastChunkStatus;
+  copy: NotificationBroadcastCopy;
+  targets: NotificationBroadcastTarget[];
+  attempt: number;
+  sent: number;
+  failed: number;
+  invalidTokens: number;
+  lastError?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  processedAt?: Timestamp;
+}
+
+export interface NotificationBroadcastCreationResult {
+  broadcastId: string;
+  status: NotificationBroadcastStatus;
+  targetedUsers: number;
+  totalTokens: number;
+  totalChunks: number;
+}
+
 export interface NotificationProcessingResult {
   eventId: string;
   status: NotificationEventStatus;

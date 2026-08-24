@@ -1,6 +1,20 @@
 {
   "indexes": [
     {
+      "collectionGroup": "notificacionEnvios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "productos",
       "queryScope": "COLLECTION",
       "fields": [

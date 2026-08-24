@@ -8,6 +8,7 @@ import {
 import {
   deviceIdParamSchema,
   enqueueNotificationEventSchema,
+  broadcastIdParamSchema,
   broadcastNotificationSchema,
   manualNotificationTestSchema,
   registerDeviceTokenSchema,
@@ -234,12 +235,15 @@ router.post(
  * @swagger
  * /api/notificaciones/broadcast:
  *   post:
- *     summary: Enviar una notificación push broadcast
+ *     summary: Encolar una notificación push broadcast
  *     description: >
  *       Endpoint administrativo para enviar un mensaje ad-hoc a todos los
  *       dispositivos activos, o solo a una lista de userIds.
  *       Si `userIds` está vacío u omitido, se incluyen todos los usuarios con
  *       al menos un dispositivo push habilitado.
+ *       El envío es asíncrono: la respuesta 202 confirma que el broadcast quedó
+ *       encolado en lotes de 500 tokens. Usa
+ *       `GET /api/notificaciones/broadcast/{broadcastId}` para ver el avance.
  *     tags: [Notifications]
  *     security:
  *       - BearerAuth: []
@@ -257,8 +261,19 @@ router.post(
  *             priority: "high"
  *             userIds: []
  *     responses:
- *       200:
- *         description: Broadcast procesado
+ *       202:
+ *         description: Broadcast encolado
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Broadcast de notificación encolado"
+ *               data:
+ *                 broadcastId: "8sJk2mQpZ1aBcDeFgHiJ"
+ *                 status: "queued"
+ *                 targetedUsers: 4820
+ *                 totalTokens: 5931
+ *                 totalChunks: 12
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  *       401:
@@ -274,6 +289,44 @@ router.post(
   requireAdmin,
   validateBody(broadcastNotificationSchema),
   commandController.sendBroadcastNotification,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/broadcast/{broadcastId}:
+ *   get:
+ *     summary: Consultar el avance de un broadcast
+ *     description: >
+ *       Devuelve los contadores acumulados del broadcast: lotes completados,
+ *       envíos exitosos, fallidos y tokens dados de baja por inválidos.
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: broadcastId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "8sJk2mQpZ1aBcDeFgHiJ"
+ *     responses:
+ *       200:
+ *         description: Estado del broadcast
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/broadcast/:broadcastId",
+  authMiddleware,
+  requireAdmin,
+  validateParams(broadcastIdParamSchema),
+  queryController.getBroadcastStatus,
 );
 
 /**

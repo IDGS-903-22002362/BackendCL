@@ -37,6 +37,16 @@ export const deviceIdParamSchema = z
   })
   .strict();
 
+export const broadcastIdParamSchema = z
+  .object({
+    broadcastId: z
+      .string()
+      .trim()
+      .min(1, "broadcastId es requerido")
+      .max(120, "broadcastId es demasiado largo"),
+  })
+  .strict();
+
 const deviceTokenBaseSchema = z
   .object({
     deviceId: z.string().trim().min(1).max(120),

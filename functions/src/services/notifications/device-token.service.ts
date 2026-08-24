@@ -233,6 +233,73 @@ class DeviceTokenService {
       );
   }
 
+  /**
+   * Desactiva varios dispositivos en una sola pasada de BulkWriter.
+   * Pensado para los lotes de broadcast, donde FCM puede devolver decenas de
+   * tokens invalidos por envio.
+   */
+  async disableTokensBulk(
+    entries: Array<{ userId: string; deviceId: string; reason: string }>,
+  ): Promise<number> {
+    if (entries.length === 0) {
+      return 0;
+    }
+
+    const userRefCache = new Map<
+      string,
+      FirebaseFirestore.DocumentReference | null
+    >();
+    const writer = firestoreApp.bulkWriter();
+    const now = Timestamp.now();
+    let disabled = 0;
+
+    for (const entry of entries) {
+      const userId = entry.userId.trim();
+      const deviceId = entry.deviceId.trim();
+
+      if (!userId || !deviceId) {
+        continue;
+      }
+
+      if (!userRefCache.has(userId)) {
+        const userRef = await notificationUserContextService
+          .resolveUserReference(userId)
+          .catch(() => null);
+        userRefCache.set(userId, userRef);
+      }
+
+      const userRef = userRefCache.get(userId);
+      if (!userRef) {
+        continue;
+      }
+
+      const deviceRef = userRef
+        .collection(notificationCollections.userDeviceTokens)
+        .doc(deviceId);
+
+      void writer.set(
+        deviceRef,
+        {
+          enabled: false,
+          invalidReason: entry.reason,
+          lastFailureAt: now,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+      disabled += 1;
+    }
+
+    await writer.close();
+
+    this.baseLogger.warn("device_tokens_marked_invalid_bulk", {
+      requested: entries.length,
+      disabled,
+    });
+
+    return disabled;
+  }
+
   async markTokenInvalid(
     userId: string,
     deviceId: string,

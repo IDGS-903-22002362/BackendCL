@@ -174,18 +174,22 @@ export const sendBroadcastNotification = async (req: Request, res: Response) => 
       userIds?: string[];
     };
 
-    const result = await notificationBroadcastService.broadcast({
+    const result = await notificationBroadcastService.createBroadcast({
       title,
       body,
       deeplink,
       screen,
       priority,
       userIds,
+      createdBy: req.user?.uid,
     });
 
-    return res.status(200).json({
+    return res.status(202).json({
       success: true,
-      message: "Broadcast de notificación procesado",
+      message:
+        result.totalChunks === 0
+          ? "Broadcast sin destinatarios con dispositivos activos"
+          : "Broadcast de notificación encolado",
       data: result,
     });
   } catch (error) {

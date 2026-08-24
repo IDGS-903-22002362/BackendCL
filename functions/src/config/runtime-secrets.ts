@@ -125,8 +125,16 @@ export const AI_TRIGGER_SECRETS = [
   ...LEGACY_CONFIG_SECRETS,
 ] as const;
 
+/**
+ * El pipeline de notificaciones envia push y escribe el espejo in-app en
+ * app-oficial-leon, por lo que necesita la credencial cross-project.
+ */
 export const NOTIFICATION_EVENT_SECRETS = [
   ...AI_API_SECRETS,
   ...LEGACY_CONFIG_SECRETS,
+  ...APP_OFICIAL_SECRETS,
 ] as const;
+
+/** Schedulers y workers de notificaciones que solo requieren acceso cross-project. */
+export const NOTIFICATION_SCHEDULER_SECRETS = [...APP_OFICIAL_SECRETS] as const;
 

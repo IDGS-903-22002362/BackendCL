@@ -25,6 +25,7 @@ import {
 const PRODUCTOS_COLLECTION = "productos";
 const ORDENES_COLLECTION = "ordenes";
 const CARRITOS_COLLECTION = "carritos";
+const USER_DELIVERY_HISTORY_LIMIT = 200;
 
 class NotificationEligibilityService {
   private readonly baseLogger = logger.child({
@@ -43,9 +44,13 @@ class NotificationEligibilityService {
   private async loadUserDeliveries(
     userId: string,
   ): Promise<NotificationDeliveryRecord[]> {
+    // Solo se usan para cooldowns y el cap diario de marketing, asi que el
+    // historial reciente basta y evita escanear toda la coleccion.
     const snapshot = await firestoreTienda
       .collection(notificationCollections.deliveries)
       .where("userId", "==", userId)
+      .orderBy("createdAt", "desc")
+      .limit(USER_DELIVERY_HISTORY_LIMIT)
       .get();
 
     return snapshot.docs.map((doc) => ({

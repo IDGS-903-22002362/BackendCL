@@ -16,6 +16,11 @@ import {
   resolveNotificationPriority,
 } from "./notification.utils";
 
+export interface EventLockResult {
+  acquired: boolean;
+  event: NotificationEvent | null;
+}
+
 export interface EnqueueNotificationEventInput {
   eventType: NotificationEventType;
   userId: string;
@@ -245,24 +250,33 @@ class NotificationEventService {
     };
   }
 
-  async markProcessing(eventId: string): Promise<NotificationEvent | null> {
+  /**
+   * Toma el lock del evento. `acquired` indica si fue *este* llamador quien lo
+   * tomo: el endpoint sincrono y el trigger de Firestore pueden competir por el
+   * mismo evento, y solo uno debe enviarlo.
+   */
+  async markProcessing(eventId: string): Promise<EventLockResult> {
     const eventRef = firestoreTienda
       .collection(notificationCollections.events)
       .doc(eventId);
-    let capturedEvent: NotificationEvent | null = null;
+    let result: EventLockResult = { acquired: false, event: null };
 
     await firestoreTienda.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(eventRef);
 
       if (!snapshot.exists) {
+        result = { acquired: false, event: null };
         return;
       }
 
       const event = snapshot.data() as NotificationEvent;
       if (event.status !== "queued" && event.status !== "failed") {
-        capturedEvent = {
-          id: snapshot.id,
-          ...event,
+        result = {
+          acquired: false,
+          event: {
+            id: snapshot.id,
+            ...event,
+          },
         };
         return;
       }
@@ -275,15 +289,18 @@ class NotificationEventService {
         lastError: null,
       });
 
-      capturedEvent = {
-        id: snapshot.id,
-        ...event,
-        status: "processing",
-        updatedAt: now,
+      result = {
+        acquired: true,
+        event: {
+          id: snapshot.id,
+          ...event,
+          status: "processing",
+          updatedAt: now,
+        },
       };
     });
 
-    return capturedEvent;
+    return result;
   }
 
   async markProcessed(eventId: string): Promise<void> {

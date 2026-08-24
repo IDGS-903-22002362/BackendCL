@@ -1,7 +1,12 @@
 import * as functions from "firebase-functions/v1";
+import { NOTIFICATION_SCHEDULER_SECRETS } from "./config/runtime-secrets";
 import notificationSchedulerService from "./services/notifications/notification-scheduler.service";
 
-export const enqueueAbandonedCartNotifications = functions.pubsub
+const schedulerRuntime = functions.runWith({
+  secrets: [...NOTIFICATION_SCHEDULER_SECRETS],
+});
+
+export const enqueueAbandonedCartNotifications = schedulerRuntime.pubsub
   .schedule("every 60 minutes")
   .timeZone("America/Mexico_City")
   .onRun(async () => {
@@ -9,7 +14,7 @@ export const enqueueAbandonedCartNotifications = functions.pubsub
     return null;
   });
 
-export const enqueueInactiveUserNotifications = functions.pubsub
+export const enqueueInactiveUserNotifications = schedulerRuntime.pubsub
   .schedule("every day 10:00")
   .timeZone("America/Mexico_City")
   .onRun(async () => {
@@ -17,7 +22,7 @@ export const enqueueInactiveUserNotifications = functions.pubsub
     return null;
   });
 
-export const enqueueCampaignNotifications = functions.pubsub
+export const enqueueCampaignNotifications = schedulerRuntime.pubsub
   .schedule("every 15 minutes")
   .timeZone("America/Mexico_City")
   .onRun(async () => {
@@ -25,7 +30,7 @@ export const enqueueCampaignNotifications = functions.pubsub
     return null;
   });
 
-export const enqueueProbableRepurchaseNotifications = functions.pubsub
+export const enqueueProbableRepurchaseNotifications = schedulerRuntime.pubsub
   .schedule("every day 11:00")
   .timeZone("America/Mexico_City")
   .onRun(async () => {
@@ -33,7 +38,7 @@ export const enqueueProbableRepurchaseNotifications = functions.pubsub
     return null;
   });
 
-export const enqueueProductRatingReminderNotifications = functions.pubsub
+export const enqueueProductRatingReminderNotifications = schedulerRuntime.pubsub
   .schedule("every day 12:00")
   .timeZone("America/Mexico_City")
   .onRun(async () => {

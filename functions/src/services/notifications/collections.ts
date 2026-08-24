@@ -2,6 +2,8 @@ export const NOTIFICATION_COLLECTIONS = {
   events: "notificacionEventos",
   deliveries: "notificacionEnvios",
   campaigns: "notificacionCampanas",
+  broadcasts: "notificacionBroadcasts",
+  broadcastChunks: "notificacionBroadcastLotes",
   systemNotifications: "notificacionesSistema",
   users: "usuariosApp",
   userDeviceTokens: "dispositivosPush",

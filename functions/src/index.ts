@@ -27,6 +27,7 @@ import {
   enqueueProbableRepurchaseNotifications,
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
+import { processBroadcastChunkTrigger } from "./services/notifications/notification-broadcast.trigger";
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
@@ -83,6 +84,7 @@ export const syncInstagramPostsFunction = syncInstagramPosts;
 export const scheduledAccountDeletionFunction = scheduledAccountDeletion;
 export const processTryOnJob = processTryOnJobTrigger;
 export const processNotificationEvent = processNotificationEventTrigger;
+export const processBroadcastChunk = processBroadcastChunkTrigger;
 export const processPaymentEvent = processPaymentEventTrigger;
 export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;
 export const expirePickupOrdersFunction = expirePickupOrders;
