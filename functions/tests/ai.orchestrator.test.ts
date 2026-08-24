@@ -191,6 +191,9 @@ describe("AiOrchestrator.handleMessage", () => {
       text: "Tengo disponible el Jersey Oficial Club Leon 2024 Local por $1299 MXN. Aqui lo puedes ver: https://clubleon.mx/productos/jersey-2024-local",
       functionCalls: [],
       response: {} as never,
+      model: "gemini-3.7-flash",
+      purpose: "main",
+      thinkingLevel: "medium",
     });
 
     const result = await aiOrchestrator.handleMessage({

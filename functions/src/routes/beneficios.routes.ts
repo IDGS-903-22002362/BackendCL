@@ -10,6 +10,7 @@ import {
   createBeneficioSchema,
   updateBeneficioSchema,
 } from "../middleware/validators/beneficio.validator";
+import { removeBeneficioImagenSchema } from "../middleware/validators/beneficio-media.validator";
 import { authMiddleware } from "../utils/middlewares";
 import { handleMultipart } from "../middleware/multipart-handler";
 import { verifyRole } from "../middleware/validation.middleware";
@@ -48,6 +49,12 @@ const router = Router();
  *                     $ref: '#/components/schemas/Benefit'
  */
 router.get("/", queryController.getAll);
+
+router.get(
+  "/me/reclamados",
+  authMiddleware,
+  queryController.getMyReclamados,
+);
 
 /**
  * @swagger
@@ -176,11 +183,62 @@ router.post(
   verifyRole(BENEFICIOS_STAFF_ROLES),
   validateParams(idParamSchema),
   handleMultipart({
-    maxFiles: 1,
+    maxFiles: 10,
     maxFileSize: 5 * 1024 * 1024,
     allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
   }),
   commandController.uploadImage,
+);
+
+router.post(
+  "/:id/video",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  handleMultipart({
+    maxFiles: 1,
+    maxFileSize: 50 * 1024 * 1024,
+    allowedMimeTypes: [
+      "video/mp4",
+      "video/webm",
+      "video/quicktime",
+      "video/x-msvideo",
+      "application/octet-stream",
+    ],
+  }),
+  commandController.uploadVideo,
+);
+
+router.delete(
+  "/:id/permanente",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  commandController.destroyPermanently,
+);
+
+router.delete(
+  "/:id/media",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  commandController.removeMedia,
+);
+
+router.delete(
+  "/:id/imagen",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  validateBody(removeBeneficioImagenSchema),
+  commandController.removeImage,
+);
+
+router.post(
+  "/:id/reclamar",
+  authMiddleware,
+  validateParams(idParamSchema),
+  commandController.claimPoints,
 );
 
 export default router;

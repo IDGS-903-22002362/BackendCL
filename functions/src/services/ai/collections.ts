@@ -5,6 +5,8 @@ export const AI_COLLECTIONS = {
   tryOnJobs: "tryon_jobs",
   tryOnAssets: "tryon_assets",
   auditLogs: "ai_audit_logs",
+  adminAssistantSessions: "ai_admin_assistant_sessions",
+  adminAssistantTurns: "ai_admin_assistant_turns",
   faq: "faqTienda",
   policies: "politicasTienda",
   knowledge: "knowledgeTienda",

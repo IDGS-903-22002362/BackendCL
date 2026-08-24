@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@jest/globals";
 import {
   construirContextoActual,
+  esCierrePartidoPublicable,
   esMarcadorOficial,
   esPartidoConcluido,
   normalizarDetallePartido,
@@ -8,6 +9,8 @@ import {
   normalizarJugadorPlantilla,
   normalizarPartidoCalendario,
   fusionarPartidosCalendario,
+  hayPartidoDentroDeVentanaDeSilencio,
+  partidoDentroDeVentanaDeSilencio,
   partidoDentroDeVentanaEnVivo,
 } from "../src/services/liga-mx/liga-mx.mapper";
 import { ID_TORNEO_CLAUSURA } from "../src/config/liga-mx.config";
@@ -350,5 +353,131 @@ describe("liga-mx mapper", () => {
     expect(match.visita.goles).toBeNull();
     expect(match.local.penales).toBeNull();
     expect(match.visita.penales).toBeNull();
+  });
+
+  describe("corte de publicación del marcador", () => {
+    // Partido de las 19:00 (México) => inicio 01:00Z, corte 03:15Z.
+    const partidoEnCurso = (
+      raw: Record<string, unknown>,
+      sincronizadoEn: string,
+    ) =>
+      normalizarPartidoCalendario(
+        {
+          idPartido: 151600,
+          idDivision: 1,
+          idTemporada: 77,
+          idTorneo: 1,
+          idClubLocal: 9,
+          clubLocal: "León",
+          idClubVisita: 12570,
+          clubVisita: "Monterrey",
+          matchDate: "2026-08-21 19:00:00.000",
+          fecha: "2026-08-21",
+          hora: "19:00",
+          ...raw,
+        },
+        "varonil",
+        sincronizadoEn,
+      );
+
+    it("no publica marcador mientras el partido está en juego", () => {
+      const match = partidoEnCurso(
+        {
+          idEstatusPartido: 2,
+          idEstatusMinutoAMinuto: 3,
+          estatusMinutoAMinuto: "Segundo Tiempo",
+          golLocal: 0,
+          golVisita: 1,
+        },
+        "2026-08-22T01:30:00.000Z",
+      );
+
+      expect(match.fechaHoraPartido).toBe("2026-08-22T01:00:00.000Z");
+      expect(match.local.goles).toBeNull();
+      expect(match.visita.goles).toBeNull();
+      expect(esCierrePartidoPublicable(match, Date.parse("2026-08-22T01:30:00.000Z"))).toBe(
+        false,
+      );
+    });
+
+    it("no trata el final del primer tiempo como cierre del partido", () => {
+      const match = partidoEnCurso(
+        {
+          idEstatusMinutoAMinuto: 2,
+          estatusMinutoAMinuto: "Final del Primer Tiempo",
+          golLocal: 1,
+          golVisita: 0,
+        },
+        "2026-08-22T01:55:00.000Z",
+      );
+
+      expect(match.local.goles).toBeNull();
+      expect(esCierrePartidoPublicable(match, Date.parse("2026-08-22T01:55:00.000Z"))).toBe(
+        false,
+      );
+    });
+
+    it("publica el marcador final una vez pasado el corte de 2 h 15 min", () => {
+      const match = partidoEnCurso(
+        {
+          idEstatusPartido: 2,
+          idEstatusMinutoAMinuto: 6,
+          estatusMinutoAMinuto: "Marcador Final",
+          golLocal: 2,
+          golVisita: 1,
+        },
+        "2026-08-22T03:20:00.000Z",
+      );
+
+      expect(match.local.goles).toBe(2);
+      expect(match.visita.goles).toBe(1);
+      expect(esCierrePartidoPublicable(match, Date.parse("2026-08-22T03:20:00.000Z"))).toBe(
+        true,
+      );
+    });
+
+    it("mantiene la ventana de silencio entre el inicio y el corte", () => {
+      const inicioMs = Date.parse("2026-08-22T01:00:00.000Z");
+      const enSilencio = (offsetMin: number) =>
+        partidoDentroDeVentanaDeSilencio(
+          "2026-08-22T01:00:00.000Z",
+          inicioMs + offsetMin * 60 * 1000,
+        );
+
+      expect(enSilencio(-1)).toBe(false);
+      expect(enSilencio(0)).toBe(true);
+      expect(enSilencio(60)).toBe(true);
+      expect(enSilencio(134)).toBe(true);
+      expect(enSilencio(135)).toBe(false);
+
+      expect(
+        hayPartidoDentroDeVentanaDeSilencio(
+          [
+            { fechaHoraPartido: "2026-08-22T01:00:00.000Z" },
+            { fechaHoraPartido: "2026-08-29T01:00:00.000Z" },
+          ],
+          inicioMs + 30 * 60 * 1000,
+        ),
+      ).toBe(true);
+    });
+
+    it("publica de inmediato un marcador ya declarado oficial", () => {
+      const match = partidoEnCurso(
+        {
+          idEstatusPartido: 2,
+          idEstatusMinutoAMinuto: 7,
+          estatusMinutoAMinuto: "Marcador Oficial",
+          golLocal: 3,
+          golVisita: 0,
+        },
+        "2026-08-22T02:50:00.000Z",
+      );
+
+      expect(match.local.goles).toBe(3);
+      expect(match.visita.goles).toBe(0);
+      expect(esCierrePartidoPublicable(match, Date.parse("2026-08-22T02:50:00.000Z"))).toBe(
+        true,
+      );
+    });
   });
 });

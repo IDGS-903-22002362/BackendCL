@@ -5,6 +5,12 @@ import {
   AiRuntimeError,
   RECOMMENDED_VERTEX_GEMINI_MODEL,
 } from "../services/ai/ai.error";
+import {
+  GEMINI_API_VERSION_WITH_THINKING,
+  GEMINI_MODELS,
+  GEMINI_THINKING_LEVELS,
+  GeminiThinkingLevelName,
+} from "./gemini.models";
 
 interface AssertAiConfigOptions {
   requireGemini?: boolean;
@@ -34,6 +40,31 @@ const normalizeBaseUrl = (value: string | undefined): string | undefined => {
   return value.trim().replace(/\/+$/, "");
 };
 
+const firstNonEmpty = (
+  ...values: Array<string | undefined>
+): string | undefined => {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeThinkingLevel = (
+  value: string | undefined,
+  fallback: GeminiThinkingLevelName,
+): GeminiThinkingLevelName => {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized;
+  }
+
+  return fallback;
+};
+
 const parseFirebaseConfigProjectId = (): string | undefined => {
   const raw = process.env.FIREBASE_CONFIG;
   if (!raw) {
@@ -55,26 +86,26 @@ const resolveGcpProjectId = (): string | undefined =>
   process.env.GCP_PROJECT?.trim() ||
   parseFirebaseConfigProjectId();
 
-const resolveGeminiMode = (): GeminiExecutionMode => {
-  const configuredMode = process.env.AI_GEMINI_MODE?.trim().toLowerCase();
-
-  if (configuredMode === "vertexai") {
-    return "vertexai";
-  }
-
-  if (
-    configuredMode === "apikey" ||
-    configuredMode === "apiKey".toLowerCase()
-  ) {
-    return "apiKey";
-  }
-
-  if (process.env.GOOGLE_GENAI_USE_VERTEXAI === "true") {
-    return "vertexai";
-  }
-
-  return "apiKey";
+const isTruthyEnv = (value: string | undefined): boolean => {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === "true" || normalized === "1" || normalized === "yes";
 };
+
+const isVertexGeminiRequested = (): boolean => {
+  const configuredMode = process.env.AI_GEMINI_MODE?.trim().toLowerCase();
+  return (
+    configuredMode === "vertexai" ||
+    isTruthyEnv(process.env.GOOGLE_GENAI_USE_VERTEXAI)
+  );
+};
+
+/**
+ * Gemini chat/planner/summary/notifications always use Gemini Developer API.
+ * Vertex remains available only as an explicit future opt-in after GCP
+ * permissions are restored; leftover AI_GEMINI_MODE=vertexai must not
+ * activate Vertex in production.
+ */
+const resolveGeminiMode = (): GeminiExecutionMode => "apiKey";
 
 const geminiMode: GeminiExecutionMode = resolveGeminiMode();
 
@@ -89,7 +120,7 @@ const VERTEX_UNSUPPORTED_MODEL_PATTERN =
 const buildVertexModelConfigError = (model: string): AiRuntimeError =>
   new AiRuntimeError(
     AI_CONFIG_ERROR_CODE,
-    `Configuracion AI invalida: el modelo "${model}" no es compatible con generateContent en modo vertexai. Ajusta AI_GEMINI_MODE=vertexai y GEMINI_MODEL_PRIMARY=${RECOMMENDED_VERTEX_GEMINI_MODEL}.`,
+    `Configuracion AI invalida: el modelo "${model}" no es compatible con generateContent en modo vertexai. Ajusta AI_GEMINI_MODE=vertexai y GEMINI_MODEL_MAIN=${RECOMMENDED_VERTEX_GEMINI_MODEL}.`,
     500,
   );
 
@@ -112,12 +143,34 @@ const assertVertexCompatibleGeminiModel = (model: string): void => {
 export const aiConfig = {
   gemini: {
     mode: geminiMode,
-    apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+    provider: "gemini-api" as const,
+    apiKey: process.env.GEMINI_API_KEY,
+    apiVersion:
+      firstNonEmpty(process.env.AI_GEMINI_API_VERSION) ||
+      GEMINI_API_VERSION_WITH_THINKING,
     primaryModel:
-      process.env.GEMINI_MODEL_PRIMARY || RECOMMENDED_VERTEX_GEMINI_MODEL,
-    fastModel: process.env.GEMINI_MODEL_FAST || "gemini-2.5-flash",
-    summaryModel: process.env.GEMINI_MODEL_SUMMARY || "gemini-2.5-flash-lite",
+      firstNonEmpty(
+        process.env.GEMINI_MODEL_MAIN,
+        process.env.GEMINI_MODEL_PRIMARY,
+      ) || GEMINI_MODELS.main,
+    fastModel: firstNonEmpty(process.env.GEMINI_MODEL_FAST) || GEMINI_MODELS.fast,
+    summaryModel:
+      firstNonEmpty(process.env.GEMINI_MODEL_SUMMARY) || GEMINI_MODELS.summary,
+    imageModel:
+      firstNonEmpty(
+        process.env.GEMINI_MODEL_IMAGE,
+        process.env.AI_PREVIEW_MOCKUP_FALLBACK_MODEL,
+      ) || GEMINI_MODELS.image,
+    thinkingLevelMain: normalizeThinkingLevel(
+      process.env.GEMINI_THINKING_LEVEL_MAIN,
+      GEMINI_THINKING_LEVELS.main,
+    ),
+    thinkingLevelFast: normalizeThinkingLevel(
+      process.env.GEMINI_THINKING_LEVEL_FAST,
+      GEMINI_THINKING_LEVELS.fast,
+    ),
     timeoutMs: toInt(process.env.AI_GEMINI_TIMEOUT_MS, 30000),
+    maxRetries: toInt(process.env.AI_GEMINI_MAX_RETRIES, 2),
     maxToolSteps: toInt(process.env.AI_MAX_TOOL_STEPS, 6),
     maxContextMessages: toInt(process.env.AI_CONTEXT_MAX_MESSAGES, 12),
     maxSummaryChars: toInt(process.env.AI_SUMMARY_MAX_CHARS, 2500),
@@ -159,8 +212,10 @@ export const aiConfig = {
       "imagen-product-recontext-preview-06-30",
     apiVersion: process.env.AI_PREVIEW_MOCKUP_API_VERSION,
     fallbackModel:
-      process.env.AI_PREVIEW_MOCKUP_FALLBACK_MODEL ||
-      "gemini-2.5-flash-image",
+      firstNonEmpty(
+        process.env.AI_PREVIEW_MOCKUP_FALLBACK_MODEL,
+        process.env.GEMINI_MODEL_IMAGE,
+      ) || GEMINI_MODELS.image,
     fallbackRegion:
       process.env.AI_PREVIEW_MOCKUP_FALLBACK_REGION ||
       process.env.GCP_REGION ||
@@ -214,8 +269,17 @@ export const aiConfig = {
 };
 
 export const getAiRuntimeSummary = () => ({
+  geminiProvider: aiConfig.gemini.provider,
   geminiMode: aiConfig.gemini.mode,
+  vertexGeminiRequested: isVertexGeminiRequested(),
+  vertexGeminiActive: false,
+  geminiApiVersion: aiConfig.gemini.apiVersion,
   geminiPrimaryModel: aiConfig.gemini.primaryModel,
+  geminiFastModel: aiConfig.gemini.fastModel,
+  geminiSummaryModel: aiConfig.gemini.summaryModel,
+  geminiImageModel: aiConfig.gemini.imageModel,
+  geminiThinkingLevelMain: aiConfig.gemini.thinkingLevelMain,
+  geminiThinkingLevelFast: aiConfig.gemini.thinkingLevelFast,
   geminiProject: aiConfig.gemini.project,
   geminiRegion: aiConfig.gemini.region,
   hasGeminiApiKey: Boolean(aiConfig.gemini.apiKey),
@@ -236,9 +300,9 @@ export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
   const requireGemini = options.requireGemini ?? true;
 
   if (requireGemini) {
-    if (aiConfig.gemini.mode === "apiKey" && !aiConfig.gemini.apiKey) {
+    if (!aiConfig.gemini.apiKey) {
       throw new Error(
-        "GEMINI_API_KEY es requerido cuando AI_GEMINI_MODE=apiKey",
+        "GEMINI_API_KEY es requerido para Gemini Developer API",
       );
     }
 
@@ -256,6 +320,8 @@ export const assertAiConfig = (options: AssertAiConfigOptions = {}): void => {
       }
 
       assertVertexCompatibleGeminiModel(aiConfig.gemini.primaryModel);
+      assertVertexCompatibleGeminiModel(aiConfig.gemini.fastModel);
+      assertVertexCompatibleGeminiModel(aiConfig.gemini.summaryModel);
     }
   }
 

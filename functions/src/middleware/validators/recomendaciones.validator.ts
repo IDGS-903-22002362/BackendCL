@@ -1,6 +1,28 @@
 import { z } from "zod";
 import { RecomendacionEstrategia, RecomendacionEventoTipo, RecomendacionSuperficie } from "../../models/recomendaciones.model";
 
+/**
+ * Metadata permitida en telemetria. Es una lista blanca: cualquier otra clave
+ * se descarta antes de persistir (comportamiento por defecto de z.object) para
+ * que nunca llegue informacion personal a la coleccion de eventos.
+ */
+const eventMetadataSchema = z.object({
+  /** Ruta visitada, sin query string. */
+  path: z.string().trim().max(160).optional(),
+  source: z.string().trim().max(60).optional(),
+  medium: z.string().trim().max(60).optional(),
+  campaign: z.string().trim().max(60).optional(),
+  referrerHost: z.string().trim().max(120).optional(),
+  /** Termino buscado, ya normalizado por el cliente. */
+  term: z.string().trim().max(80).optional(),
+  resultCount: z.number().int().min(0).max(100000).optional(),
+  quantity: z.number().int().min(1).max(999).optional(),
+  /** Clave de idempotencia de compra. */
+  ordenId: z.string().trim().max(120).optional(),
+  orderId: z.string().trim().max(120).optional(),
+  atribuidoRecomendacion: z.boolean().optional(),
+});
+
 export const trackEventSchema = z.object({
   tipo: z.nativeEnum(RecomendacionEventoTipo),
   productoId: z.string().trim().optional(),
@@ -8,7 +30,7 @@ export const trackEventSchema = z.object({
   estrategia: z.nativeEnum(RecomendacionEstrategia).optional(),
   superficie: z.nativeEnum(RecomendacionSuperficie).optional(),
   seccionId: z.string().trim().optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: eventMetadataSchema.optional(),
 });
 
 export const trackEventsBatchSchema = z.object({

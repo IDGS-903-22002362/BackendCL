@@ -7,6 +7,7 @@ import {
   logoutAllSessions,
 } from "../controllers/users/auth.logout.controller";
 import { authMiddleware } from "../utils/middlewares";
+import { createFirebaseSessionToken } from "../controllers/users/auth.firebase-session.controller";
 import { refreshToken } from "../controllers/users/auth.refresh.controller";
 import { requestVerificationCode, verifyAndLogin } from "../controllers/users/auth.otp.controller";
 import {
@@ -58,6 +59,12 @@ const authRateLimit = createSimpleRateLimiter({
 
 const otpRateLimit = createSimpleRateLimiter({
   keyPrefix: "auth:otp",
+  windowMs: 60_000,
+  maxRequests: 10,
+});
+
+const firebaseSessionRateLimit = createSimpleRateLimiter({
+  keyPrefix: "auth:firebase-session",
   windowMs: 60_000,
   maxRequests: 10,
 });
@@ -148,6 +155,51 @@ router.post("/logout", authMiddleware, logout);
 router.post("/logout-all", authMiddleware, logoutAllSessions);
 
 router.post("/refresh", authMiddleware, refreshToken);
+
+/**
+ * @swagger
+ * /api/auth/firebase-session:
+ *   post:
+ *     summary: Custom token de Firebase para la sesión actual
+ *     description: >
+ *       Emite un Firebase custom token para el uid del JWT de sesión. Lo usa la
+ *       app móvil cuando el login (email/password) no dejó sesión de Firebase
+ *       Auth, requisito para la verificación telefónica por SMS.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Custom token emitido
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     customToken:
+ *                       type: string
+ *                     uid:
+ *                       type: string
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       404:
+ *         description: El usuario no existe en Firebase Auth
+ *       429:
+ *         description: Demasiadas solicitudes
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/firebase-session",
+  authMiddleware,
+  firebaseSessionRateLimit,
+  createFirebaseSessionToken,
+);
 
 
 /**

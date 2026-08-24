@@ -35,9 +35,10 @@ export const handleMultipart = (options: {
             },
         });
 
-        const files: MulterFile[] = [];
+        const files: Array<MulterFile | undefined> = [];
         const fields: Record<string, any> = {};
         let errorOccurred = false;
+        let nextFileIndex = 0;
         // ✅ Rastrear promesas de cada archivo para esperar que terminen
         const filePromises: Promise<void>[] = [];
 
@@ -48,6 +49,8 @@ export const handleMultipart = (options: {
                 file.resume();
                 return;
             }
+
+            const fileIndex = nextFileIndex++;
 
             // ✅ Cada archivo es una promesa que resuelve en su evento "end"
             const filePromise = new Promise<void>((resolve, reject) => {
@@ -75,14 +78,14 @@ export const handleMultipart = (options: {
                     }
 
                     const buffer = Buffer.concat(chunks);
-                    files.push({
+                    files[fileIndex] = {
                         fieldname,
                         originalname: filename,
                         encoding,
                         mimetype: mimeType,
                         buffer,
                         size: fileSize,
-                    });
+                    };
                     resolve();
                 });
 
@@ -97,9 +100,30 @@ export const handleMultipart = (options: {
         });
 
         busboy.on("error", (error) => {
+            if (errorOccurred) {
+                return;
+            }
+            errorOccurred = true;
+            const message = (error as Error).message || "Error desconocido";
+            try {
+                if (typeof req.unpipe === "function") {
+                    req.unpipe(busboy);
+                }
+            } catch {
+                // ignore cleanup errors
+            }
+            next(new ApiError(400, "Error al procesar archivos: " + message));
+        });
+
+        req.on?.("error", (error: Error) => {
             if (!errorOccurred) {
                 errorOccurred = true;
-                next(new ApiError(400, "Error al procesar archivos: " + (error as Error).message));
+                next(
+                    new ApiError(
+                        400,
+                        "Error al leer la solicitud multipart: " + error.message,
+                    ),
+                );
             }
         });
 
@@ -110,7 +134,9 @@ export const handleMultipart = (options: {
             Promise.all(filePromises)
                 .then(() => {
                     if (!errorOccurred && !res.headersSent) {
-                        req.files = files as any;
+                        req.files = files.filter(
+                            (file): file is MulterFile => file !== undefined,
+                        ) as any;
                         req.body = { ...req.body, ...fields };
                         next();
                     }
@@ -124,6 +150,28 @@ export const handleMultipart = (options: {
         });
 
         const parseBufferedBody = (body: Buffer | string): boolean => {
+            const declaredLength = Number.parseInt(
+                String(req.headers["content-length"] ?? ""),
+                10,
+            );
+            if (
+                Buffer.isBuffer(body) &&
+                Number.isFinite(declaredLength) &&
+                declaredLength > 0 &&
+                body.length < declaredLength
+            ) {
+                if (!errorOccurred) {
+                    errorOccurred = true;
+                    next(
+                        new ApiError(
+                            400,
+                            "El cuerpo multipart llego incompleto al servidor",
+                        ),
+                    );
+                }
+                return true;
+            }
+
             try {
                 busboy.end(body);
             } catch (error) {
@@ -132,7 +180,12 @@ export const handleMultipart = (options: {
                     next(
                         error instanceof ApiError
                             ? error
-                            : new ApiError(400, error instanceof Error ? error.message : "Error al procesar multipart")
+                            : new ApiError(
+                                  400,
+                                  error instanceof Error
+                                      ? error.message
+                                      : "Error al procesar multipart",
+                              ),
                     );
                 }
             }

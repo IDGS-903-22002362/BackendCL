@@ -121,6 +121,7 @@ class AiOrchestrator {
     try {
       const response = await geminiAdapter.generate({
         model: aiConfig.gemini.primaryModel,
+        purpose: "main",
         systemInstruction: getAiResponderInstructions(input.agentType),
         prompt: JSON.stringify(
           {
@@ -135,6 +136,14 @@ class AiOrchestrator {
       });
 
       if (response.text.trim()) {
+        this.baseLogger.info("ai_responder_completed", {
+          provider: "gemini-api",
+          purpose: "main",
+          source: "gemini",
+          model: aiConfig.gemini.primaryModel,
+          requestId: input.requestId,
+          success: true,
+        });
         return response.text.trim();
       }
     } catch (error) {
@@ -142,7 +151,11 @@ class AiOrchestrator {
         isAiRuntimeError(error) &&
         error.code === AI_INVALID_CONFIGURATION_CODE;
       this.baseLogger.warn("ai_responder_fallback", {
+        provider: "gemini-api",
+        purpose: "main",
+        source: "local_fallback",
         requestId: input.requestId,
+        success: false,
         message: error instanceof Error ? error.message : String(error),
         canFallback,
       });
@@ -389,6 +402,12 @@ class AiOrchestrator {
       confidence: plan.confidence,
       toolCalls: toolCallSummaries.length,
       fallbackClarification: plan.needsClarification,
+      provider: "gemini",
+      model: aiConfig.gemini.primaryModel,
+      purpose: "main",
+      thinking: aiConfig.gemini.thinkingLevelMain,
+      durationMs: Date.now() - startedAt,
+      success: true,
       latencyMs: Date.now() - startedAt,
     });
 

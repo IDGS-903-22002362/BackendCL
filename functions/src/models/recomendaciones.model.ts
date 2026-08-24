@@ -20,6 +20,7 @@ export enum RecomendacionEstrategia {
 }
 
 export enum RecomendacionEventoTipo {
+  VISTA_PAGINA = "vista_pagina",
   VISTA_PRODUCTO = "vista_producto",
   CLIC_PRODUCTO = "clic_producto",
   CLIC_RECOMENDACION = "clic_recomendacion",
@@ -27,6 +28,7 @@ export enum RecomendacionEventoTipo {
   AGREGAR_CARRITO = "agregar_carrito",
   INICIO_CHECKOUT = "inicio_checkout",
   COMPRA = "compra",
+  BUSQUEDA = "busqueda",
   FAVORITO = "favorito",
 }
 

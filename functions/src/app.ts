@@ -105,7 +105,7 @@ app.use((req, _res, next) => {
 
 app.use(express.raw({
   type: (req) => isMultipart(req as express.Request),
-  limit: "32mb",
+  limit: "55mb",
 }));
 
 app.use((req, res, next) => {

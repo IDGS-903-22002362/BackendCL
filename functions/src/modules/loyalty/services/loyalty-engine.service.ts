@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
+import { logger } from "firebase-functions";
 import { firestoreApp } from "../../../config/app.firebase";
 import { TipoMovimientoPuntos } from "../../../models/usuario.model";
 import { LOYALTY_DEFAULTS, LOYALTY_COLLECTIONS } from "../constants/loyalty.constants";
@@ -168,6 +169,47 @@ export class LoyaltyEngineService {
         operation: "bonus/fichaje",
         description: "Bonificación por descubrir el nuevo fichaje",
         reasonCode: "FICHAJE",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async applyBeneficioClaimBonus(
+    memberId: string,
+    beneficioId: string,
+    points: number,
+    beneficioTitulo: string,
+    actorId = memberId,
+  ): Promise<LoyaltyTransaction | null> {
+    if (points <= 0 || !Number.isInteger(points)) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT");
+    }
+
+    const idempotencyKey = `beneficio-claim:${beneficioId}:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.USER,
+          actorId,
+          roles: ["CLIENTE"],
+          permissions: [],
+        },
+        points,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/beneficio-claim",
+        description: `Recompensa por beneficio: ${beneficioTitulo}`,
+        reasonCode: "BENEFICIO_CLAIM",
         legacyTipo: TipoMovimientoPuntos.BONIFICACION,
         legacyOrigen: "promo",
         skipIfDuplicate: true,
@@ -663,6 +705,30 @@ export class LoyaltyEngineService {
         };
       } else {
         wallet = walletSnap.data() as LoyaltyWallet;
+        // El espejo legacy solo debe moverse desde aquí. Si difiere del wallet
+        // significa que algo escribió `puntosActuales` por fuera del ledger
+        // (p. ej. el fallback del POS) y esos puntos están a punto de
+        // desaparecer, porque el saldo que persistimos sale del wallet.
+        // No lo "arreglamos" sumando la diferencia: eso devolvería puntos ya
+        // gastados. Se reporta para que la reparación lo resuelva por
+        // transacción real.
+        const legacyBalance = Math.trunc(
+          Number(userSnap.data()?.puntosActuales ?? 0),
+        );
+        if (
+          Number.isFinite(legacyBalance) &&
+          legacyBalance !== wallet.availablePoints
+        ) {
+          logger.error("loyalty_legacy_balance_drift", {
+            memberId: params.memberId,
+            walletAvailablePoints: wallet.availablePoints,
+            legacyPuntosActuales: legacyBalance,
+            drift: legacyBalance - wallet.availablePoints,
+            operation: params.operation,
+            channel: params.channel,
+            type: params.type,
+          });
+        }
       }
 
       const availableDelta =

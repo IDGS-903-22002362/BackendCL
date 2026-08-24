@@ -140,8 +140,8 @@ export const notificationConfig = {
   ai: {
     promptVersion: toTrimmedString(process.env.AI_NOTIFICATION_PROMPT_VERSION) || "v1",
     modelVersion:
-      toTrimmedString(process.env.GEMINI_MODEL_SUMMARY) ||
       toTrimmedString(process.env.GEMINI_MODEL_FAST) ||
+      toTrimmedString(process.env.GEMINI_MODEL_MAIN) ||
       toTrimmedString(process.env.GEMINI_MODEL_PRIMARY) ||
       "gemini-fallback",
   },

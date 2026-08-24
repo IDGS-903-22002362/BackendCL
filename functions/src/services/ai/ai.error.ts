@@ -17,7 +17,7 @@ export const AI_TRYON_SESSION_UNAVAILABLE_CODE =
   "AI_TRYON_SESSION_UNAVAILABLE";
 export const AI_TRYON_IDEMPOTENCY_CONFLICT_CODE = "AI_TRYON_IDEMPOTENCY_CONFLICT";
 export const AI_TRYON_RATE_LIMIT_CODE = "AI_TRYON_RATE_LIMIT";
-export const RECOMMENDED_VERTEX_GEMINI_MODEL = "gemini-2.5-pro";
+export const RECOMMENDED_VERTEX_GEMINI_MODEL = "gemini-3.7-flash";
 
 export class AiRuntimeError extends Error {
   readonly code: string;
