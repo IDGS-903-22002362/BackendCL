@@ -282,3 +282,49 @@ export interface NotificationProcessingResult {
   deliveries: NotificationDeliveryRecord[];
   copy?: GeneratedPushCopy;
 }
+
+/**
+ * Payload de navegación del espejo in-app. Mismos campos que viajan en `data`
+ * del push, para que el cliente resuelva el destino con la misma lógica.
+ */
+export interface NotificationInboxPayload {
+  notificationId: string;
+  eventId: string;
+  type: string;
+  category: string;
+  entityType: string;
+  entityId: string;
+  deeplink: string;
+  screen: string;
+  priority: string;
+}
+
+/** Notificación de la bandeja del usuario, ya normalizada para el cliente. */
+export interface NotificationInboxItem {
+  id: string;
+  type: string;
+  category: string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+  readAt?: string;
+  payload: NotificationInboxPayload;
+}
+
+export interface NotificationInboxPage {
+  items: NotificationInboxItem[];
+  unreadCount: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface NotificationInboxReadResult {
+  updated: number;
+  unreadCount: number;
+}
+
+export interface NotificationInboxDeleteResult {
+  deleted: boolean;
+  unreadCount: number;
+}

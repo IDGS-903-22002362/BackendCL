@@ -47,6 +47,29 @@ export const broadcastIdParamSchema = z
   })
   .strict();
 
+export const inboxQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+    cursor: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const markInboxReadSchema = z
+  .object({
+    ids: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+  })
+  .strict();
+
+export const inboxNotificationIdParamSchema = z
+  .object({
+    notificationId: z
+      .string()
+      .trim()
+      .min(1, "notificationId es requerido")
+      .max(200, "notificationId es demasiado largo"),
+  })
+  .strict();
+
 const deviceTokenBaseSchema = z
   .object({
     deviceId: z.string().trim().min(1).max(120),
