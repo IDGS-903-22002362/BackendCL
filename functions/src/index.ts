@@ -25,6 +25,8 @@ import {
   enqueueInactiveUserNotifications,
   enqueueProductRatingReminderNotifications,
   enqueueProbableRepurchaseNotifications,
+  enqueueStreakReminderNotifications,
+  enqueueBirthdayNotifications,
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
 import { processBroadcastChunkTrigger } from "./services/notifications/notification-broadcast.trigger";
@@ -95,6 +97,8 @@ export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
+export const streakReminderNotifications = enqueueStreakReminderNotifications;
+export const birthdayNotifications = enqueueBirthdayNotifications;
 export const userLevelSyncFunction = syncUserLevelOnPointsChange;
 export const loyaltyPointsExpirationJobFunction = loyaltyPointsExpirationJob;
 export const loyaltyRedemptionReleaseJobFunction = loyaltyRedemptionReleaseJob;

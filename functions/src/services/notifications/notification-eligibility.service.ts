@@ -1,4 +1,9 @@
-import { Timestamp } from "firebase-admin/firestore";
+import { evaluateRachaRisk, RACHA_TIMEZONE } from "../../utils/racha-risk.util";
+import {
+  BIRTHDAY_TIMEZONE,
+  evaluateBirthdayToday,
+} from "../../utils/birthday.util";
+import { QueryDocumentSnapshot, Timestamp } from "firebase-admin/firestore";
 import notificationConfig, {
   resolveNotificationTimezone,
 } from "../../config/notification.config";
@@ -17,8 +22,8 @@ import notificationPreferencesService from "./notification-preferences.service";
 import productRatingService from "../product-rating.service";
 import notificationUserContextService from "./user-context.service";
 import {
+  bypassesQuietHours,
   getNotificationDayKey,
-  isTransactionalNotification,
   isWithinQuietHours,
 } from "./notification.utils";
 
@@ -41,22 +46,72 @@ class NotificationEligibilityService {
     );
   }
 
+  private needsDeliveryHistory(event: NotificationEvent): boolean {
+    return (
+      this.isMarketingLikeEvent(event) ||
+      event.eventType === "cart_abandoned" ||
+      event.eventType === "price_drop"
+    );
+  }
+
+  private isMissingIndexError(error: unknown): boolean {
+    const firestoreError = error as { code?: string | number; message?: string };
+    const code = String(firestoreError.code ?? "").toLowerCase();
+    const message = String(firestoreError.message ?? "").toLowerCase();
+    return (
+      code === "9" ||
+      code === "failed-precondition" ||
+      message.includes("requires an index")
+    );
+  }
+
+  private mapDeliveryDocs(
+    docs: QueryDocumentSnapshot[],
+  ): NotificationDeliveryRecord[] {
+    return docs.map((doc) => ({
+      id: doc.id,
+      ...(doc.data() as NotificationDeliveryRecord),
+    }));
+  }
+
   private async loadUserDeliveries(
     userId: string,
   ): Promise<NotificationDeliveryRecord[]> {
     // Solo se usan para cooldowns y el cap diario de marketing, asi que el
     // historial reciente basta y evita escanear toda la coleccion.
-    const snapshot = await firestoreTienda
-      .collection(notificationCollections.deliveries)
-      .where("userId", "==", userId)
-      .orderBy("createdAt", "desc")
-      .limit(USER_DELIVERY_HISTORY_LIMIT)
-      .get();
+    const collection = firestoreTienda.collection(
+      notificationCollections.deliveries,
+    );
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...(doc.data() as NotificationDeliveryRecord),
-    }));
+    try {
+      const snapshot = await collection
+        .where("userId", "==", userId)
+        .orderBy("createdAt", "desc")
+        .limit(USER_DELIVERY_HISTORY_LIMIT)
+        .get();
+
+      return this.mapDeliveryDocs(snapshot.docs);
+    } catch (error) {
+      if (!this.isMissingIndexError(error)) {
+        throw error;
+      }
+
+      this.baseLogger.error("notification_delivery_history_index_missing", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      const fallbackSnapshot = await collection
+        .where("userId", "==", userId)
+        .get();
+      return this.mapDeliveryDocs(fallbackSnapshot.docs)
+        .sort(
+          (left, right) =>
+            (right.createdAt?.toMillis?.() || 0) -
+            (left.createdAt?.toMillis?.() || 0),
+        )
+        .slice(0, USER_DELIVERY_HISTORY_LIMIT);
+    }
   }
 
   private findLatestDelivery(
@@ -288,6 +343,42 @@ class NotificationEligibilityService {
       }
       case "probable_repurchase":
         return { allowed: true };
+      case "streak_reminder": {
+        const userData = await notificationUserContextService.getUserData(
+          event.userId,
+        );
+        if (!userData || userData.activo === false) {
+          return { allowed: false, reason: "user_inactive_or_missing" };
+        }
+
+        const risk = evaluateRachaRisk(userData, RACHA_TIMEZONE);
+        if (risk.streakLastDay === risk.todayKey) {
+          return { allowed: false, reason: "streak_already_claimed_today" };
+        }
+        if (!risk.atRisk) {
+          return { allowed: false, reason: "streak_not_at_risk" };
+        }
+
+        return { allowed: true };
+      }
+      case "birthday": {
+        const userData = await notificationUserContextService.getUserData(
+          event.userId,
+        );
+        if (!userData || userData.activo === false) {
+          return { allowed: false, reason: "user_inactive_or_missing" };
+        }
+
+        const birthday = evaluateBirthdayToday(
+          userData.fechaNacimiento,
+          BIRTHDAY_TIMEZONE,
+        );
+        if (!birthday.isBirthday) {
+          return { allowed: false, reason: "not_birthday_today" };
+        }
+
+        return { allowed: true };
+      }
       case "manual_test":
       case "manual_broadcast":
       default:
@@ -341,13 +432,8 @@ class NotificationEligibilityService {
     const now = new Date();
     const localDayKey = getNotificationDayKey(now, timezone);
 
-    const bypassQuietHours =
-      event.eventType === "manual_test" ||
-      event.eventType === "manual_broadcast";
-
     if (
-      !bypassQuietHours &&
-      !isTransactionalNotification(event.eventType) &&
+      !bypassesQuietHours(event.eventType) &&
       isWithinQuietHours(now, timezone, preference.quietHours)
     ) {
       return {
@@ -381,7 +467,9 @@ class NotificationEligibilityService {
       };
     }
 
-    const userDeliveries = await this.loadUserDeliveries(event.userId);
+    const userDeliveries = this.needsDeliveryHistory(event)
+      ? await this.loadUserDeliveries(event.userId)
+      : [];
 
     if (this.isMarketingLikeEvent(event)) {
       const sentToday = userDeliveries.filter((delivery) => {

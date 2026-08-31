@@ -42,6 +42,12 @@ class NotificationEventService {
     component: "notification-event-service",
   });
 
+  private isAlreadyExistsError(error: unknown): boolean {
+    const firestoreError = error as { code?: string | number };
+    const code = String(firestoreError.code ?? "").toLowerCase();
+    return code === "6" || code === "already-exists";
+  }
+
   private buildEventFingerprint(input: EnqueueNotificationEventInput): string {
     if (Array.isArray(input.fingerprintParts) && input.fingerprintParts.length) {
       return buildNotificationFingerprint(...input.fingerprintParts);
@@ -109,6 +115,18 @@ class NotificationEventService {
           input.eventType,
           input.userId,
           input.sourceData?.referenceOrderId || "repurchase",
+        );
+      case "streak_reminder":
+        return buildNotificationFingerprint(
+          input.eventType,
+          input.userId,
+          input.sourceData?.dayKey || "default",
+        );
+      case "birthday":
+        return buildNotificationFingerprint(
+          input.eventType,
+          input.userId,
+          input.sourceData?.yearKey || input.sourceData?.dayKey || "default",
         );
       case "manual_test":
       case "manual_broadcast":
@@ -190,9 +208,7 @@ class NotificationEventService {
 
       return { event, created: true };
     } catch (error) {
-      const firestoreError = error as { code?: string | number };
-
-      if (String(firestoreError?.code) !== "6") {
+      if (!this.isAlreadyExistsError(error)) {
         throw error;
       }
 
@@ -201,11 +217,30 @@ class NotificationEventService {
         throw error;
       }
 
+      const existing = existingSnapshot.data() as NotificationEvent;
+      if (existing.status === "failed") {
+        await eventRef.delete();
+        await eventRef.create(payload);
+
+        const event: NotificationEvent = {
+          id: eventRef.id,
+          ...payload,
+        };
+
+        this.baseLogger.info("notification_event_requeued_after_failure", {
+          eventId: event.id,
+          eventType: event.eventType,
+          userId: event.userId,
+        });
+
+        return { event, created: true };
+      }
+
       return {
         created: false,
         event: {
           id: existingSnapshot.id,
-          ...(existingSnapshot.data() as NotificationEvent),
+          ...existing,
         },
       };
     }

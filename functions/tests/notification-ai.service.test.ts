@@ -89,4 +89,50 @@ describe("notificationAiService", () => {
     expect(copy.body).toContain("Gorra Edición Especial");
     expect(copy.deeplink).toBe("clubleon://shop/product/prod_1");
   });
+
+  it("uses deterministic streak copy without calling Gemini", async () => {
+    const copy = await notificationAiService.generateCopy({
+      ...baseEvent,
+      eventType: "streak_reminder",
+      category: "streak",
+      entityType: "streak",
+      entityId: "uid_123",
+      priority: "high",
+      sourceData: {
+        streakCount: 12,
+        dayKey: "2026-08-27",
+      },
+    });
+
+    expect(mockedGeminiAdapter.generateStructured).not.toHaveBeenCalled();
+    expect(copy.source).toBe("fallback");
+    expect(copy.title).toBe("¿Vas a dejar perder tu Fiera Racha?");
+    expect(copy.body).toContain("12 días");
+    expect(copy.deeplink).toBe("clubleon://racha");
+    expect(copy.screen).toBe("racha");
+    expect(copy.priority).toBe("high");
+  });
+
+  it("uses deterministic birthday copy without calling Gemini", async () => {
+    const copy = await notificationAiService.generateCopy({
+      ...baseEvent,
+      eventType: "birthday",
+      category: "birthday",
+      entityType: "user",
+      entityId: "uid_123",
+      priority: "high",
+      sourceData: {
+        firstName: "Ignacio",
+        dayKey: "2026-08-27",
+        yearKey: "2026",
+      },
+    });
+
+    expect(mockedGeminiAdapter.generateStructured).not.toHaveBeenCalled();
+    expect(copy.source).toBe("fallback");
+    expect(copy.title).toBe("¡Feliz cumpleaños, Ignacio!");
+    expect(copy.body).toContain("celebra");
+    expect(copy.deeplink).toBe("clubleon://shop/home");
+    expect(copy.screen).toBe("home");
+  });
 });

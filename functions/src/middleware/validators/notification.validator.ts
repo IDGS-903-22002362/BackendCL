@@ -18,6 +18,8 @@ const notificationEventTypeEnum: [NotificationEventType, ...NotificationEventTyp
     "promo_campaign",
     "matchday_campaign",
     "probable_repurchase",
+    "streak_reminder",
+    "birthday",
     "manual_test",
     "manual_broadcast",
   ];
@@ -104,6 +106,8 @@ export const updateNotificationPreferencesSchema = z
     matchdayEnabled: z.boolean().optional(),
     reactivationEnabled: z.boolean().optional(),
     recommendationsEnabled: z.boolean().optional(),
+    streakRemindersEnabled: z.boolean().optional(),
+    birthdayNotificationsEnabled: z.boolean().optional(),
     timezone: z.string().trim().min(3).max(100).optional(),
     locale: z.string().trim().min(2).max(20).optional(),
     quietHours: z

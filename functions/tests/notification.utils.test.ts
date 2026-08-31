@@ -1,6 +1,7 @@
 import {
   buildNotificationDeepLink,
   buildNotificationFingerprint,
+  bypassesQuietHours,
   getNotificationDayKey,
   isWithinQuietHours,
 } from "../src/services/notifications/notification.utils";
@@ -37,6 +38,11 @@ describe("notification.utils", () => {
       deeplink: "clubleon://shop/cart",
       screen: "cart",
     });
+
+    expect(buildNotificationDeepLink("streak", "uid_1")).toEqual({
+      deeplink: "clubleon://racha",
+      screen: "racha",
+    });
   });
 
   it("respects quiet hours and day keys using timezone-aware logic", () => {
@@ -62,5 +68,12 @@ describe("notification.utils", () => {
     expect(getNotificationDayKey(noonUtc, "America/Mexico_City")).toBe(
       "2026-03-15",
     );
+  });
+
+  it("lets streak reminders bypass quiet hours without changing order logic", () => {
+    expect(bypassesQuietHours("streak_reminder")).toBe(true);
+    expect(bypassesQuietHours("order_confirmed")).toBe(true);
+    expect(bypassesQuietHours("cart_abandoned")).toBe(false);
+    expect(bypassesQuietHours("inactive_user")).toBe(false);
   });
 });

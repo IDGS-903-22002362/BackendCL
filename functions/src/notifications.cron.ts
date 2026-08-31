@@ -45,3 +45,25 @@ export const enqueueProductRatingReminderNotifications = schedulerRuntime.pubsub
     await notificationSchedulerService.enqueueProductRatingReminders();
     return null;
   });
+
+const streakSchedulerRuntime = functions.runWith({
+  secrets: [...NOTIFICATION_SCHEDULER_SECRETS],
+  timeoutSeconds: 300,
+  memory: "512MB",
+});
+
+export const enqueueStreakReminderNotifications = streakSchedulerRuntime.pubsub
+  .schedule("every day 23:00")
+  .timeZone("America/Mexico_City")
+  .onRun(async () => {
+    await notificationSchedulerService.enqueueStreakReminders();
+    return null;
+  });
+
+export const enqueueBirthdayNotifications = streakSchedulerRuntime.pubsub
+  .schedule("every day 12:00")
+  .timeZone("America/Mexico_City")
+  .onRun(async () => {
+    await notificationSchedulerService.enqueueBirthdayNotifications();
+    return null;
+  });

@@ -136,6 +136,14 @@ export const notificationConfig = {
       process.env.NOTIFICATIONS_RATING_REMINDER_BATCH_SIZE,
       200,
     ),
+    streakReminderPageSize: toInt(
+      process.env.NOTIFICATIONS_STREAK_REMINDER_PAGE_SIZE,
+      500,
+    ),
+    birthdayPageSize: toInt(
+      process.env.NOTIFICATIONS_BIRTHDAY_PAGE_SIZE,
+      500,
+    ),
   },
   ai: {
     promptVersion: toTrimmedString(process.env.AI_NOTIFICATION_PROMPT_VERSION) || "v1",

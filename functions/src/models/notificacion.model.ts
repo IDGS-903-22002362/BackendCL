@@ -18,6 +18,8 @@ export type NotificationEventType =
   | "promo_campaign"
   | "matchday_campaign"
   | "probable_repurchase"
+  | "streak_reminder"
+  | "birthday"
   | "manual_test"
   | "manual_broadcast";
 
@@ -30,6 +32,8 @@ export type NotificationCategory =
   | "matchday"
   | "reactivation"
   | "recommendation"
+  | "streak"
+  | "birthday"
   | "test";
 
 export type NotificationPriority = "normal" | "high";
@@ -57,6 +61,7 @@ export type NotificationEntityType =
   | "campaign"
   | "promo"
   | "user"
+  | "streak"
   | "notification";
 
 export interface NotificationQuietHours {
@@ -79,6 +84,8 @@ export interface NotificationPreferenceDocument {
   matchdayEnabled: boolean;
   reactivationEnabled: boolean;
   recommendationsEnabled: boolean;
+  streakRemindersEnabled: boolean;
+  birthdayNotificationsEnabled: boolean;
   quietHours: NotificationQuietHours;
   timezone: string;
   locale: string;

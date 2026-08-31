@@ -26,6 +26,8 @@ const generatedPushCopySchema = z
       "matchday",
       "reactivation",
       "recommendation",
+      "streak",
+      "birthday",
       "test",
     ]),
     priority: z.enum(["normal", "high"]),
@@ -171,6 +173,31 @@ class NotificationAiService {
           body: "Detectamos productos que pueden volver a interesarte. Entra y revisa opciones similares.",
           reasoningTag: "probable_repurchase",
         };
+      case "streak_reminder": {
+        const streakCount = Number(event.sourceData?.streakCount ?? 0);
+        const streakLabel =
+          Number.isFinite(streakCount) && streakCount > 1
+            ? `Llevas ${streakCount} días seguidos. Te queda 1 hora para reclamar y no perderla.`
+            : "Te queda 1 hora para reclamar hoy y no romper tu racha.";
+
+        return {
+          ...base,
+          title: "¿Vas a dejar perder tu Fiera Racha?",
+          body: streakLabel,
+          reasoningTag: "streak_reminder",
+        };
+      }
+      case "birthday": {
+        const firstName = this.truncate(event.sourceData?.firstName, 24);
+        return {
+          ...base,
+          title: firstName
+            ? `¡Feliz cumpleaños, ${firstName}!`
+            : "¡Feliz cumpleaños, Fiera!",
+          body: "Hoy la afición verde te celebra. Entra a la app y vive tu día con el Club León.",
+          reasoningTag: "birthday",
+        };
+      }
       case "manual_test":
       case "manual_broadcast":
         return {
@@ -214,6 +241,10 @@ class NotificationAiService {
 
   async generateCopy(event: NotificationEvent): Promise<GeneratedPushCopy> {
     const fallback = this.fallbackCopy(event);
+
+    if (event.eventType === "streak_reminder" || event.eventType === "birthday") {
+      return fallback;
+    }
 
     try {
       const responseJsonSchema = zodToJsonSchema(generatedPushCopySchema, {

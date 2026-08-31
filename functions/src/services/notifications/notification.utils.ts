@@ -48,6 +48,10 @@ export const resolveNotificationCategory = (
       return "reactivation";
     case "probable_repurchase":
       return "recommendation";
+    case "streak_reminder":
+      return "streak";
+    case "birthday":
+      return "birthday";
     case "manual_test":
     case "manual_broadcast":
       return "test";
@@ -65,6 +69,8 @@ export const resolveNotificationPriority = (
     case "order_delivered":
     case "pickup_ready_for_pickup":
     case "pickup_picked_up":
+    case "streak_reminder":
+    case "birthday":
       return "high";
     default:
       return "normal";
@@ -123,6 +129,10 @@ export const resolveNotificationEntity = (
     case "manual_test":
     case "manual_broadcast":
       return { entityType: "user", entityId: input.userId };
+    case "streak_reminder":
+      return { entityType: "streak", entityId: input.userId };
+    case "birthday":
+      return { entityType: "user", entityId: input.userId };
     default:
       return { entityType: "notification", entityId: input.userId };
   }
@@ -162,6 +172,11 @@ export const buildNotificationDeepLink = (
       return {
         deeplink: "clubleon://shop/home",
         screen: "home",
+      };
+    case "streak":
+      return {
+        deeplink: "clubleon://racha",
+        screen: "racha",
       };
     default:
       return {
@@ -243,3 +258,15 @@ export const isTransactionalNotification = (
   eventType === "pickup_picked_up" ||
   eventType === "pickup_expired" ||
   eventType === "pickup_reminder";
+
+export const isTimeSensitiveNotification = (
+  eventType: NotificationEventType,
+): boolean =>
+  isTransactionalNotification(eventType) || eventType === "streak_reminder";
+
+export const bypassesQuietHours = (
+  eventType: NotificationEventType,
+): boolean =>
+  isTimeSensitiveNotification(eventType) ||
+  eventType === "manual_test" ||
+  eventType === "manual_broadcast";
