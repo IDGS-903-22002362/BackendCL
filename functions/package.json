@@ -36,6 +36,7 @@
     "verify:pos-repair": "npm run build && node lib/modules/loyalty/scripts/verify-pos-repair.js",
     "reconcile:pos-absorbed": "npm run build && node lib/modules/loyalty/scripts/reconcile-absorbed-ledger.js",
     "reset:member-points": "npm run build && node lib/modules/loyalty/scripts/reset-member-points-baseline.js",
+    "gift:campaign-points": "npm run build && node lib/modules/loyalty/scripts/gift-campaign-points.js",
     "seed:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/seed-loyalty-flags.js",
     "activate:loyalty-flags": "npm run build && node lib/modules/loyalty/scripts/activate-loyalty-flags.js",
     "deploy:loyalty-indexes": "firebase deploy --only firestore:indexes --config firebase.app-oficial.json --project app-oficial-leon",

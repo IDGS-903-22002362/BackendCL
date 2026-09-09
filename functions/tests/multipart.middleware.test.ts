@@ -284,6 +284,50 @@ describe("handleMultipart", () => {
       mimetype: "video/mp4",
       buffer: Buffer.from("fake-gallery-video"),
     });
+    expect(req.body).toEqual({});
+  });
+
+  it("no explota si req.body es un Buffer grande de un GIF", async () => {
+    const form = new FormData();
+    form.append("imagen", Buffer.alloc(2 * 1024 * 1024, 7), {
+      filename: "valla.gif",
+      contentType: "image/gif",
+    });
+    form.append("nombre", "TELCEL2");
+
+    const req: {
+      headers: ReturnType<FormData["getHeaders"]>;
+      body: Buffer | Record<string, unknown>;
+      files?: Express.Multer.File[];
+    } = {
+      headers: form.getHeaders(),
+      body: form.getBuffer(),
+    };
+
+    const middleware = handleMultipart({
+      maxFiles: 1,
+      maxFileSize: 32 * 1024 * 1024,
+      allowedMimeTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      middleware(req as never, { headersSent: false } as never, (error?: unknown) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+
+    expect(req.body).toEqual({ nombre: "TELCEL2" });
+    expect((req.files as Express.Multer.File[])[0]).toMatchObject({
+      fieldname: "imagen",
+      originalname: "valla.gif",
+      mimetype: "image/gif",
+      size: 2 * 1024 * 1024,
+    });
   });
 
   it("conserva el orden de multiples archivos en el multipart", async () => {

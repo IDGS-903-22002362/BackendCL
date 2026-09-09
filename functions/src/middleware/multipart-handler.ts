@@ -1,6 +1,38 @@
 import { Request, Response, NextFunction } from "express";
 import Busboy from "busboy";
+import * as path from "path";
 import { ApiError } from "../utils/error-handler";
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+    ".gif": "image/gif",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+};
+
+function resolveUploadMimeType(mimeType: string, filename: string) {
+    const normalized = (mimeType || "").toLowerCase().split(";")[0]?.trim() ?? "";
+    if (normalized && normalized !== "application/octet-stream") {
+        return normalized;
+    }
+
+    return MIME_BY_EXTENSION[path.extname(filename || "").toLowerCase()] || normalized;
+}
+
+function asPlainBody(body: unknown): Record<string, unknown> {
+    if (
+        body &&
+        typeof body === "object" &&
+        !Buffer.isBuffer(body) &&
+        !ArrayBuffer.isView(body) &&
+        !Array.isArray(body)
+    ) {
+        return body as Record<string, unknown>;
+    }
+
+    return {};
+}
 
 interface MulterFile {
     fieldname: string;
@@ -44,8 +76,9 @@ export const handleMultipart = (options: {
 
         busboy.on("file", (fieldname, file, info) => {
             const { filename, encoding, mimeType } = info;
+            const resolvedMimeType = resolveUploadMimeType(mimeType, filename);
 
-            if (options.allowedMimeTypes && !options.allowedMimeTypes.includes(mimeType)) {
+            if (options.allowedMimeTypes && !options.allowedMimeTypes.includes(resolvedMimeType)) {
                 file.resume();
                 return;
             }
@@ -82,7 +115,7 @@ export const handleMultipart = (options: {
                         fieldname,
                         originalname: filename,
                         encoding,
-                        mimetype: mimeType,
+                        mimetype: resolvedMimeType,
                         buffer,
                         size: fileSize,
                     };
@@ -137,7 +170,7 @@ export const handleMultipart = (options: {
                         req.files = files.filter(
                             (file): file is MulterFile => file !== undefined,
                         ) as any;
-                        req.body = { ...req.body, ...fields };
+                        req.body = { ...asPlainBody(req.body), ...fields };
                         next();
                     }
                 })

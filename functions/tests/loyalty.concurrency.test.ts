@@ -403,4 +403,34 @@ describe("loyalty concurrency", () => {
     expect(transaction.points).toBe(10);
     expect(transaction.balanceAfter).toBe(10);
   });
+
+  it("el regalo de campaña suma 20 pts, deja el movimiento y no se duplica", async () => {
+    const first = await loyaltyEngineService.applyCampaignGiftBonus("member_1", {
+      campaignKey: "regalo-20-puntos-2026-09-08",
+      points: 20,
+      description: "regalo 20 puntos del 8/09/2026",
+      claimField: "regaloPuntos20260908At",
+    });
+    const second = await loyaltyEngineService.applyCampaignGiftBonus("member_1", {
+      campaignKey: "regalo-20-puntos-2026-09-08",
+      points: 20,
+      description: "regalo 20 puntos del 8/09/2026",
+      claimField: "regaloPuntos20260908At",
+    });
+
+    expect(first).not.toBeNull();
+    expect(first?.points).toBe(20);
+    expect(first?.balanceBefore).toBe(100);
+    expect(first?.balanceAfter).toBe(120);
+    expect(first?.description).toBe("regalo 20 puntos del 8/09/2026");
+    expect(second).toBeNull();
+    expect(fakeFirestore.get("usuariosApp", "member_1")?.puntosActuales).toBe(120);
+    expect(
+      fakeFirestore.get("usuariosApp", "member_1")?.regaloPuntos20260908At,
+    ).toBeTruthy();
+    expect(fakeFirestore.get("loyalty_wallets", "member_1")?.availablePoints).toBe(
+      120,
+    );
+    expect(fakeFirestore.count("usuariosApp/member_1/movimientos_puntos")).toBe(1);
+  });
 });

@@ -43,6 +43,13 @@ export const FEDEX_SECRETS = [
 
 export const LIGA_MX_SECRETS = ["LMX_API_KEY"] as const;
 
+/** Solo el cron de Opta. No mezclar con Liga MX ni con API_RUNTIME_SECRETS. */
+export const OPTA_SECRETS = [
+  "OPTA_API_KEY",
+  "OPTA_CLIENT_ID",
+  "OPTA_CLIENT_SECRET",
+] as const;
+
 export const BOLETOMOVIL_SECRETS = [
   "BOLETOMOVIL_API_TOKEN",
   "BOLETOMOVIL_PURCHASES_URL",
