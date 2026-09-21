@@ -219,7 +219,7 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
       description: body.descripcion ?? `Puntos por venta de $${body.dinero}`,
       metadata: {
         saleId: body.folioVenta,
-        source: body.externalTransactionId ? "pos-concesion" : "staff-qr",
+        source: body.externalReference ? "pos-concesion" : "staff-qr",
       },
       idempotencyKey: externalTransactionId,
       actor,
