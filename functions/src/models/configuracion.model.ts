@@ -11,7 +11,7 @@ export interface ConfiguracionPuntos {
   id?: string;
   puntosPorPesoTienda: number; // Ej: 1 punto por cada $10 pesos gastados en tienda
   puntosPorPesoComedor: number; // Ej: 1 punto por cada $5 pesos gastados en comedor
-  valorPuntoEnPesos: number; // Ej: 1 punto = $1 peso para canjes
+  valorPuntoEnPesos: number; // 1 FieraPunto = $0.10 MXN (10 centavos) para canjes
   puntosMinimoCanje: number; // Puntos mínimos requeridos para hacer un canje
   diasExpiracionPuntos?: number; // Días antes de que expiren los puntos
   activo: boolean; // Si el sistema de puntos está activo

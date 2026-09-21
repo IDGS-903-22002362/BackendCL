@@ -8,7 +8,9 @@ import {
 } from "../models/loyalty.types";
 
 export class IdempotencyRepository {
-  private collection = firestoreApp.collection(LOYALTY_COLLECTIONS.IDEMPOTENCY);
+  private get collection() {
+    return firestoreApp.collection(LOYALTY_COLLECTIONS.IDEMPOTENCY);
+  }
 
   buildDocId(operation: string, actorId: string, idempotencyKeyHash: string): string {
     const safeOperation = encodeURIComponent(operation.trim());
@@ -64,9 +66,9 @@ export class IdempotencyRepository {
 }
 
 export class ExternalTxnRepository {
-  private collection = firestoreApp.collection(
-    LOYALTY_COLLECTIONS.EXTERNAL_TXN_INDEX,
-  );
+  private get collection() {
+    return firestoreApp.collection(LOYALTY_COLLECTIONS.EXTERNAL_TXN_INDEX);
+  }
 
   docRef(key: string) {
     return this.collection.doc(key);

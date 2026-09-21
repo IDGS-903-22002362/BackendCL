@@ -102,6 +102,52 @@ describe("payment loyalty hooks", () => {
     expect(mockEarnFromSale).not.toHaveBeenCalled();
   });
 
+  it("earnLoyaltyPointsForPaidOrder no asigna si el pedido se cubrió 100% con FieraPuntos", async () => {
+    mockOrderGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        usuarioId: "member-1",
+        total: 0,
+        subtotal: 39,
+        paymentComposition: {
+          pointsUsed: 390,
+          providerAmountMinor: 0,
+          pointsDiscountMinor: 3900,
+        },
+      }),
+    });
+
+    await earnLoyaltyPointsForPaidOrder("order-points-only");
+
+    expect(mockEarnFromSale).not.toHaveBeenCalled();
+  });
+
+  it("earnLoyaltyPointsForPaidOrder acumula solo sobre el efectivo en un pago híbrido", async () => {
+    mockOrderGet.mockResolvedValue({
+      exists: true,
+      data: () => ({
+        usuarioId: "member-1",
+        total: 24.9,
+        subtotal: 39,
+        paymentComposition: {
+          pointsUsed: 141,
+          providerAmountMinor: 2490,
+          pointsDiscountMinor: 1410,
+        },
+      }),
+    });
+    mockEarnFromSale.mockResolvedValue({ transactionId: "tx-hybrid" });
+
+    await earnLoyaltyPointsForPaidOrder("order-hybrid");
+
+    expect(mockEarnFromSale).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 2490,
+        memberId: "member-1",
+      }),
+    );
+  });
+
   it("reverseLoyaltyPointsForRefund revierte con idempotencyKey por reembolso", async () => {
     mockBuildExternalTxnKey.mockReturnValue("ext-key");
     mockExternalGet.mockResolvedValue({ transactionId: "tx-earn-1" });

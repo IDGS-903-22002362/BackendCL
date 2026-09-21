@@ -8,6 +8,10 @@ import {
 } from "../product-offer-snapshot.service";
 import { isProductoElegible } from "./utils/product-eligibility.util";
 import { projectLegacyFromProductData } from "../../utils/inventory-stock.util";
+import {
+  isProductPersonalizable,
+  resolvePersonalizationFeeMxn,
+} from "../../utils/product-personalization.util";
 
 const PRODUCTOS_COLLECTION = "productos";
 const CATEGORIAS_COLLECTION = "categorias";
@@ -120,6 +124,8 @@ class ProductCardsService {
           ? product.disponible
           : stockTotal > 0,
       destacado: product.destacado === true,
+      personalizable: isProductPersonalizable(product),
+      personalizationFeeMxn: resolvePersonalizationFeeMxn(product),
     };
   }
 

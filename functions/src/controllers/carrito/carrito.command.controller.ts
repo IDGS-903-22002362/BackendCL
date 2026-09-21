@@ -95,6 +95,7 @@ export const addItem = async (req: Request, res: Response) => {
         msg.includes("stock insuficiente") ||
         msg.includes("talla") ||
         msg.includes("cantidad máxima") ||
+        msg.includes("personalización") ||
         msg.includes("se requiere")
       ) {
         statusCode = 400;

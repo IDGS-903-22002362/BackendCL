@@ -68,6 +68,7 @@ const validateApiAiConfigOnce = (): void => {
 export const api = onRequest(
   {
     memory: "1GiB",
+    timeoutSeconds: 180,
     invoker: "public",
     secrets: [...API_RUNTIME_SECRETS],
   },

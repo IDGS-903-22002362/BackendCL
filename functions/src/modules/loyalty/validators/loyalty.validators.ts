@@ -85,3 +85,33 @@ export const earnPreviewQuerySchema = z
     amountCents: z.coerce.number().int().nonnegative(),
   })
   .strict();
+
+const dayKeySchema = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "La fecha debe tener formato YYYY-MM-DD");
+
+export const adminRedemptionsReportQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    cursor: z.string().trim().min(1).max(240).optional(),
+    from: dayKeySchema,
+    to: dayKeySchema,
+  })
+  .strict()
+  .refine((value) => value.from <= value.to, {
+    message: 'El campo "from" no puede ser posterior a "to".',
+  });
+
+export const adminTopBalancesQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict();
+
+export const adminTopEarnersQuerySchema = z
+  .object({
+    day: dayKeySchema,
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict();

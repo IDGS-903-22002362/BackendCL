@@ -26,12 +26,16 @@ export async function earnLoyaltyPointsForPaidOrder(orderId: string): Promise<vo
     return;
   }
 
-  const totalPesos = Number(order.total ?? order.subtotal ?? 0);
-  if (!Number.isFinite(totalPesos) || totalPesos <= 0) {
+  const composition = order.paymentComposition;
+  const cashPesos =
+    composition && composition.pointsUsed > 0
+      ? Math.max(0, composition.providerAmountMinor) / 100
+      : Number(order.total);
+  if (!Number.isFinite(cashPesos) || cashPesos <= 0) {
     return;
   }
 
-  const amountCents = Math.round(totalPesos * 100);
+  const amountCents = Math.round(cashPesos * 100);
   const externalTransactionId = `order:${orderId}`;
   const idempotencyKey = `earn:order:${orderId}`;
 

@@ -25,6 +25,9 @@ export interface LoyaltyWallet {
   nextExpirationAt?: Timestamp;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  /** Huella de consistencia con la última entrada del ledger. */
+  ledgerBalanceAfter?: number;
+  lastTransactionId?: string;
 }
 
 export interface LoyaltyTransaction {
@@ -61,6 +64,10 @@ export interface LoyaltyRedemption {
   expiresAt: Timestamp;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
+  externalReference?: string;
+  metadata?: Record<string, string | number | boolean>;
+  confirmTransactionId?: string;
+  refundTransactionId?: string;
 }
 
 export interface EarnTransactionInput {
@@ -92,6 +99,10 @@ export interface RedemptionInput {
   description?: string;
   idempotencyKey: string;
   actor: LoyaltyActorContext;
+  externalReference?: string;
+  metadata?: Record<string, string | number | boolean>;
+  /** Override del TTL de hold. Si se omite, usa el default del engine. */
+  holdTtlMs?: number;
 }
 
 export interface ReversalInput {

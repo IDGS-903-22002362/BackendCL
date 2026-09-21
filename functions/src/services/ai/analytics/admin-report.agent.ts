@@ -10,6 +10,7 @@
  */
 
 import { Content, Part } from "@google/genai";
+import { ZodError } from "zod";
 import aiConfig from "../../../config/ai.config";
 import { RolUsuario } from "../../../models/usuario.model";
 import logger from "../../../utils/logger";
@@ -20,10 +21,18 @@ import {
   reconcileForecastBlocks,
   summarizeAnalysisEvidence,
 } from "./admin-report.enrich";
+import { reconcileEvidenceCharts } from "./admin-report.chart-enrich";
+import { reconcileDecisionBlocksAndSources } from "./admin-report.decision-enrich";
+import {
+  AdminConversationState,
+  buildConversationStatePrompt,
+} from "./admin-conversation-state";
 import {
   AdminReport,
+  adminReportBlockSchema,
   adminReportSchema,
   buildAdminReportJsonSchema,
+  prepareAdminReportForReconciliation,
   sanitizeAdminReport,
 } from "./admin-report.schema";
 import {
@@ -43,6 +52,23 @@ import { ANALYTICS_TIMEZONE, toAnalyticsDayKey } from "./period.util";
 export const MAX_TOOL_CALLS_PER_QUESTION = 12;
 /** Tamano maximo de evidencia enviada al paso de redaccion. */
 const MAX_EVIDENCE_CHARS = 60_000;
+/** No se inician nuevas rondas cuando la investigacion supera este tiempo. */
+export const MAX_INVESTIGATION_DURATION_MS = 50_000;
+/** Una fuente lenta falla de forma aislada para que el informe pueda continuar. */
+export const MAX_SINGLE_TOOL_DURATION_MS = 20_000;
+
+const isCorrectableStructuredOutputError = (error: unknown): boolean =>
+  error instanceof SyntaxError || error instanceof ZodError;
+
+const toReportCompositionError = (error: unknown): AiRuntimeError =>
+  error instanceof AiRuntimeError
+    ? error
+    : new AiRuntimeError(
+        AI_INTERNAL_ERROR_CODE,
+        "El asistente no pudo estructurar el informe. Intenta reformular la pregunta.",
+        502,
+        error,
+      );
 
 const TOOL_STATUS_LABELS: Record<string, string> = {
   get_sales_summary: "Analizando ventas...",
@@ -61,6 +87,14 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   analyze_metric_relationships: "Buscando relaciones entre métricas...",
   forecast_metric: "Calculando proyección...",
   detect_business_anomalies: "Buscando anomalías...",
+  prioritize_business_findings: "Priorizando hallazgos...",
+  decompose_metric_change: "Descomponiendo la variación...",
+  simulate_business_scenario: "Comparando escenarios...",
+  segment_products: "Clasificando productos...",
+  get_customer_segments: "Analizando clientes de forma agregada...",
+  analyze_customer_cohorts: "Revisando recompra por cohortes...",
+  analyze_product_affinity: "Buscando productos comprados juntos...",
+  get_business_brief: "Preparando lo más importante...",
 };
 
 export interface AdminAgentHistoryEntry {
@@ -75,6 +109,7 @@ export interface RunAdminReportInput {
   requestId?: string;
   sessionId?: string;
   history?: AdminAgentHistoryEntry[];
+  conversationState?: AdminConversationState;
   now?: Date;
 }
 
@@ -96,6 +131,12 @@ export interface AdminReportTrace {
   model: string;
   purpose: string;
   durationMs: number;
+  totalAgentDuration: number;
+  geminiDuration: number;
+  toolDuration: number;
+  numberOfToolCalls: number;
+  slowestTools: Array<{ label: string; durationMs: number; success: boolean }>;
+  sourceTimestamps: string[];
   timeZone: string;
   /** Pronosticos calculados en backend: metrica, metodo e historial usado. */
   forecasts?: ForecastTraceEntry[];
@@ -163,6 +204,7 @@ interface EvidenceEntry {
   ok: boolean;
   result?: unknown;
   error?: string;
+  observedAt: string;
 }
 
 class AdminReportAgent {
@@ -203,6 +245,7 @@ class AdminReportAgent {
 
     let investigationRounds = 0;
     let reachedToolLimit = false;
+    let geminiDurationMs = 0;
 
     yield {
       type: "status",
@@ -210,8 +253,13 @@ class AdminReportAgent {
     };
 
     for (let round = 1; round <= maxToolSteps; round += 1) {
+      if (Date.now() - startedAt >= MAX_INVESTIGATION_DURATION_MS) {
+        reachedToolLimit = true;
+        break;
+      }
       investigationRounds = round;
 
+      const geminiStartedAt = Date.now();
       const generation = await geminiAdapter.generate({
         model: aiConfig.gemini.primaryModel,
         purpose: "main",
@@ -219,6 +267,7 @@ class AdminReportAgent {
         contents,
         tools: declarations,
       });
+      geminiDurationMs += Date.now() - geminiStartedAt;
 
       const functionCalls = generation.functionCalls || [];
       if (functionCalls.length === 0) {
@@ -236,45 +285,62 @@ class AdminReportAgent {
       );
 
       const responseParts: Part[] = [];
+      const remaining = Math.max(
+        0,
+        MAX_TOOL_CALLS_PER_QUESTION - toolCalls.length,
+      );
+      const selectedCalls = functionCalls.slice(0, remaining);
+      const omittedCalls = functionCalls.slice(remaining);
+      if (omittedCalls.length > 0) reachedToolLimit = true;
 
-      for (const call of functionCalls) {
-        if (toolCalls.length >= MAX_TOOL_CALLS_PER_QUESTION) {
-          reachedToolLimit = true;
-          responseParts.push({
-            functionResponse: {
-              name: call.name || "unknown_tool",
-              response: {
-                ok: false,
-                error:
-                  "Se alcanzo el limite de consultas para esta pregunta. Responde con la evidencia ya obtenida.",
-              },
-            },
-          });
-          continue;
-        }
+      // Gemini puede solicitar varias funciones independientes en una ronda.
+      // Promise.all conserva el orden declarado; el cache request-local comparte
+      // promesas y la firma evita duplicados aun dentro de este mismo lote.
+      for (const call of selectedCalls) {
+        yield {
+          type: "status",
+          data: {
+            status:
+              TOOL_STATUS_LABELS[call.name || ""] || "Consultando datos...",
+            step: round,
+          },
+        };
+      }
+      const executions = await Promise.all(
+        selectedCalls.map((call) =>
+          this.executeToolCall(
+            call.name,
+            toPlainArguments(call.args),
+            toolContext,
+            executedSignatures,
+          ),
+        ),
+      );
 
-        const execution = await this.executeToolCall(
-          call.name,
-          toPlainArguments(call.args),
-          toolContext,
-          executedSignatures,
-        );
-
+      for (let index = 0; index < selectedCalls.length; index += 1) {
+        const call = selectedCalls[index];
+        const execution = executions[index];
         toolCalls.push(execution.trace);
-        if (execution.evidence) {
-          evidence.push(execution.evidence);
-        }
-
+        if (execution.evidence) evidence.push(execution.evidence);
         responseParts.push({
           functionResponse: {
             name: call.name || "unknown_tool",
             response: execution.response,
           },
         });
+      }
 
-        const statusLabel =
-          TOOL_STATUS_LABELS[call.name || ""] || "Consultando datos...";
-        yield { type: "status", data: { status: statusLabel, step: round } };
+      for (const call of omittedCalls) {
+        responseParts.push({
+          functionResponse: {
+            name: call.name || "unknown_tool",
+            response: {
+              ok: false,
+              error:
+                "Se alcanzo el limite de consultas para esta pregunta. Responde con la evidencia ya obtenida.",
+            },
+          },
+        });
       }
 
       contents.push({ role: "user", parts: responseParts });
@@ -289,12 +355,14 @@ class AdminReportAgent {
       data: { status: "Preparando informe...", step: investigationRounds + 1 },
     };
 
-    const report = await this.composeReport({
+    const composition = await this.composeReport({
       question: input.question,
       history: input.history,
       evidence,
       promptContext,
     });
+    const report = composition.report;
+    geminiDurationMs += composition.geminiDurationMs;
 
     const durationMs = Date.now() - startedAt;
     const analysis = summarizeAnalysisEvidence(evidence);
@@ -307,6 +375,21 @@ class AdminReportAgent {
       model: aiConfig.gemini.primaryModel,
       purpose: "main",
       durationMs,
+      totalAgentDuration: durationMs,
+      geminiDuration: geminiDurationMs,
+      toolDuration: toolCalls.reduce((sum, call) => sum + call.durationMs, 0),
+      numberOfToolCalls: toolCalls.length,
+      slowestTools: [...toolCalls]
+        .sort((a, b) => b.durationMs - a.durationMs)
+        .slice(0, 3)
+        .map((call) => ({
+          label: TOOL_STATUS_LABELS[call.toolName]?.replace(/\.\.\.$/, "") || "Consulta de datos",
+          durationMs: call.durationMs,
+          success: call.success,
+        })),
+      sourceTimestamps: Array.from(
+        new Set(evidence.filter((entry) => entry.ok).map((entry) => entry.observedAt)),
+      ),
       timeZone: ANALYTICS_TIMEZONE,
       forecasts: analysis.forecasts.length > 0 ? analysis.forecasts : undefined,
       anomaliesDetected: analysis.anomaliesDetected,
@@ -367,6 +450,10 @@ class AdminReportAgent {
       parts: [{ text: entry.content }],
     }));
 
+    const statePrompt = buildConversationStatePrompt(input.conversationState);
+    if (statePrompt) {
+      contents.push({ role: "user", parts: [{ text: statePrompt }] });
+    }
     contents.push({ role: "user", parts: [{ text: input.question }] });
     return contents;
   }
@@ -424,9 +511,19 @@ class AdminReportAgent {
     executedSignatures.add(signature);
 
     try {
-      const result = await tool.execute(args, context);
+      const result = await Promise.race([
+        tool.execute(args, context),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error("La fuente excedio el tiempo maximo de consulta")),
+            MAX_SINGLE_TOOL_DURATION_MS,
+          );
+          timer.unref?.();
+        }),
+      ]);
       const durationMs = Date.now() - startedAt;
       const serialized = JSON.stringify(result);
+      const observedAt = new Date().toISOString();
 
       this.baseLogger.info("admin_report_tool_completed", {
         toolName: name,
@@ -446,7 +543,13 @@ class AdminReportAgent {
           periodLabel: extractPeriodLabel(result),
         },
         response: { ok: true, data: result },
-        evidence: { tool: name, arguments: args, ok: true, result },
+        evidence: {
+          tool: name,
+          arguments: args,
+          ok: true,
+          result,
+          observedAt,
+        },
       };
     } catch (error) {
       const durationMs = Date.now() - startedAt;
@@ -474,7 +577,13 @@ class AdminReportAgent {
           ok: false,
           error: `La consulta fallo: ${message}. Continua con la informacion disponible y advierte la limitacion.`,
         },
-        evidence: { tool: name, arguments: args, ok: false, error: message },
+        evidence: {
+          tool: name,
+          arguments: args,
+          ok: false,
+          error: message,
+          observedAt: new Date().toISOString(),
+        },
       };
     }
   }
@@ -514,7 +623,7 @@ class AdminReportAgent {
       todayDayKey: string;
       maxToolSteps: number;
     };
-  }): Promise<AdminReport> {
+  }): Promise<{ report: AdminReport; geminiDurationMs: number }> {
     const responseJsonSchema = buildAdminReportJsonSchema();
     const baseInstructions = buildReportInstructions(input.promptContext);
     const systemInstruction =
@@ -523,7 +632,9 @@ class AdminReportAgent {
         : baseInstructions;
     const prompt = this.buildEvidencePrompt(input);
 
+    let geminiDurationMs = 0;
     const attempt = async (extraInstruction?: string): Promise<AdminReport> => {
+      const generationStartedAt = Date.now();
       const raw = await geminiAdapter.generateStructured<unknown>({
         model: aiConfig.gemini.primaryModel,
         purpose: "main",
@@ -533,11 +644,15 @@ class AdminReportAgent {
         prompt,
         responseJsonSchema,
       });
+      geminiDurationMs += Date.now() - generationStartedAt;
 
-      const parsed = adminReportSchema.parse(raw);
+      // El schema enviado al proveedor es intencionalmente superficial. Antes
+      // del parse estricto se eliminan placeholders calculados por el modelo y
+      // se reponen solo desde tools deterministas del backend.
+      const candidate = prepareAdminReportForReconciliation(raw);
       // Las cifras de pronostico se toman del servicio de forecasting, nunca
       // de lo que haya escrito el modelo.
-      const reconciliation = reconcileForecastBlocks(parsed, input.evidence);
+      const reconciliation = reconcileForecastBlocks(candidate, input.evidence);
 
       if (reconciliation.reconciled > 0 || reconciliation.unsupported > 0) {
         this.baseLogger.info("admin_report_forecast_reconciled", {
@@ -546,7 +661,53 @@ class AdminReportAgent {
         });
       }
 
-      const sanitized = sanitizeAdminReport(reconciliation.report);
+      const decisionReconciled = reconcileDecisionBlocksAndSources(
+        reconciliation.report,
+        input.evidence,
+      );
+      const chartReconciliation = reconcileEvidenceCharts(
+        decisionReconciled,
+        input.question,
+        input.evidence,
+      );
+      if (
+        chartReconciliation.added > 0 ||
+        chartReconciliation.reconciled > 0 ||
+        chartReconciliation.discarded > 0
+      ) {
+        this.baseLogger.info("admin_report_charts_reconciled", {
+          added: chartReconciliation.added,
+          reconciled: chartReconciliation.reconciled,
+          discarded: chartReconciliation.discarded,
+        });
+      }
+      const reconciledBlocks = chartReconciliation.report.blocks.filter((block) => {
+        if (
+          block.type !== "forecast" &&
+          block.type !== "scenario" &&
+          block.type !== "diagram" &&
+          block.type !== "segment"
+        ) {
+          return true;
+        }
+        return adminReportBlockSchema.safeParse(block).success;
+      });
+      const strictCandidate = {
+        ...chartReconciliation.report,
+        blocks:
+          reconciledBlocks.length > 0
+            ? reconciledBlocks
+            : [
+                {
+                  type: "text" as const,
+                  kind: "contexto" as const,
+                  content:
+                    "La evidencia disponible no permite presentar los bloques calculados solicitados.",
+                },
+              ],
+      };
+      const parsed = adminReportSchema.parse(strictCandidate);
+      const sanitized = sanitizeAdminReport(parsed);
 
       if (sanitized.blocks.length !== reconciliation.report.blocks.length) {
         // Solo se registran tipos y nombres de campos, nunca los datos.
@@ -570,8 +731,19 @@ class AdminReportAgent {
     };
 
     try {
-      return await attempt();
+      return { report: await attempt(), geminiDurationMs };
     } catch (error) {
+      if (!isCorrectableStructuredOutputError(error)) {
+        this.baseLogger.error("admin_report_failed", {
+          provider: aiConfig.gemini.provider,
+          model: aiConfig.gemini.primaryModel,
+          success: false,
+          errorMessage:
+            error instanceof Error ? error.message : "Error desconocido",
+        });
+        throw toReportCompositionError(error);
+      }
+
       this.baseLogger.warn("admin_report_schema_retry", {
         provider: aiConfig.gemini.provider,
         model: aiConfig.gemini.primaryModel,
@@ -580,9 +752,12 @@ class AdminReportAgent {
       });
 
       try {
-        return await attempt(
-          "La respuesta anterior no cumplio el esquema JSON. Devuelve unicamente JSON valido segun el esquema, sin texto adicional.",
-        );
+        return {
+          report: await attempt(
+            "La respuesta anterior no cumplio el esquema JSON. Devuelve unicamente JSON valido segun el esquema, sin texto adicional.",
+          ),
+          geminiDurationMs,
+        };
       } catch (retryError) {
         this.baseLogger.error("admin_report_failed", {
           provider: aiConfig.gemini.provider,
@@ -594,12 +769,7 @@ class AdminReportAgent {
               : "Error desconocido",
         });
 
-        throw new AiRuntimeError(
-          AI_INTERNAL_ERROR_CODE,
-          "El asistente no pudo estructurar el informe. Intenta reformular la pregunta.",
-          502,
-          retryError,
-        );
+        throw toReportCompositionError(retryError);
       }
     }
   }

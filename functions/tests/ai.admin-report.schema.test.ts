@@ -9,8 +9,10 @@ import {
   ADMIN_REPORT_BLOCK_TYPES,
   adminReportSchema,
   buildAdminReportJsonSchema,
+  prepareAdminReportForReconciliation,
   sanitizeAdminReport,
 } from "../src/services/ai/analytics/admin-report.schema";
+import { reconcileDecisionBlocksAndSources } from "../src/services/ai/analytics/admin-report.decision-enrich";
 
 const baseReport = {
   summary: "Resumen de prueba",
@@ -125,6 +127,94 @@ describe("adminReportSchema", () => {
       adminReportSchema.safeParse({ ...baseReport, blocks: [] }).success,
     ).toBe(false);
   });
+
+  it("mantiene estricto el contrato de metricas de segmentos", () => {
+    const invalid = adminReportSchema.safeParse({
+      ...baseReport,
+      blocks: [
+        {
+          type: "segment",
+          title: "Productos",
+          segmentType: "product",
+          methodology: "Medianas dinamicas",
+          items: [
+            {
+              label: "Jersey",
+              segment: "STARS",
+              evidence: "high",
+              metrics: [
+                { label: "Ingresos", value: "1200", status: "observed" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(invalid.success).toBe(false);
+  });
+
+  it("reemplaza metricas de segmentos del proveedor con evidencia confiable", () => {
+    const candidate = prepareAdminReportForReconciliation({
+      ...baseReport,
+      blocks: [
+        {
+          type: "segment",
+          title: "Productos",
+          segmentType: "product",
+          methodology: "Texto no confiable",
+          items: [
+            {
+              label: "Jersey",
+              segment: "STARS",
+              evidence: "high",
+              metrics: [{ label: "Ingresos", value: 999999 }],
+            },
+          ],
+        },
+      ],
+    });
+    const reconciled = reconcileDecisionBlocksAndSources(candidate, [
+      {
+        tool: "segment_products",
+        ok: true,
+        observedAt: "2026-08-25T12:00:00.000Z",
+        result: {
+          available: true,
+          evidence: "high",
+          opportunityScore: "Score determinista 0-100",
+          products: [
+            {
+              name: "Jersey",
+              segment: "OPPORTUNITIES",
+              opportunityScore: 72,
+              views: 40,
+              conversion: 2.5,
+              revenue: 1200,
+              availableStock: 8,
+            },
+          ],
+        },
+      },
+    ]);
+    const parsed = adminReportSchema.parse(reconciled);
+    const segment = parsed.blocks[0];
+
+    expect(segment.type).toBe("segment");
+    if (segment.type !== "segment") throw new Error("Expected segment block");
+    expect(segment.methodology).toBe("Score determinista 0-100");
+    expect(segment.items[0]).toMatchObject({
+      label: "Jersey",
+      segment: "OPPORTUNITIES",
+      score: 72,
+    });
+    expect(segment.items[0].metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Ingresos", value: 1200 }),
+      ]),
+    );
+    expect(JSON.stringify(segment)).not.toContain("999999");
+  });
 });
 
 describe("sanitizeAdminReport", () => {
@@ -192,11 +282,45 @@ describe("buildAdminReportJsonSchema", () => {
 
   it("declara los bloques como variantes independientes", () => {
     const schema = buildAdminReportJsonSchema() as {
-      properties: { blocks: { items: { anyOf?: unknown[] } } };
+      properties: {
+        blocks: {
+          items: {
+            anyOf?: Array<{
+              properties?: { type?: { enum?: string[] } };
+            }>;
+          };
+        };
+      };
     };
 
     expect(schema.properties.blocks.items.anyOf).toHaveLength(
       ADMIN_REPORT_BLOCK_TYPES.length,
+    );
+    expect(
+      schema.properties.blocks.items.anyOf?.map(
+        (branch) => branch.properties?.type?.enum?.[0],
+      ),
+    ).toEqual(ADMIN_REPORT_BLOCK_TYPES);
+  });
+
+  it("mantiene una complejidad estable y omite restricciones irrelevantes para Gemini", () => {
+    const schema = buildAdminReportJsonSchema();
+    const maxDepth = (value: unknown): number => {
+      if (!value || typeof value !== "object") return 0;
+      return (
+        1 +
+        Math.max(
+          0,
+          ...Object.values(value as Record<string, unknown>).map(maxDepth),
+        )
+      );
+    };
+    const serialized = JSON.stringify(schema);
+
+    expect(serialized.length).toBeLessThan(8_000);
+    expect(maxDepth(schema)).toBeLessThanOrEqual(14);
+    expect(serialized).not.toMatch(
+      /minLength|maxLength|exclusiveMinimum|exclusiveMaximum/,
     );
   });
 });

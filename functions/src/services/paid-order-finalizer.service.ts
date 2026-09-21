@@ -37,7 +37,7 @@ const hasFedexTrackingLabel = (shipping: Orden["shipping"]): boolean => {
 
 export interface FinalizePaidOrderInput {
   orderId: string;
-  provider: "stripe" | "aplazo";
+  provider: "stripe" | "aplazo" | "fiera_points";
   sourceEventId?: string;
   paymentAttemptId?: string;
   requestedBy?: string;

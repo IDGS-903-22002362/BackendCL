@@ -14,6 +14,7 @@ export enum LoyaltyTransactionType {
   REDEMPTION_HOLD = "REDEMPTION_HOLD",
   REDEMPTION_CONFIRM = "REDEMPTION_CONFIRM",
   REDEMPTION_RELEASE = "REDEMPTION_RELEASE",
+  REDEMPTION_REFUND = "REDEMPTION_REFUND",
   REVERSAL = "REVERSAL",
   EXPIRATION = "EXPIRATION",
 }
@@ -49,6 +50,7 @@ export enum LoyaltyRedemptionStatus {
   CONFIRMED = "CONFIRMED",
   CANCELLED = "CANCELLED",
   EXPIRED = "EXPIRED",
+  REFUNDED = "REFUNDED",
 }
 
 /** OAuth scopes for external partner integrations */

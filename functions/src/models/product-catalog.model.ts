@@ -67,6 +67,9 @@ export interface CatalogProductCardDTO {
   stockFisico: number;
   disponible: boolean;
   destacado: boolean;
+  /** Resuelto por el backend; el cliente no debe inferirlo por nombre. */
+  personalizable: boolean;
+  personalizationFeeMxn: number;
 }
 
 export interface CatalogResponse {

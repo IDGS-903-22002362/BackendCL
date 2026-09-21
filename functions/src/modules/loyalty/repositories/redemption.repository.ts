@@ -9,7 +9,9 @@ import { LoyaltyRedemptionStatus } from "../models/loyalty.enums";
 import { LoyaltyRedemption } from "../models/loyalty.types";
 
 export class RedemptionRepository {
-  private collection = firestoreApp.collection(LOYALTY_COLLECTIONS.REDEMPTIONS);
+  private get collection() {
+    return firestoreApp.collection(LOYALTY_COLLECTIONS.REDEMPTIONS);
+  }
 
   async getById(redemptionId: string): Promise<LoyaltyRedemption | null> {
     const snap = await this.collection.doc(redemptionId).get();
@@ -23,13 +25,23 @@ export class RedemptionRepository {
       memberId: string;
       points: number;
       holdTransactionId: string;
+      redemptionId?: string;
+      externalReference?: string;
+      metadata?: Record<string, string | number | boolean>;
+      holdTtlMs?: number;
     },
   ): LoyaltyRedemption {
-    const ref = this.collection.doc();
+    const ref = input.redemptionId
+      ? this.collection.doc(input.redemptionId)
+      : this.collection.doc();
     const now = admin.firestore.Timestamp.now();
-    const expiresAt = Timestamp.fromMillis(
-      now.toMillis() + LOYALTY_DEFAULTS.REDEMPTION_HOLD_TTL_MS,
-    );
+    const holdTtlMs =
+      typeof input.holdTtlMs === "number" &&
+      Number.isFinite(input.holdTtlMs) &&
+      input.holdTtlMs > 0
+        ? Math.trunc(input.holdTtlMs)
+        : LOYALTY_DEFAULTS.REDEMPTION_HOLD_TTL_MS;
+    const expiresAt = Timestamp.fromMillis(now.toMillis() + holdTtlMs);
     const redemption: LoyaltyRedemption = {
       redemptionId: ref.id,
       memberId: input.memberId,
@@ -39,8 +51,12 @@ export class RedemptionRepository {
       expiresAt,
       createdAt: now,
       updatedAt: now,
+      ...(input.externalReference
+        ? { externalReference: input.externalReference }
+        : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
     };
-    tx.set(ref, redemption);
+    tx.create(ref, redemption);
     return redemption;
   }
 
@@ -48,15 +64,29 @@ export class RedemptionRepository {
     tx: Transaction,
     redemptionId: string,
     status: LoyaltyRedemptionStatus,
+    patch?: Partial<LoyaltyRedemption>,
   ): void {
     tx.set(
       this.collection.doc(redemptionId),
       {
         status,
+        ...(patch || {}),
         updatedAt: admin.firestore.Timestamp.now(),
       },
       { merge: true },
     );
+  }
+
+  async findByExternalReference(
+    externalReference: string,
+  ): Promise<LoyaltyRedemption | null> {
+    const snap = await this.collection
+      .where("externalReference", "==", externalReference)
+      .limit(1)
+      .get();
+    if (snap.empty) return null;
+    const doc = snap.docs[0];
+    return { ...(doc.data() as LoyaltyRedemption), redemptionId: doc.id };
   }
 
   async listExpiredPending(limit: number): Promise<LoyaltyRedemption[]> {

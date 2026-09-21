@@ -1,5 +1,6 @@
 // checkout attempt service
 import { Timestamp } from "firebase-admin/firestore";
+import { firestoreTienda } from "../../config/firebase";
 import {
   CheckoutAttempt,
   CheckoutAttemptStatus,
@@ -7,7 +8,12 @@ import {
   TERMINAL_CHECKOUT_ATTEMPT_STATUSES,
 } from "../../models/checkout-attempt.model";
 import { CrearOrdenDTO, MetodoPago } from "../../models/orden.model";
-import { CheckoutPricingSnapshot } from "../../models/checkout-pricing.model";
+import {
+  CheckoutPricingSnapshot,
+  FieraPointsQuote,
+  FieraPointsRequest,
+  PaymentComposition,
+} from "../../models/checkout-pricing.model";
 import { ApiError } from "../../utils/error-handler";
 import { mapCheckoutErrorToApiError } from "../../utils/checkout-error.util";
 import logger from "../../utils/logger";
@@ -22,6 +28,9 @@ import pagoService from "../pago.service";
 import paidOrderFinalizerService from "../paid-order-finalizer.service";
 import pickupOrderService from "../pickup-order.service";
 import type { ClientPrivacyMetadata } from "../../types/client-origin";
+import fieraPointsPaymentService, {
+  emptyPaymentComposition,
+} from "./fiera-points-payment.service";
 
 const checkoutLogger = logger.child({ component: "checkout-attempt-service" });
 
@@ -41,6 +50,7 @@ type CheckoutBody = {
   successUrl?: string;
   cancelUrl?: string;
   retryPayment?: boolean;
+  fieraPoints?: FieraPointsRequest;
 };
 
 const ACTIVE_ATTEMPT_STATUSES = new Set<CheckoutAttemptStatus>([
@@ -78,6 +88,7 @@ import {
 function computeCartSignature(
   orderDraft: Pick<CrearOrdenDTO, "items" | "fulfillmentMethod">,
   pricing: CheckoutPricingSnapshot,
+  fieraPoints?: FieraPointsRequest,
 ): string {
   const items = [...(orderDraft.items ?? [])]
     .map((item) =>
@@ -102,10 +113,43 @@ function computeCartSignature(
     `codigo=${pricing.codigoPromocion ?? ""}`,
     `envio=${roundMoney(pricing.shippingTotal)}`,
     `fulfillment=${orderDraft.fulfillmentMethod ?? ""}`,
+    `fieraMode=${fieraPoints?.mode ?? "NONE"}`,
+    `fieraPoints=${fieraPoints?.mode === "EXACT" ? fieraPoints.points ?? 0 : 0}`,
   ].join("||");
 }
 
 export class CheckoutAttemptService {
+  async quoteFieraPoints(
+    userId: string,
+    body: CheckoutBody,
+    clientContext?: ClientPrivacyMetadata,
+  ): Promise<FieraPointsQuote> {
+    const metodoPago =
+      body.metodoPago === MetodoPago.APLAZO
+        ? MetodoPago.APLAZO
+        : MetodoPago.TARJETA;
+
+    const { pricing } = await carritoService.buildCheckoutOrderDraft(userId, {
+      ...body,
+      metodoPago,
+      ...(clientContext?.clientOrigin
+        ? { clientOrigin: clientContext.clientOrigin }
+        : {}),
+      ...(typeof clientContext?.advertisingTrackingAllowed === "boolean"
+        ? {
+            advertisingTrackingAllowed:
+              clientContext.advertisingTrackingAllowed,
+          }
+        : {}),
+    } as Parameters<typeof carritoService.buildCheckoutOrderDraft>[1]);
+
+    return fieraPointsPaymentService.quoteForCheckout({
+      userId,
+      grossTotal: pricing.total,
+      request: body.fieraPoints,
+    });
+  }
+
   async startCheckout(
     userId: string,
     body: CheckoutBody,
@@ -149,7 +193,11 @@ export class CheckoutAttemptService {
           : {}),
       } as Parameters<typeof carritoService.buildCheckoutOrderDraft>[1]);
 
-    const currentSignature = computeCartSignature(orderDraft, pricing);
+    const currentSignature = computeCartSignature(
+      orderDraft,
+      pricing,
+      body.fieraPoints,
+    );
 
     // 1) Reuso por Idempotency-Key: solo si el carrito/pricing es idéntico.
     //    Si el cliente reusa la misma key con un carrito distinto, gana el
@@ -179,6 +227,17 @@ export class CheckoutAttemptService {
             cartId,
           });
           return rehydrated;
+        }
+        if (existingByKey.paymentComposition?.providerAmountMinor === 0) {
+          return this.createPaymentSessionForAttempt({
+            attempt: existingByKey,
+            userId,
+            cartId,
+            orderDraft: existingByKey.orderDraft,
+            pricing: existingByKey.pricingSnapshot,
+            body,
+            idempotencyKey,
+          });
         }
       } else {
         checkoutLogger.info("checkout_attempt_invalidate_idempotency", {
@@ -230,6 +289,17 @@ export class CheckoutAttemptService {
           });
           return rehydrated;
         }
+        if (activeAttempt.paymentComposition?.providerAmountMinor === 0) {
+          return this.createPaymentSessionForAttempt({
+            attempt: activeAttempt,
+            userId,
+            cartId,
+            orderDraft: activeAttempt.orderDraft,
+            pricing: activeAttempt.pricingSnapshot,
+            body,
+            idempotencyKey,
+          });
+        }
       } else {
         checkoutLogger.info("checkout_attempt_invalidate_active", {
           checkoutAttemptId: activeAttempt.id,
@@ -249,12 +319,14 @@ export class CheckoutAttemptService {
       }
     }
 
-    const attempt = await checkoutAttemptRepository.create({
+    let attempt = await checkoutAttemptRepository.create({
       userId,
       cartId,
       status: CheckoutAttemptStatus.CREATED,
       orderDraft,
       pricingSnapshot: pricing,
+      paymentComposition: emptyPaymentComposition(pricing.total),
+      grossTotal: pricing.total,
       total: pricing.total,
       currency: pricing.currency,
       metodoPago,
@@ -262,6 +334,45 @@ export class CheckoutAttemptService {
       idempotencyKey,
       cartSignature: currentSignature,
     });
+
+    try {
+      const paymentComposition = await fieraPointsPaymentService.reserveForCheckout({
+        checkoutAttemptId: attempt.id!,
+        userId,
+        grossTotal: pricing.total,
+        request: body.fieraPoints,
+      });
+      const composedOrderDraft: CrearOrdenDTO = {
+        ...orderDraft,
+        grossTotal: paymentComposition.grossTotalMinor / 100,
+        total: paymentComposition.providerAmountMinor / 100,
+        paymentComposition,
+        metodoPago:
+          paymentComposition.providerAmountMinor === 0 &&
+          paymentComposition.pointsUsed > 0
+            ? MetodoPago.FIERA_PUNTOS
+            : orderDraft.metodoPago,
+      };
+      attempt = await checkoutAttemptRepository.update(attempt.id!, {
+        orderDraft: composedOrderDraft,
+        paymentComposition,
+        grossTotal: paymentComposition.grossTotalMinor / 100,
+        total: paymentComposition.providerAmountMinor / 100,
+        metodoPago: composedOrderDraft.metodoPago,
+      });
+      orderDraft.total = composedOrderDraft.total;
+      orderDraft.grossTotal = composedOrderDraft.grossTotal;
+      orderDraft.paymentComposition = paymentComposition;
+      orderDraft.metodoPago = composedOrderDraft.metodoPago;
+    } catch (error) {
+      await checkoutAttemptRepository.update(attempt.id!, {
+        status: CheckoutAttemptStatus.FAILED,
+        failureCode: "fiera_points_reservation_failed",
+        failureMessage:
+          error instanceof Error ? error.message : "No se pudieron reservar los puntos",
+      });
+      throw error;
+    }
 
     checkoutLogger.info("checkout_attempt_created", {
       checkoutAttemptId: attempt.id,
@@ -311,6 +422,8 @@ export class CheckoutAttemptService {
     return this.createPaymentSessionForAttempt({
       attempt,
       ...input,
+      orderDraft: attempt.orderDraft,
+      pricing: attempt.pricingSnapshot,
     });
   }
 
@@ -325,8 +438,16 @@ export class CheckoutAttemptService {
   }): Promise<StartCheckoutAttemptResult> {
     const { attempt, userId, cartId, orderDraft, pricing, body, idempotencyKey } =
       input;
+    const paymentComposition =
+      attempt.paymentComposition ?? emptyPaymentComposition(attempt.total);
 
     try {
+      if (
+        attempt.orderId &&
+        paymentComposition.providerAmountMinor === 0
+      ) {
+        return await this.finalizePointsOnlyAttempt(attempt, "");
+      }
       const reservas = await inventoryReservationService.reserveForCheckoutAttempt({
         checkoutAttemptId: attempt.id!,
         items: orderDraft.items.map((item) => ({
@@ -342,6 +463,10 @@ export class CheckoutAttemptService {
         reservas.find((reserva) => reserva.id)?.id ??
         reservas[0]?.id ??
         "";
+
+      if (paymentComposition.providerAmountMinor === 0) {
+        return await this.finalizePointsOnlyAttempt(attempt, reservationId);
+      }
 
       const successUrl = body.successUrl?.trim();
       const cancelUrl = body.cancelUrl?.trim();
@@ -389,9 +514,11 @@ export class CheckoutAttemptService {
         url: session.url,
         sessionId: session.sessionId,
         pagoId: session.pagoId,
-        total: pricing.total,
+        total: attempt.total,
+        grossTotal: attempt.grossTotal,
         currency: pricing.currency,
         created: session.created,
+        paymentComposition,
       };
     } catch (error) {
       checkoutLogger.error("checkout_attempt_start_failed", {
@@ -399,15 +526,24 @@ export class CheckoutAttemptService {
         userId,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
-      const isStockConflict =
-        error instanceof InventoryStockUnavailableError ||
-        (error instanceof Error && /Stock insuficiente/i.test(error.message));
-      if (!isStockConflict) {
+      const freshAttempt = await checkoutAttemptRepository.getById(attempt.id!);
+      if (!freshAttempt?.orderId) {
         await this.releaseAttempt(attempt.id!, "Fallo al iniciar pago", {
           status: CheckoutAttemptStatus.FAILED,
-          failureCode: "payment_start_failed",
+          failureCode:
+            error instanceof InventoryStockUnavailableError ||
+            (error instanceof Error && /Stock insuficiente/i.test(error.message))
+              ? "stock_unavailable"
+              : "payment_start_failed",
           failureMessage:
             error instanceof Error ? error.message : "Error al iniciar pago",
+        });
+      } else {
+        checkoutLogger.error("checkout_attempt_requires_reconciliation", {
+          checkoutAttemptId: attempt.id,
+          orderId: freshAttempt.orderId,
+          redemptionStatus:
+            freshAttempt.paymentComposition?.redemptionStatus,
         });
       }
       mapCheckoutStartError(error);
@@ -423,7 +559,12 @@ export class CheckoutAttemptService {
     if (attempt.cartSignature) {
       return attempt.cartSignature;
     }
-    return computeCartSignature(attempt.orderDraft, attempt.pricingSnapshot);
+    return computeCartSignature(attempt.orderDraft, attempt.pricingSnapshot, {
+      mode: attempt.paymentComposition?.mode ?? "NONE",
+      ...(attempt.paymentComposition?.mode === "EXACT"
+        ? { points: attempt.paymentComposition.pointsRequested }
+        : {}),
+    });
   }
 
   private async tryRehydrateAttemptSession(
@@ -454,8 +595,11 @@ export class CheckoutAttemptService {
         sessionId: session.sessionId,
         pagoId: attempt.pagoId,
         total: attempt.total,
+        grossTotal: attempt.grossTotal ?? attempt.pricingSnapshot.total,
         currency: attempt.currency,
         created,
+        paymentComposition:
+          attempt.paymentComposition ?? emptyPaymentComposition(attempt.total),
       };
     } catch (error) {
       checkoutLogger.warn("checkout_attempt_rehydrate_failed", {
@@ -488,6 +632,8 @@ export class CheckoutAttemptService {
     total: number;
     currency: string;
     paymentStatus?: string;
+    grossTotal: number;
+    paymentComposition: PaymentComposition;
   }> {
     const attempt = await checkoutAttemptRepository.getById(attemptId);
     if (!attempt) {
@@ -509,8 +655,11 @@ export class CheckoutAttemptService {
       orderId: attempt.orderId,
       pagoId: attempt.pagoId,
       total: attempt.total,
+      grossTotal: attempt.grossTotal ?? attempt.pricingSnapshot.total,
       currency: attempt.currency,
       paymentStatus,
+      paymentComposition:
+        attempt.paymentComposition ?? emptyPaymentComposition(attempt.total),
     };
   }
 
@@ -527,7 +676,9 @@ export class CheckoutAttemptService {
     }
 
     if (attempt.orderId) {
+      await this.confirmAttemptRedemption(attempt);
       await paidOrderFinalizerService.applyPaidOrderStatePatch(attempt.orderId);
+      await pagoService.linkPaymentToOrder(input.pagoId, attempt.orderId);
       return attempt.orderId;
     }
 
@@ -540,6 +691,7 @@ export class CheckoutAttemptService {
         lock.attempt.orderId ||
         (await this.waitForAttemptOrderId(attempt.id!, 20_000));
       if (existingOrderId) {
+        await this.confirmAttemptRedemption(lock.attempt, existingOrderId);
         await paidOrderFinalizerService.applyPaidOrderStatePatch(existingOrderId);
         await pagoService.linkPaymentToOrder(input.pagoId, existingOrderId);
         return existingOrderId;
@@ -562,6 +714,13 @@ export class CheckoutAttemptService {
       attempt.id!,
       orden.id!,
     );
+
+    await checkoutAttemptRepository.update(attempt.id!, {
+      status: CheckoutAttemptStatus.PAID,
+      orderId: orden.id,
+    });
+
+    await this.confirmAttemptRedemption(attempt, orden.id!);
 
     await pagoService.linkPaymentToOrder(input.pagoId, orden.id!);
 
@@ -593,6 +752,144 @@ export class CheckoutAttemptService {
     });
 
     return orden.id!;
+  }
+
+  private async confirmAttemptRedemption(
+    attempt: CheckoutAttempt,
+    orderId = attempt.orderId,
+  ): Promise<PaymentComposition> {
+    const composition =
+      attempt.paymentComposition ?? emptyPaymentComposition(attempt.total);
+    if (!composition.redemptionId || composition.pointsUsed <= 0) {
+      return composition;
+    }
+
+    const request: FieraPointsRequest = {
+      mode: composition.mode,
+      ...(composition.mode === "EXACT"
+        ? { points: composition.pointsRequested }
+        : {}),
+    };
+
+    try {
+      const confirmed =
+        await fieraPointsPaymentService.confirmOrRereserveForCheckout({
+          composition,
+          userId: attempt.userId,
+          checkoutAttemptId: attempt.id!,
+          grossTotal: attempt.grossTotal ?? attempt.pricingSnapshot.total,
+          request,
+        });
+      await checkoutAttemptRepository.update(attempt.id!, {
+        paymentComposition: confirmed,
+        orderDraft: { ...attempt.orderDraft, paymentComposition: confirmed },
+        fieraPointsConfirmStatus: "COMPLETED",
+      });
+      if (orderId) {
+        await firestoreTienda.collection("ordenes").doc(orderId).set(
+          {
+            paymentComposition: confirmed,
+            fieraPointsConfirmStatus: "COMPLETED",
+            updatedAt: Timestamp.now(),
+          },
+          { merge: true },
+        );
+      }
+      return confirmed;
+    } catch (error) {
+      checkoutLogger.error("checkout_fiera_points_confirm_failed", {
+        checkoutAttemptId: attempt.id,
+        orderId,
+        redemptionId: composition.redemptionId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      const expired: PaymentComposition = {
+        ...composition,
+        redemptionStatus: "EXPIRED",
+      };
+      await checkoutAttemptRepository.update(attempt.id!, {
+        paymentComposition: expired,
+        orderDraft: { ...attempt.orderDraft, paymentComposition: expired },
+        fieraPointsConfirmStatus: "FAILED",
+        failureCode: "fiera_points_confirm_failed",
+        failureMessage:
+          error instanceof Error
+            ? error.message
+            : "No se pudieron confirmar los FieraPuntos reservados",
+      });
+      if (orderId) {
+        await firestoreTienda.collection("ordenes").doc(orderId).set(
+          {
+            paymentComposition: expired,
+            fieraPointsConfirmStatus: "FAILED",
+            updatedAt: Timestamp.now(),
+          },
+          { merge: true },
+        );
+      }
+      return expired;
+    }
+  }
+
+  private async finalizePointsOnlyAttempt(
+    attempt: CheckoutAttempt,
+    _reservationId: string,
+  ): Promise<StartCheckoutAttemptResult> {
+    let orderId = attempt.orderId;
+    if (!orderId) {
+      const hasAttemptReservations =
+        await inventoryReservationService.checkoutAttemptHasActiveReservations(
+          attempt.id!,
+        );
+      const order = await ordenService.createOrden(attempt.orderDraft, {
+        skipStockRevalidation: hasAttemptReservations,
+      });
+      orderId = order.id!;
+      await inventoryReservationService.migrateReservationsToOrder(
+        attempt.id!,
+        orderId,
+      );
+      await checkoutAttemptRepository.update(attempt.id!, {
+        status: CheckoutAttemptStatus.PAID,
+        orderId,
+      });
+    }
+
+    const confirmedComposition = await this.confirmAttemptRedemption(
+      attempt,
+      orderId,
+    );
+    await checkoutAttemptRepository.update(attempt.id!, {
+      status: CheckoutAttemptStatus.FINALIZED,
+      orderId,
+      finalizedAt: Timestamp.now(),
+      paymentComposition: confirmedComposition,
+    });
+
+    await pickupOrderService.finalizePaidPickupOrder({
+      orderId,
+      source: "fiera_points",
+      sourceEventId: `fiera-points:${attempt.id}`,
+      paymentAttemptId: attempt.id,
+    });
+    await paidOrderFinalizerService.finalizePaidOrder({
+      orderId,
+      provider: "fiera_points",
+      sourceEventId: `fiera-points:${attempt.id}`,
+      paymentAttemptId: attempt.id,
+      requestedBy: "checkout-fiera-points",
+      paymentConfirmed: true,
+    });
+
+    return {
+      attemptId: attempt.id!,
+      status: CheckoutAttemptStatus.FINALIZED,
+      total: 0,
+      grossTotal: attempt.grossTotal,
+      currency: attempt.currency,
+      created: true,
+      paymentComposition: confirmedComposition,
+    };
   }
 
   private async waitForAttemptOrderId(
@@ -767,6 +1064,20 @@ export class CheckoutAttemptService {
       return;
     }
 
+    const shouldReleasePoints =
+      attempt.paymentComposition?.redemptionStatus === "PENDING";
+    if (shouldReleasePoints) {
+      await fieraPointsPaymentService.releaseForCheckout(
+        attempt.paymentComposition,
+      );
+    }
+    const releasedComposition = shouldReleasePoints
+      ? {
+          ...attempt.paymentComposition,
+          redemptionStatus: "CANCELLED" as const,
+        }
+      : attempt.paymentComposition;
+
     const hasActiveReservations =
       await inventoryReservationService.checkoutAttemptHasActiveReservations(
         checkoutAttemptId,
@@ -781,6 +1092,11 @@ export class CheckoutAttemptService {
         motivo: `${motivo} (reparación de reservas huérfanas)`,
         usuarioId: attempt.userId,
       });
+      if (releasedComposition) {
+        await checkoutAttemptRepository.update(checkoutAttemptId, {
+          paymentComposition: releasedComposition,
+        });
+      }
       checkoutLogger.info("checkout_attempt_orphan_reservations_released", {
         checkoutAttemptId,
         motivo,
@@ -799,6 +1115,9 @@ export class CheckoutAttemptService {
       status: patch?.status ?? CheckoutAttemptStatus.CANCELED,
       failureCode: patch?.failureCode,
       failureMessage: patch?.failureMessage,
+      ...(releasedComposition
+        ? { paymentComposition: releasedComposition }
+        : {}),
     });
 
     checkoutLogger.info("checkout_attempt_released", {

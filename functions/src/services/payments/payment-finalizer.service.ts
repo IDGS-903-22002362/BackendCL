@@ -293,6 +293,58 @@ export class PaymentFinalizerService {
       }
     }
 
+    if (paymentAttempt.ordenId && nextStatus === PaymentStatus.REFUNDED) {
+      const orderRef = firestoreTienda
+        .collection(ORDENES_COLLECTION)
+        .doc(paymentAttempt.ordenId);
+      const orderSnap = await orderRef.get();
+      const order = orderSnap.data() as Orden | undefined;
+      const redemptionId = order?.paymentComposition?.redemptionId;
+      if (redemptionId && (order?.paymentComposition?.pointsUsed ?? 0) > 0) {
+        try {
+          const { default: fieraPointsPaymentService } = await import(
+            "../checkout/fiera-points-payment.service"
+          );
+          await fieraPointsPaymentService.restoreConfirmedRedemption({
+            redemptionId,
+            orderId: paymentAttempt.ordenId,
+          });
+          await orderRef.set(
+            {
+              paymentComposition: {
+                ...order!.paymentComposition,
+                redemptionStatus: "REFUNDED",
+              },
+              paymentMetadata: {
+                ...(order?.paymentMetadata || {}),
+                fieraPointsRefundRestoreStatus: "COMPLETED",
+                fieraPointsRefundRestoreIdempotencyKey: `refund:order:${paymentAttempt.ordenId}:fiera-points`,
+              },
+              updatedAt: Timestamp.now(),
+            },
+            { merge: true },
+          );
+        } catch (error) {
+          await orderRef.set(
+            {
+              paymentMetadata: {
+                ...(order?.paymentMetadata || {}),
+                fieraPointsRefundRestoreStatus: "FAILED",
+                fieraPointsRefundRestoreIdempotencyKey: `refund:order:${paymentAttempt.ordenId}:fiera-points`,
+              },
+              updatedAt: Timestamp.now(),
+            },
+            { merge: true },
+          );
+          paymentFinalizerLogger.error("fiera_points_refund_restore_failed", {
+            orderId: paymentAttempt.ordenId,
+            redemptionId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
     return this.paymentAttemptRepo.update(paymentAttempt.id, {
       refundState: refundResult.refundState,
       status: nextStatus,

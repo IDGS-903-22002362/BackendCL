@@ -1,4 +1,5 @@
 import { Timestamp } from "firebase-admin/firestore";
+import { createHash } from "crypto";
 import { firestoreApp } from "../../../config/app.firebase";
 import { TipoMovimientoPuntos } from "../../../models/usuario.model";
 import { LOYALTY_DEFAULTS, LOYALTY_COLLECTIONS } from "../constants/loyalty.constants";
@@ -13,6 +14,7 @@ import {
 import {
   AdjustmentInput,
   EarnTransactionInput,
+  LoyaltyActorContext,
   LoyaltyRedemption,
   LoyaltyTransaction,
   LoyaltyWallet,
@@ -25,7 +27,11 @@ import {
 } from "../repositories/idempotency.repository";
 import ledgerRepository from "../repositories/ledger.repository";
 import redemptionRepository from "../repositories/redemption.repository";
-import walletRepository from "../repositories/wallet.repository";
+import walletRepository, {
+  detectLegacyMirrorDrift,
+  reportLegacyMirrorDrift,
+  reportWalletLedgerMismatch,
+} from "../repositories/wallet.repository";
 import conversionRulesService from "./conversion-rules.service";
 import { requireLoyaltyWrites, loyaltyFeatureFlagsService } from "./loyalty-feature-flags.service";
 import pointsService from "../../../services/puntos.service";
@@ -92,6 +98,62 @@ export class LoyaltyEngineService {
       legacyTipo: TipoMovimientoPuntos.ACUMULACION,
       legacyOrigen: input.channel === LoyaltyChannel.ECOMMERCE ? "tienda" : "admin",
       requireCustomerRecipient: true,
+    });
+  }
+
+  /**
+   * Importa al ledger una acumulación que ya ocurrió en un sistema externo con
+   * una cantidad de puntos exacta y conocida (no recalculada desde el monto).
+   *
+   * Se usa para reparar acumulaciones del POS de concesiones que quedaron solo
+   * en el espejo legacy: el movimiento en `movimientos_puntos` ya existe, así
+   * que `legacySkip` evita duplicarlo, mientras el dual-write mantiene el
+   * espejo alineado con el wallet.
+   *
+   * Idempotente por `externalTransactionId`: reejecutarlo devuelve la
+   * transacción existente sin volver a acreditar puntos.
+   */
+  async importExternalEarn(input: {
+    memberId: string;
+    points: number;
+    externalTransactionId: string;
+    channel: LoyaltyChannel;
+    description: string;
+    actor: LoyaltyActorContext;
+    locationId?: string;
+    reasonCode?: string;
+    metadata?: Record<string, string | number | boolean>;
+    /** false cuando el movimiento legacy todavía no existe y hay que crearlo. */
+    legacyMovementExists: boolean;
+  }): Promise<LoyaltyTransaction> {
+    await requireLoyaltyWrites();
+    const points = Math.trunc(input.points);
+    if (!Number.isFinite(points) || points <= 0) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT");
+    }
+    if (points > LOYALTY_DEFAULTS.MAX_POINTS_PER_TRANSACTION) {
+      throw new LoyaltyProblemError(
+        "INVALID_AMOUNT",
+        "Puntos exceden el máximo por transacción",
+      );
+    }
+
+    return this.executeMutation({
+      memberId: input.memberId,
+      actor: input.actor,
+      points,
+      type: LoyaltyTransactionType.EARN,
+      channel: input.channel,
+      externalTransactionId: input.externalTransactionId,
+      idempotencyKey: input.externalTransactionId,
+      operation: "earn-transactions",
+      description: input.description,
+      reasonCode: input.reasonCode,
+      locationId: input.locationId,
+      metadata: input.metadata,
+      legacySkip: input.legacyMovementExists,
+      legacyTipo: TipoMovimientoPuntos.ACUMULACION,
+      legacyOrigen: "pos",
     });
   }
 
@@ -328,9 +390,22 @@ export class LoyaltyEngineService {
     redemption: LoyaltyRedemption;
     transaction: LoyaltyTransaction;
   }> {
+    await this.requireRedemptionsEnabled();
     if (input.points <= 0 || !Number.isInteger(input.points)) {
       throw new LoyaltyProblemError("INVALID_AMOUNT");
     }
+
+    const redemptionId = createHash("sha256")
+      .update(
+        [
+          "redemption",
+          input.memberId,
+          input.actor.actorId,
+          input.idempotencyKey,
+        ].join(":"),
+      )
+      .digest("hex")
+      .slice(0, 40);
 
     const holdTxn = await this.executeMutation({
       memberId: input.memberId,
@@ -343,17 +418,31 @@ export class LoyaltyEngineService {
       description: input.description ?? "Reserva de canje",
       heldDelta: input.points,
       availableDelta: -input.points,
-      legacyTipo: TipoMovimientoPuntos.CANJE,
-      legacyOrigen: "tienda",
+      // HOLD solo inmoviliza saldo. El espejo legacy registra CANJE al
+      // confirmar, nunca durante una reserva que todavía puede liberarse.
+      legacySkip: true,
+      metadata: input.metadata,
+      externalTransactionId: input.externalReference,
+      postLedgerInTx: (tx, entry) => {
+        redemptionRepository.createInTx(tx, {
+          redemptionId,
+          memberId: input.memberId,
+          points: input.points,
+          holdTransactionId: entry.transactionId,
+          externalReference: input.externalReference,
+          metadata: input.metadata,
+          holdTtlMs: input.holdTtlMs,
+        });
+      },
     });
 
-    const redemption = await firestoreApp.runTransaction(async (tx) => {
-      return redemptionRepository.createInTx(tx, {
-        memberId: input.memberId,
-        points: input.points,
-        holdTransactionId: holdTxn.transactionId,
-      });
-    });
+    const redemption = await redemptionRepository.getById(redemptionId);
+    if (!redemption) {
+      throw new LoyaltyProblemError(
+        "INTERNAL_ERROR",
+        "La reserva de puntos no quedó persistida",
+      );
+    }
 
     return { redemption, transaction: holdTxn };
   }
@@ -385,6 +474,7 @@ export class LoyaltyEngineService {
     actor: RedemptionInput["actor"],
     idempotencyKey: string,
   ): Promise<LoyaltyTransaction> {
+    await requireLoyaltyWrites();
     const replay = await this.findCachedMutation(
       `redemptions/${redemptionId}/confirm`,
       actor.actorId,
@@ -420,12 +510,30 @@ export class LoyaltyEngineService {
       availableDelta: 0,
       lifetimeEarnedDelta: 0,
       lifetimeRedeemedDelta: redemption.points,
-      legacySkip: true,
-      postLedgerInTx: (tx) => {
+      legacyTipo: TipoMovimientoPuntos.CANJE,
+      legacyOrigen: "tienda",
+      validateInTx: async (tx) => {
+        const current = await tx.get(
+          firestoreApp.collection(LOYALTY_COLLECTIONS.REDEMPTIONS).doc(redemptionId),
+        );
+        if (!current.exists) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+        const data = current.data() as LoyaltyRedemption;
+        if (data.memberId !== redemption.memberId) {
+          throw new LoyaltyProblemError("FORBIDDEN");
+        }
+        if (
+          data.status !== LoyaltyRedemptionStatus.PENDING ||
+          data.expiresAt.toMillis() < Date.now()
+        ) {
+          throw new LoyaltyProblemError("REDEMPTION_EXPIRED");
+        }
+      },
+      postLedgerInTx: (tx, entry) => {
         redemptionRepository.updateStatusInTx(
           tx,
           redemptionId,
           LoyaltyRedemptionStatus.CONFIRMED,
+          { confirmTransactionId: entry.transactionId },
         );
       },
     });
@@ -438,6 +546,7 @@ export class LoyaltyEngineService {
     actor: RedemptionInput["actor"],
     idempotencyKey: string,
   ): Promise<LoyaltyTransaction> {
+    await requireLoyaltyWrites();
     const replay = await this.findCachedMutation(
       `redemptions/${redemptionId}/cancel`,
       actor.actorId,
@@ -470,6 +579,23 @@ export class LoyaltyEngineService {
       availableDelta: redemption.points,
       lifetimeEarnedDelta: 0,
       legacySkip: true,
+      validateInTx: async (tx) => {
+        const current = await tx.get(
+          firestoreApp.collection(LOYALTY_COLLECTIONS.REDEMPTIONS).doc(redemptionId),
+        );
+        if (!current.exists) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+        const data = current.data() as LoyaltyRedemption;
+        if (data.memberId !== redemption.memberId) {
+          throw new LoyaltyProblemError("FORBIDDEN");
+        }
+        if (data.status !== LoyaltyRedemptionStatus.PENDING) {
+          throw new LoyaltyProblemError(
+            data.status === LoyaltyRedemptionStatus.CONFIRMED
+              ? "REDEMPTION_ALREADY_CONFIRMED"
+              : "REDEMPTION_EXPIRED",
+          );
+        }
+      },
       postLedgerInTx: (tx) => {
         redemptionRepository.updateStatusInTx(
           tx,
@@ -480,6 +606,69 @@ export class LoyaltyEngineService {
     });
 
     return releaseTxn;
+  }
+
+  /**
+   * Restaura un canje confirmado. La operación es idempotente y deja una
+   * huella explícita en redemption + ledger; se usa para refunds cash-first.
+   */
+  async refundConfirmedRedemption(
+    redemptionId: string,
+    actor: RedemptionInput["actor"],
+    idempotencyKey: string,
+    description = "Restauración de FieraPuntos por reembolso",
+  ): Promise<LoyaltyTransaction> {
+    await requireLoyaltyWrites();
+    const replay = await this.findCachedMutation(
+      `redemptions/${redemptionId}/refund`,
+      actor.actorId,
+      idempotencyKey,
+    );
+    if (replay) return replay;
+
+    const redemption = await redemptionRepository.getById(redemptionId);
+    if (!redemption) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+    if (redemption.status === LoyaltyRedemptionStatus.REFUNDED) {
+      throw new LoyaltyProblemError("TRANSACTION_NOT_REVERSIBLE");
+    }
+    if (redemption.status !== LoyaltyRedemptionStatus.CONFIRMED) {
+      throw new LoyaltyProblemError("TRANSACTION_NOT_REVERSIBLE");
+    }
+
+    return this.executeMutation({
+      memberId: redemption.memberId,
+      actor,
+      points: redemption.points,
+      type: LoyaltyTransactionType.REDEMPTION_REFUND,
+      channel: LoyaltyChannel.SYSTEM,
+      idempotencyKey,
+      operation: `redemptions/${redemptionId}/refund`,
+      description,
+      availableDelta: redemption.points,
+      heldDelta: 0,
+      lifetimeEarnedDelta: 0,
+      lifetimeRedeemedDelta: -redemption.points,
+      legacyTipo: TipoMovimientoPuntos.DEVOLUCION,
+      legacyOrigen: "tienda",
+      validateInTx: async (tx) => {
+        const current = await tx.get(
+          firestoreApp.collection(LOYALTY_COLLECTIONS.REDEMPTIONS).doc(redemptionId),
+        );
+        if (!current.exists) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+        const data = current.data() as LoyaltyRedemption;
+        if (data.status !== LoyaltyRedemptionStatus.CONFIRMED) {
+          throw new LoyaltyProblemError("TRANSACTION_NOT_REVERSIBLE");
+        }
+      },
+      postLedgerInTx: (tx, entry) => {
+        redemptionRepository.updateStatusInTx(
+          tx,
+          redemptionId,
+          LoyaltyRedemptionStatus.REFUNDED,
+          { refundTransactionId: entry.transactionId },
+        );
+      },
+    });
   }
 
   async reverseTransaction(input: ReversalInput): Promise<LoyaltyTransaction> {
@@ -574,6 +763,7 @@ export class LoyaltyEngineService {
       tx: FirebaseFirestore.Transaction,
       entry: LoyaltyTransaction,
     ) => void;
+    validateInTx?: (tx: FirebaseFirestore.Transaction) => Promise<void>;
   }): Promise<LoyaltyTransaction> {
     const idempotencyKeyHash = conversionRulesService.hashIdempotencyKey(
       params.idempotencyKey,
@@ -704,11 +894,23 @@ export class LoyaltyEngineService {
         };
       } else {
         wallet = walletSnap.data() as LoyaltyWallet;
+        // El saldo base siempre sale del wallet respaldado por el ledger. Un
+        // espejo desincronizado se reporta, nunca se adopta como saldo.
+        reportLegacyMirrorDrift(
+          detectLegacyMirrorDrift(wallet, userSnap.data()?.puntosActuales),
+          { source: `executeMutation:${params.operation}` },
+        );
+        reportWalletLedgerMismatch(wallet, {
+          source: `executeMutation:${params.operation}`,
+        });
       }
 
       const availableDelta =
         params.availableDelta ?? params.points;
       const balanceBefore = wallet.availablePoints;
+      if (params.validateInTx) {
+        await params.validateInTx(tx);
+      }
       const updatedWallet = walletRepository.applyWalletDeltaInTx(
         tx,
         params.memberId,
@@ -744,6 +946,13 @@ export class LoyaltyEngineService {
           ? { ...params.metadata, customerNameSnapshot }
           : params.metadata,
       });
+
+      walletRepository.writeLedgerMirrorInTx(
+        tx,
+        params.memberId,
+        updatedWallet.availablePoints,
+        entry.transactionId,
+      );
 
       walletRepository.dualWriteLegacyBalanceInTx(
         tx,
@@ -814,6 +1023,17 @@ export class LoyaltyEngineService {
     });
 
     return result;
+  }
+
+  private async requireRedemptionsEnabled(): Promise<void> {
+    await requireLoyaltyWrites();
+    const flags = await loyaltyFeatureFlagsService.getFlags();
+    if (!flags.loyaltyRedemptionsEnabled) {
+      throw new LoyaltyProblemError(
+        "SERVICE_UNAVAILABLE",
+        "Los canjes de FieraPuntos están temporalmente deshabilitados",
+      );
+    }
   }
 
   private writeLegacyMovementInTx(

@@ -471,7 +471,7 @@ async function seedConfiguracion() {
   const configPuntos = {
     puntosPorPesoTienda: 1, // 1 punto por cada $10 pesos
     puntosPorPesoComedor: 2, // 2 puntos por cada $10 pesos en comedor
-    valorPuntoEnPesos: 1, // 1 punto = $1 peso
+    valorPuntoEnPesos: 0.1, // 1 FieraPunto = $0.10 MXN (10 centavos)
     puntosMinimoCanje: 100, // Mínimo 100 puntos para canjear
     diasExpiracionPuntos: 365, // Los puntos expiran en 1 año
     activo: true,

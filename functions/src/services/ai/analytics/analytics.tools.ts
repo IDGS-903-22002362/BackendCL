@@ -37,6 +37,7 @@ import {
   resolveFromInput,
 } from "./analytics.tool-kit";
 import { BEHAVIOR_TOOLS } from "./behavior.tools";
+import { DECISION_INTELLIGENCE_TOOLS } from "./decision-intelligence.tools";
 import {
   ANALYTICS_PERIOD_KEYS,
   describePeriodForModel,
@@ -653,6 +654,7 @@ export const SALES_TOOLS: AnalyticsTool[] = [
 export const ANALYTICS_TOOLS: AnalyticsTool[] = [
   ...SALES_TOOLS,
   ...BEHAVIOR_TOOLS,
+  ...DECISION_INTELLIGENCE_TOOLS,
 ];
 
 export const ANALYTICS_TOOL_MAP = new Map(

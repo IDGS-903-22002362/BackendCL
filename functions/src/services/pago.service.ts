@@ -1489,7 +1489,8 @@ async createStripeCheckoutSession(
   ): Promise<CreateStripeCheckoutSessionResult> {
     const stripe = getStripeClient();
     const currency = getStripeCurrency();
-    const amount = Math.round(input.pricing.total * 100);
+    const composition = input.orderDraft.paymentComposition;
+    const amount = composition?.providerAmountMinor ?? Math.round(input.pricing.total * 100);
 
     if (amount <= 0) {
       throw new ApiError(409, "El total del checkout es inválido para Stripe");
@@ -1543,6 +1544,12 @@ async createStripeCheckoutSession(
       pickupLocationId: input.orderDraft.pickupLocationId || "",
       shippingTotal: String(input.pricing.shippingTotal || 0),
       discountTotal: String(input.pricing.discountTotal || 0),
+      grossTotalMinor: String(
+        composition?.grossTotalMinor ?? Math.round(input.pricing.total * 100),
+      ),
+      pointsUsed: String(composition?.pointsUsed ?? 0),
+      pointsDiscountMinor: String(composition?.pointsDiscountMinor ?? 0),
+      redemptionId: composition?.redemptionId || "",
     };
 
     const pagoRef = await firestoreTienda.collection(COLECCION_PAGOS).add({
@@ -1551,7 +1558,7 @@ async createStripeCheckoutSession(
       userId: input.userId,
       provider: ProveedorPago.STRIPE,
       metodoPago: MetodoPago.TARJETA,
-      monto: input.pricing.total,
+      monto: amount / 100,
       amountMinor: amount,
       currency,
       estado: EstadoPago.PROCESANDO,
@@ -1601,6 +1608,10 @@ async createStripeCheckoutSession(
         pickupLocationId: paymentMetadata.pickupLocationId,
         shippingTotal: paymentMetadata.shippingTotal,
         discountTotal: paymentMetadata.discountTotal,
+        grossTotalMinor: paymentMetadata.grossTotalMinor,
+        pointsUsed: paymentMetadata.pointsUsed,
+        pointsDiscountMinor: paymentMetadata.pointsDiscountMinor,
+        redemptionId: paymentMetadata.redemptionId,
         reservationId: input.reservationId || "",
         paymentAttemptId:
           input.paymentAttemptId || input.checkoutAttemptId,
@@ -1615,6 +1626,10 @@ async createStripeCheckoutSession(
           pickupLocationId: paymentMetadata.pickupLocationId,
           shippingTotal: paymentMetadata.shippingTotal,
           discountTotal: paymentMetadata.discountTotal,
+          grossTotalMinor: paymentMetadata.grossTotalMinor,
+          pointsUsed: paymentMetadata.pointsUsed,
+          pointsDiscountMinor: paymentMetadata.pointsDiscountMinor,
+          redemptionId: paymentMetadata.redemptionId,
           reservationId: input.reservationId || "",
           paymentAttemptId:
             input.paymentAttemptId || input.checkoutAttemptId,
@@ -2172,6 +2187,62 @@ async createStripeCheckoutSession(
       createdBy: requestedByUid,
       createdAt: admin.firestore.Timestamp.now(),
     });
+
+    const originalOrder = ordenGuardDoc.data() as Orden;
+    const isFullCashRefund =
+      refundAmountInCents >= Math.round(Number(pago.monto) * 100);
+    const redemptionId = originalOrder.paymentComposition?.redemptionId;
+    if (
+      isFullCashRefund &&
+      redemptionId &&
+      (originalOrder.paymentComposition?.pointsUsed ?? 0) > 0
+    ) {
+      try {
+        const { default: fieraPointsPaymentService } = await import(
+          "./checkout/fiera-points-payment.service"
+        );
+        await fieraPointsPaymentService.restoreConfirmedRedemption({
+          redemptionId,
+          orderId: pago.ordenId,
+        });
+        await ordenRef.set(
+          {
+            paymentComposition: {
+              ...originalOrder.paymentComposition,
+              redemptionStatus: "REFUNDED",
+            },
+            paymentMetadata: {
+              ...(originalOrder.paymentMetadata || {}),
+              fieraPointsRefundRestoreStatus: "COMPLETED",
+              fieraPointsRefundRestoreIdempotencyKey: `refund:order:${pago.ordenId}:fiera-points`,
+            },
+            updatedAt: admin.firestore.Timestamp.now(),
+          },
+          { merge: true },
+        );
+      } catch (error) {
+        // El reembolso cash ya fue confirmado por Stripe: no se reintenta el
+        // cargo. Persistimos el estado compensable para reparación idempotente.
+        await ordenRef.set(
+          {
+            paymentMetadata: {
+              ...(originalOrder.paymentMetadata || {}),
+              fieraPointsRefundRestoreStatus: "FAILED",
+              fieraPointsRefundRestoreIdempotencyKey: `refund:order:${pago.ordenId}:fiera-points`,
+              fieraPointsRefundRestoreError:
+                error instanceof Error ? error.message.slice(0, 300) : "unknown",
+            },
+            updatedAt: admin.firestore.Timestamp.now(),
+          },
+          { merge: true },
+        );
+        console.error("fiera_points_refund_restore_failed", {
+          orderId: pago.ordenId,
+          redemptionId,
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     return {
       pagoId,

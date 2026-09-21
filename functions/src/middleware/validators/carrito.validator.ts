@@ -103,6 +103,33 @@ const checkoutShippingSelectionSchema = z
   })
   .strict();
 
+export const fieraPointsRequestSchema = z
+  .object({
+    mode: z.enum(["NONE", "EXACT", "MAX"]),
+    points: z
+      .number({ invalid_type_error: "Los FieraPuntos deben ser un número" })
+      .int("Los FieraPuntos deben ser enteros")
+      .positive("Los FieraPuntos deben ser mayores a cero")
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.mode === "EXACT" && value.points === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points"],
+        message: "Indica cuántos FieraPuntos deseas usar",
+      });
+    }
+    if (value.mode !== "EXACT" && value.points !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["points"],
+        message: "points solo se permite cuando mode es EXACT",
+      });
+    }
+  });
+
 /**
  * Schema para agregar un item al carrito
  * POST /api/carrito/items
@@ -256,6 +283,8 @@ const checkoutCarritoBaseObject = z
       .trim()
       .max(1000, "Las notas no pueden exceder 1000 caracteres")
       .optional(),
+
+    fieraPoints: fieraPointsRequestSchema.optional(),
   })
   .strict();
 
@@ -342,6 +371,12 @@ export const startCheckoutAttemptSchema = checkoutCarritoBaseObject
   })
   .strict()
   .superRefine(checkoutCarritoRefinement);
+
+/**
+ * Schema para cotizar FieraPuntos sin reservar saldo.
+ * POST /api/checkout/fiera-points/quote
+ */
+export const quoteFieraPointsSchema = checkoutCarritoSchema;
 
 export const createCartFedexQuoteSchema = z
   .object({

@@ -2,6 +2,59 @@ export type CheckoutShippingMethod = "PICKUP" | "FEDEX" | "MANUAL";
 
 export type CheckoutPaymentProvider = "STRIPE" | "APLAZO";
 
+export type FieraPointsMode = "NONE" | "EXACT" | "MAX";
+
+export type FieraPointsRequest = {
+  mode: FieraPointsMode;
+  points?: number;
+};
+
+export type FieraPointsRedemptionStatus =
+  | "NOT_REQUESTED"
+  | "PENDING"
+  | "CONFIRMED"
+  | "CANCELLED"
+  | "EXPIRED"
+  | "REFUNDED";
+
+/**
+ * Snapshot monetario calculado exclusivamente por backend. Los importes son
+ * minor units (centavos) para no perder precisión entre Stripe y Firestore.
+ */
+export type PaymentComposition = {
+  mode: FieraPointsMode;
+  grossTotalMinor: number;
+  providerAmountMinor: number;
+  pointsRequested: number;
+  pointsUsed: number;
+  pointValueMinor: number;
+  pointsDiscountMinor: number;
+  minimumRedemptionPoints: number;
+  redemptionId?: string;
+  redemptionStatus: FieraPointsRedemptionStatus;
+};
+
+export type FieraPointsQuoteReason =
+  | "NONE"
+  | "OK"
+  | "MIN_NOT_MET"
+  | "DISABLED"
+  | "INSUFFICIENT"
+  | "EXCEEDS_TOTAL"
+  | "INVALID_AMOUNT"
+  | "INVALID_CONFIG";
+
+export type FieraPointsQuote = {
+  canRedeem: boolean;
+  reason: FieraPointsQuoteReason;
+  availablePoints: number;
+  pointValueMinor: number;
+  minimumRedemptionPoints: number;
+  grossTotal: number;
+  providerAmount: number;
+  paymentComposition: PaymentComposition;
+};
+
 export type CheckoutAddressValidationStatus =
   | "VALIDATED"
   | "SUGGESTED"

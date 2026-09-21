@@ -47,6 +47,10 @@ import {
 import { ofertasService } from "./ofertas.service";
 import { seleccionarMejorOferta } from "../utils/ofertas-pricing.util";
 import { isFirestoreMissingIndexError } from "../utils/firebase-error.util";
+import {
+  isProductPersonalizable,
+  resolvePersonalizationFeeMxn,
+} from "../utils/product-personalization.util";
 import type { Oferta } from "../models/ofertas.model";
 
 /**
@@ -519,6 +523,22 @@ export class ProductService {
         ? { shipping: data.shipping }
         : {}),
       activo: data.activo,
+      // Se expone el valor ya resuelto para que el cliente no tenga que inferir
+      // la personalización por nombre y termine ofreciendo algo que el carrito rechaza.
+      personalizable: isProductPersonalizable({
+        personalizable:
+          typeof data.personalizable === "boolean"
+            ? data.personalizable
+            : undefined,
+        descripcion: data.descripcion,
+        clave: data.clave,
+      } as Producto),
+      personalizationFeeMxn: resolvePersonalizationFeeMxn({
+        personalizationFeeMxn:
+          typeof data.personalizationFeeMxn === "number"
+            ? data.personalizationFeeMxn
+            : undefined,
+      } as Producto),
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     } as Producto;
@@ -1151,6 +1171,8 @@ export class ProductService {
       stockFisico,
       disponible,
       destacado: product.destacado === true,
+      personalizable: isProductPersonalizable(product),
+      personalizationFeeMxn: resolvePersonalizationFeeMxn(product),
     };
   }
 

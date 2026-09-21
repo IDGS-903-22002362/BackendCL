@@ -666,6 +666,28 @@ console.log(
       const totalCalculado = roundCurrency(
   subtotalCalculado + impuestosCalculados + costoEnvioCalculado,
 );
+      const grossTotalMinor = Math.round(totalCalculado * 100);
+      const paymentComposition = data.paymentComposition;
+      if (paymentComposition) {
+        const compositionIsConsistent =
+          paymentComposition.grossTotalMinor === grossTotalMinor &&
+          paymentComposition.providerAmountMinor >= 0 &&
+          paymentComposition.pointsDiscountMinor >= 0 &&
+          paymentComposition.providerAmountMinor +
+              paymentComposition.pointsDiscountMinor ===
+            grossTotalMinor &&
+          paymentComposition.pointsUsed >= 0 &&
+          paymentComposition.pointsUsed * paymentComposition.pointValueMinor ===
+            paymentComposition.pointsDiscountMinor;
+        if (!compositionIsConsistent) {
+          throw new Error(
+            "La composición de pago no coincide con el total recalculado por backend",
+          );
+        }
+      }
+      const providerTotal = paymentComposition
+        ? roundCurrency(paymentComposition.providerAmountMinor / 100)
+        : totalCalculado;
       const pricingSnapshot = data.pricingSnapshot
         ? {
             ...data.pricingSnapshot,
@@ -690,7 +712,11 @@ console.log(
         items: itemsValidados,
         subtotal: subtotalCalculado, // Calculado por servidor
         impuestos: impuestosCalculados, // Calculado por servidor
-        total: totalCalculado, // Calculado por servidor
+        // Compatibilidad: `total` es el monto efectivamente cobrado al
+        // proveedor. `grossTotal` conserva el total de mercancía + envío.
+        total: providerTotal,
+        grossTotal: totalCalculado,
+        ...(paymentComposition ? { paymentComposition } : {}),
         estado: EstadoOrden.PENDIENTE, // Siempre PENDIENTE al crear
         ...(direccionEnvio ? { direccionEnvio } : {}),
         metodoPago: data.metodoPago,
@@ -1278,6 +1304,8 @@ subtotalFinal: subtotalCalculado,
           subtotalFinal: data.subtotalFinal,
           shippingTotal: data.shippingTotal,
           currency: data.currency,
+          grossTotal: data.grossTotal,
+          paymentComposition: data.paymentComposition,
           shippingHistory: data.shippingHistory,
           updatedByAdminId: data.updatedByAdminId,
           notas: data.notas,
@@ -1413,6 +1441,8 @@ subtotalFinal: subtotalCalculado,
         subtotalFinal: data.subtotalFinal,
         shippingTotal: data.shippingTotal,
         currency: data.currency,
+        grossTotal: data.grossTotal,
+        paymentComposition: data.paymentComposition,
         shippingHistory: data.shippingHistory,
         updatedByAdminId: data.updatedByAdminId,
         notas: data.notas,
@@ -1855,6 +1885,8 @@ subtotalFinal: subtotalCalculado,
           subtotalFinal: data.subtotalFinal,
           shippingTotal: data.shippingTotal,
           currency: data.currency,
+          grossTotal: data.grossTotal,
+          paymentComposition: data.paymentComposition,
           shippingHistory: data.shippingHistory,
           updatedByAdminId: data.updatedByAdminId,
           notas: data.notas,

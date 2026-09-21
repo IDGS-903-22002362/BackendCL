@@ -70,7 +70,7 @@ export class PickupOrderService {
 
   async finalizePaidPickupOrder(input: {
     orderId: string;
-    source: "stripe" | "aplazo";
+    source: "stripe" | "aplazo" | "fiera_points";
     sourceEventId?: string;
     paymentAttemptId?: string;
   }): Promise<{ pickupCode?: string; generated: boolean }> {

@@ -6,7 +6,9 @@ import { RolUsuario } from "../../../models/usuario.model";
 import { assignPointsBySaleSchema, assignUserPointsSchema } from "../../../middleware/validators/user-points.validator";
 import LoyaltyProblemError from "../errors/loyalty-problem.error";
 import { LoyaltyChannel } from "../models/loyalty.enums";
+import { externalTxnRepository } from "../repositories/idempotency.repository";
 import ledgerRepository from "../repositories/ledger.repository";
+import conversionRulesService from "../services/conversion-rules.service";
 import loyaltyEngineService from "../services/loyalty-engine.service";
 import { buildActorContext } from "../services/loyalty-auth.service";
 import { requireLegacyAdapters } from "../services/loyalty-feature-flags.service";
@@ -190,8 +192,23 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
       req.user!.sucursalId ?? req.user!.concesionId ?? actor.actorId,
     ).trim();
     const locationScope = rawLocationScope.slice(0, 120) || actor.actorId;
+    // Si el origen manda su propia referencia (`POS:<ventaId>`), esa manda: es
+    // estable entre reintentos y no depende del empleado ni de la sucursal que
+    // reprocese la venta. Sin ella se conserva la clave derivada histórica.
     const externalTransactionId =
+      body.externalReference ??
       `staff-sale:${saleNamespacePart(locationScope)}:${saleNamespacePart(id)}:${body.folioVenta}`;
+    // Consultado antes de mutar para poder responder si la venta ya estaba
+    // acreditada; el motor es idempotente y devolvería la misma transacción sin
+    // distinguir un reintento de una acumulación nueva.
+    const alreadyProcessed = Boolean(
+      await externalTxnRepository.get(
+        conversionRulesService.buildExternalTxnKey(
+          LoyaltyChannel.STORE,
+          externalTransactionId,
+        ),
+      ),
+    );
     const txn = await loyaltyEngineService.earnFromSale({
       memberId: id,
       externalTransactionId,
@@ -209,7 +226,9 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
     });
     res.status(200).json({
       success: true,
-      message: "Puntos asignados exitosamente por monto de venta",
+      message: alreadyProcessed
+        ? "La venta ya tenía puntos acreditados"
+        : "Puntos asignados exitosamente por monto de venta",
       data: {
         id,
         montoVenta: body.dinero,
@@ -218,7 +237,10 @@ export async function legacyAssignPointsBySale(req: Request, res: Response) {
         descripcion: body.descripcion,
         folioVenta: body.folioVenta,
         externalTransactionId: txn.externalTransactionId,
+        transactionId: txn.transactionId,
         origenId: actor.actorId,
+        alreadyProcessed,
+        status: alreadyProcessed ? "ALREADY_PROCESSED" : "CREDITED",
       },
     });
   } catch (error) {

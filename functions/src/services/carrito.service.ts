@@ -538,6 +538,7 @@ export class CarritoService {
           error.message.includes("Stock insuficiente") ||
           error.message.includes("talla") ||
           error.message.includes("cantidad máxima") ||
+          error.message.includes("personalización") ||
           error.message.includes("no encontrado")
         ) {
           throw error;

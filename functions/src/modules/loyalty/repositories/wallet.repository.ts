@@ -1,4 +1,5 @@
 ﻿import { FieldValue, Transaction } from "firebase-admin/firestore";
+import { logger } from "firebase-functions";
 import { firestoreApp } from "../../../config/app.firebase";
 import { admin } from "../../../config/firebase.admin";
 import { UsuarioApp } from "../../../models/usuario.model";
@@ -9,8 +10,92 @@ import conversionRulesService from "../services/conversion-rules.service";
 
 const USUARIOS_COLLECTION = "usuariosApp";
 
+export interface LegacyMirrorDrift {
+  memberId: string;
+  walletAvailablePoints: number;
+  legacyAvailablePoints: number;
+  /** Positivo: el espejo va adelantado. Negativo: el espejo va atrasado. */
+  drift: number;
+}
+
+/**
+ * `usuariosApp.puntosActuales` es solo un espejo: el motor lo escribe en la
+ * misma transacción que el wallet, así que cualquier diferencia significa que
+ * alguien escribió un saldo absoluto sin registrar la transacción en el ledger.
+ *
+ * Devuelve el desfase para poder alertarlo. NO se corrige adoptando el número
+ * del espejo: un `max(espejo, wallet)` devolvería puntos legítimamente
+ * canjeados cuando el espejo queda alto por un fallo de escritura. El saldo
+ * solo puede cambiar creando transacciones reales en el ledger.
+ */
+export function detectLegacyMirrorDrift(
+  wallet: LoyaltyWallet,
+  legacyBalance: unknown,
+): LegacyMirrorDrift | null {
+  if (legacyBalance === undefined || legacyBalance === null) {
+    return null;
+  }
+  const legacyAvailable = Math.trunc(Number(legacyBalance));
+  if (!Number.isFinite(legacyAvailable)) {
+    return null;
+  }
+  const drift = legacyAvailable - wallet.availablePoints;
+  if (drift === 0) {
+    return null;
+  }
+  return {
+    memberId: wallet.memberId,
+    walletAvailablePoints: wallet.availablePoints,
+    legacyAvailablePoints: legacyAvailable,
+    drift,
+  };
+}
+
+/**
+ * Alerta estructurada de desincronización. `unledgeredCredit` marca el caso
+ * grave: puntos visibles para el socio que nunca entraron al ledger (típico del
+ * fallback directo del POS). Se resuelve importando esas transacciones, no
+ * tocando el saldo.
+ */
+export function reportLegacyMirrorDrift(
+  drift: LegacyMirrorDrift | null,
+  context: { source: string },
+): void {
+  if (!drift) return;
+  logger.error("loyalty_legacy_mirror_drift", {
+    ...drift,
+    source: context.source,
+    unledgeredCredit: drift.drift > 0,
+  });
+}
+
+/**
+ * Detecta escrituras al wallet hechas por fuera del motor comparando el saldo
+ * materializado con el `balanceAfter` de la última transacción del ledger.
+ */
+export function reportWalletLedgerMismatch(
+  wallet: LoyaltyWallet,
+  context: { source: string },
+): void {
+  if (typeof wallet.ledgerBalanceAfter !== "number") {
+    return;
+  }
+  if (wallet.ledgerBalanceAfter === wallet.availablePoints) {
+    return;
+  }
+  logger.error("loyalty_wallet_ledger_mismatch", {
+    memberId: wallet.memberId,
+    availablePoints: wallet.availablePoints,
+    ledgerBalanceAfter: wallet.ledgerBalanceAfter,
+    lastTransactionId: wallet.lastTransactionId,
+    source: context.source,
+  });
+}
+
 export class WalletRepository {
-  private collection = firestoreApp.collection(LOYALTY_COLLECTIONS.WALLETS);
+  private get collection() {
+    return firestoreApp.collection(LOYALTY_COLLECTIONS.WALLETS);
+  }
 
   async ensureExpirationProcessed(memberId: string): Promise<void> {
     const wallet = await this.getWalletDoc(memberId);
@@ -76,6 +161,12 @@ export class WalletRepository {
     }
 
     const wallet = walletSnap.data() as LoyaltyWallet;
+    reportLegacyMirrorDrift(
+      detectLegacyMirrorDrift(wallet, userData.puntosActuales),
+      { source: "getOrSyncWallet" },
+    );
+    reportWalletLedgerMismatch(wallet, { source: "getOrSyncWallet" });
+
     const level = conversionRulesService.calculateLevel(wallet.availablePoints);
     if (wallet.level !== level) {
       const updated: LoyaltyWallet = {
@@ -121,6 +212,23 @@ export class WalletRepository {
     };
     tx.set(this.collection.doc(memberId), updated, { merge: true });
     return updated;
+  }
+
+  /**
+   * Deja en el wallet la huella de la transacción que produjo el saldo, para
+   * poder detectar después escrituras hechas por fuera del ledger.
+   */
+  writeLedgerMirrorInTx(
+    tx: Transaction,
+    memberId: string,
+    ledgerBalanceAfter: number,
+    transactionId: string,
+  ): void {
+    tx.set(
+      this.collection.doc(memberId),
+      { ledgerBalanceAfter, lastTransactionId: transactionId },
+      { merge: true },
+    );
   }
 
   dualWriteLegacyBalanceInTx(

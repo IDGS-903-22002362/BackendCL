@@ -1,11 +1,43 @@
 {
   "indexes": [
     {
-      "collectionGroup": "loyalty_transactions",
+      "collectionGroup": "loyalty_redemptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expiresAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "loyalty_sandbox_redemptions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "expiresAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "loyalty_sandbox_transactions",
       "queryScope": "COLLECTION",
       "fields": [
         {
           "fieldPath": "memberId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "partnerId",
           "order": "ASCENDING"
         },
         {
@@ -47,6 +79,20 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "memberId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "loyalty_transactions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "status",
           "order": "ASCENDING"
         },
@@ -61,29 +107,11 @@
       ]
     },
     {
-      "collectionGroup": "loyalty_redemptions",
-      "queryScope": "COLLECTION",
+      "collectionGroup": "movimientos_puntos",
+      "queryScope": "COLLECTION_GROUP",
       "fields": [
         {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "expiresAt",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "loyalty_sandbox_transactions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "memberId",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "partnerId",
+          "fieldPath": "origen",
           "order": "ASCENDING"
         },
         {
@@ -93,29 +121,118 @@
       ]
     },
     {
-      "collectionGroup": "loyalty_sandbox_redemptions",
-      "queryScope": "COLLECTION",
+      "collectionGroup": "movimientos_puntos",
+      "queryScope": "COLLECTION_GROUP",
       "fields": [
         {
-          "fieldPath": "status",
+          "fieldPath": "tipo",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "expiresAt",
-          "order": "ASCENDING"
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
         }
       ]
     },
     {
-      "collectionGroup": "dispositivosPush",
-      "queryScope": "COLLECTION_GROUP",
+      "collectionGroup": "usuariosApp",
+      "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "enabled",
+          "fieldPath": "solicitudEliminacion.estado",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "solicitudEliminacion.fechaProgramada",
           "order": "ASCENDING"
         }
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "dispositivosPush",
+      "fieldPath": "enabled",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "preferenciasPush",
+      "fieldPath": "pushEnabled",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "arrayConfig": "CONTAINS",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_puntos",
+      "fieldPath": "createdAt",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "movimientos_puntos",
+      "fieldPath": "tipo",
+      "indexes": [
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "DESCENDING",
+          "queryScope": "COLLECTION"
+        },
+        {
+          "order": "ASCENDING",
+          "queryScope": "COLLECTION_GROUP"
+        }
+      ]
+    }
+  ]
 }

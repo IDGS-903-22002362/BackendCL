@@ -14,7 +14,9 @@ import {
 } from "../models/loyalty.types";
 
 export class LedgerRepository {
-  private collection = firestoreApp.collection(LOYALTY_COLLECTIONS.TRANSACTIONS);
+  private get collection() {
+    return firestoreApp.collection(LOYALTY_COLLECTIONS.TRANSACTIONS);
+  }
 
   async getById(transactionId: string): Promise<LoyaltyTransaction | null> {
     const snap = await this.collection.doc(transactionId).get();

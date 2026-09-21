@@ -4,8 +4,10 @@ import LoyaltyProblemError from "../errors/loyalty-problem.error";
 import { LoyaltyAdjustmentReason, LoyaltyPermission } from "../models/loyalty.enums";
 import ledgerRepository from "../repositories/ledger.repository";
 import walletRepository from "../repositories/wallet.repository";
+import redemptionRepository from "../repositories/redemption.repository";
 import conversionRulesService from "../services/conversion-rules.service";
 import loyaltyEngineService from "../services/loyalty-engine.service";
+import pointsReportsService from "../services/points-reports.service";
 import { actorHasPermission } from "../services/loyalty-auth.service";
 import { firestoreApp } from "../../../config/app.firebase";
 import { isLoyaltyCustomerRecipient } from "../../../utils/usuario-roles";
@@ -23,6 +25,18 @@ function requireIdempotency(req: Request): string {
     throw new LoyaltyProblemError("IDEMPOTENCY_KEY_REQUIRED");
   }
   return key;
+}
+
+function assertCanManageMember(
+  actor: ReturnType<typeof requireActor>,
+  memberId: string,
+): void {
+  if (
+    actor.actorId !== memberId &&
+    !actorHasPermission(actor, LoyaltyPermission.WALLET_READ_ANY)
+  ) {
+    throw new LoyaltyProblemError("FORBIDDEN");
+  }
 }
 
 export async function getMyWallet(req: Request, res: Response, next: NextFunction) {
@@ -143,6 +157,7 @@ export async function createAdjustment(req: Request, res: Response, next: NextFu
 export async function createRedemption(req: Request, res: Response, next: NextFunction) {
   try {
     const actor = requireActor(req);
+    assertCanManageMember(actor, req.body.memberId);
     const idempotencyKey = requireIdempotency(req);
     const result = await loyaltyEngineService.createRedemption({
       memberId: req.body.memberId,
@@ -171,6 +186,9 @@ export async function createRedemption(req: Request, res: Response, next: NextFu
 export async function confirmRedemption(req: Request, res: Response, next: NextFunction) {
   try {
     const actor = requireActor(req);
+    const redemption = await redemptionRepository.getById(req.params.redemptionId);
+    if (!redemption) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+    assertCanManageMember(actor, redemption.memberId);
     const idempotencyKey = requireIdempotency(req);
     const txn = await loyaltyEngineService.confirmRedemption(
       req.params.redemptionId,
@@ -186,6 +204,9 @@ export async function confirmRedemption(req: Request, res: Response, next: NextF
 export async function cancelRedemption(req: Request, res: Response, next: NextFunction) {
   try {
     const actor = requireActor(req);
+    const redemption = await redemptionRepository.getById(req.params.redemptionId);
+    if (!redemption) throw new LoyaltyProblemError("REDEMPTION_NOT_FOUND");
+    assertCanManageMember(actor, redemption.memberId);
     const idempotencyKey = requireIdempotency(req);
     const txn = await loyaltyEngineService.cancelRedemption(
       req.params.redemptionId,
@@ -257,6 +278,68 @@ export async function getAdminTransactions(req: Request, res: Response, next: Ne
         nextCursor: result.nextCursor,
         hasMore: Boolean(result.nextCursor),
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminRedemptionsReport(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    requireActor(req);
+    const result = await pointsReportsService.listRedemptions({
+      limit: Number(req.query.limit ?? 50),
+      cursor: req.query.cursor as string | undefined,
+      from: req.query.from as string | undefined,
+      to: req.query.to as string | undefined,
+    });
+    res.status(200).json({
+      items: result.items,
+      summary: result.summary,
+      pagination: {
+        nextCursor: result.nextCursor,
+        hasMore: result.hasMore,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminTopBalancesReport(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    requireActor(req);
+    const result = await pointsReportsService.listTopBalances(
+      Number(req.query.limit ?? 20),
+    );
+    res.status(200).json({ items: result.items });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function getAdminTopEarnersReport(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    requireActor(req);
+    const result = await pointsReportsService.listTopEarners({
+      day: typeof req.query.day === "string" ? req.query.day : "",
+      limit: Number(req.query.limit ?? 20),
+    });
+    res.status(200).json({
+      items: result.items,
+      summary: result.summary,
     });
   } catch (error) {
     next(error);

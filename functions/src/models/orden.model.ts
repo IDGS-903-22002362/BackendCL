@@ -7,6 +7,7 @@ import {
   CheckoutAddressValidationStatus,
   CheckoutPricingSnapshot,
   CheckoutShippingSnapshot,
+  PaymentComposition,
 } from "./checkout-pricing.model";
 import type { ItemPersonalizacion } from "../utils/product-personalization.util";
 import type { ClientOrigin } from "../types/client-origin";
@@ -27,6 +28,7 @@ export enum MetodoPago {
   EFECTIVO = "EFECTIVO",
   PAYPAL = "PAYPAL",
   MERCADOPAGO = "MERCADOPAGO",
+  FIERA_PUNTOS = "FIERA_PUNTOS",
 }
 
 export enum FulfillmentMethod {
@@ -160,6 +162,9 @@ export interface Orden {
   subtotal: number;
   impuestos: number;
   total: number;
+  /** Total bruto antes del descuento por FieraPuntos. */
+  grossTotal?: number;
+  paymentComposition?: PaymentComposition;
   estado: EstadoOrden;
   direccionEnvio?: DireccionEnvio;
   metodoPago: MetodoPago;
@@ -217,6 +222,8 @@ export interface CrearOrdenDTO {
   subtotal: number;
   impuestos: number;
   total: number;
+  grossTotal?: number;
+  paymentComposition?: PaymentComposition;
   estado?: EstadoOrden;
     direccionEnvio?: DireccionEnvio;
   metodoPago: MetodoPago;

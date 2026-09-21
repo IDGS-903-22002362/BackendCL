@@ -25,15 +25,23 @@ import { RolUsuario } from "../models/usuario.model";
 import adminReportAgent, {
   type AdminAgentHistoryEntry,
 } from "../services/ai/analytics/admin-report.agent";
+import {
+  AdminConversationState,
+  evolveAdminConversationState,
+} from "../services/ai/analytics/admin-conversation-state";
 
 const DEFAULT_QUESTION = "¿Cuanto vendimos recientemente?";
 
-/** Conversacion minima de aceptacion de la fase 2. */
+/** Conversacion multi-turno de aceptacion de la fase 3. */
 const SUITE_QUESTIONS = [
-  "¿Como vamos recientemente?",
-  "¿Que productos estan llamando mas la atencion?",
-  "¿Que deberiamos atender?",
-  "Proyecta las ventas de los proximos 7 dias.",
+  "¿Qué debería saber esta semana?",
+  "Explícame el primero.",
+  "¿Qué productos están involucrados?",
+  "¿Qué harías? Dame tres opciones.",
+  "Simula la segunda.",
+  "Compárala con la primera.",
+  "¿Cuál elegirías?",
+  "Muéstrame el funnel.",
 ];
 
 /**
@@ -41,6 +49,26 @@ const SUITE_QUESTIONS = [
  * herramientas reales. Se corre con `--eval` porque consume cuota de Gemini.
  */
 const EVAL_QUESTIONS = [
+  "¿Qué debería saber hoy?",
+  "¿Qué deberíamos atender primero?",
+  "¿Qué está afectando las ventas?",
+  "¿Dónde tenemos la mayor oportunidad?",
+  "Clasifica nuestros productos.",
+  "¿Cuáles tienen alto interés pero baja conversión?",
+  "¿Cuáles corren riesgo de agotarse?",
+  "¿Tenemos productos con demasiado inventario?",
+  "¿Qué productos se compran juntos?",
+  "¿Qué bundle tendría más sentido?",
+  "¿Los clientes están regresando?",
+  "¿Qué cohorte tiene mejor comportamiento?",
+  "¿Qué pasaría si mejoramos la conversión 10%?",
+  "¿Y si aumentamos el tráfico 20%?",
+  "Compara ambas opciones.",
+  "¿Cuál elegirías?",
+  "Simula la segunda opción.",
+  "Hazme un diagrama del funnel.",
+  "Dame un informe ejecutivo.",
+  "Profundiza en el primer hallazgo.",
   "¿Cuales fueron los productos mas visitados esta semana?",
   "¿Que producto tiene muchas visitas pero pocas ventas?",
   "¿Que producto convierte mejor?",
@@ -65,6 +93,7 @@ const runQuestion = async (input: {
   question: string;
   history: AdminAgentHistoryEntry[];
   printJson: boolean;
+  conversationState?: AdminConversationState;
 }) => {
   console.log(`SMOKE  | pregunta="${input.question}"`);
   const startedAt = Date.now();
@@ -75,6 +104,7 @@ const runQuestion = async (input: {
     role: RolUsuario.ADMIN,
     requestId: `smoke-${Date.now()}`,
     history: input.history,
+    conversationState: input.conversationState,
   })) {
     if (event.type === "status") {
       console.log(`STATUS | ${event.data.status}`);
@@ -95,6 +125,9 @@ const runQuestion = async (input: {
     }
 
     console.log(`MODEL  | ${trace.model} | tz=${trace.timeZone}`);
+    console.log(
+      `LATENCY| total=${trace.totalAgentDuration}ms | gemini=${trace.geminiDuration}ms | tools=${trace.toolDuration}ms | calls=${trace.numberOfToolCalls}`,
+    );
     console.log(`BLOQUES| ${report.blocks.map((block) => block.type).join(", ")}`);
 
     for (const forecast of trace.forecasts || []) {
@@ -119,10 +152,10 @@ const runQuestion = async (input: {
       console.log(JSON.stringify(report, null, 2));
     }
 
-    return report.summary;
+    return report;
   }
 
-  return "";
+  return null;
 };
 
 const main = async () => {
@@ -149,12 +182,23 @@ const main = async () => {
 
   const startedAt = Date.now();
   const history: AdminAgentHistoryEntry[] = [];
+  let conversationState: AdminConversationState | undefined;
 
   for (const question of questions) {
-    const summary = await runQuestion({ question, history, printJson });
+    const report = await runQuestion({
+      question,
+      history,
+      printJson,
+      conversationState,
+    });
     history.push({ role: "user", content: question });
-    if (summary) {
-      history.push({ role: "assistant", content: summary });
+    if (report) {
+      history.push({ role: "assistant", content: report.summary });
+      conversationState = evolveAdminConversationState({
+        previous: conversationState,
+        question,
+        report,
+      });
     }
     console.log("---");
   }

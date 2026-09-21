@@ -19,6 +19,11 @@ import adminReportAgent, {
   AdminAgentHistoryEntry,
   AdminReportResult,
 } from "./admin-report.agent";
+import {
+  AdminConversationState,
+  evolveAdminConversationState,
+  normalizeAdminConversationState,
+} from "./admin-conversation-state";
 
 const MAX_HISTORY_TURNS = 4;
 const MAX_SESSIONS_LISTED = 30;
@@ -31,6 +36,7 @@ export interface AdminAssistantSession {
   createdAt: string;
   updatedAt: string;
   turns: number;
+  conversationState?: AdminConversationState;
 }
 
 export interface AdminAssistantTurn {
@@ -123,6 +129,7 @@ class AdminAssistantService {
         userId: String(data.userId || ""),
         title: String(data.title || "Analisis"),
         turns: Number(data.turns || 0),
+        conversationState: normalizeAdminConversationState(data.conversationState),
         createdAt: toIso(data.createdAt),
         updatedAt: toIso(data.updatedAt),
       };
@@ -152,6 +159,7 @@ class AdminAssistantService {
       userId: String(data.userId || ""),
       title: String(data.title || "Analisis"),
       turns: Number(data.turns || 0),
+      conversationState: normalizeAdminConversationState(data.conversationState),
       createdAt: toIso(data.createdAt),
       updatedAt: toIso(data.updatedAt),
     };
@@ -229,12 +237,22 @@ class AdminAssistantService {
       const sessionSnapshot = await sessionRef.get();
       const isFirstTurn =
         Number((sessionSnapshot.data() as Record<string, unknown> | undefined)?.turns || 0) === 0;
+      const previousState = normalizeAdminConversationState(
+        (sessionSnapshot.data() as Record<string, unknown> | undefined)
+          ?.conversationState,
+      );
+      const conversationState = evolveAdminConversationState({
+        previous: previousState,
+        question: input.question,
+        report: input.result.report,
+      });
 
       await sessionRef.update({
         updatedAt: now,
         turns: admin.firestore.FieldValue.increment(1),
         // El titulo se toma de la primera pregunta y luego no se sobreescribe.
         ...(isFirstTurn ? { title: buildTitle(input.question) } : {}),
+        conversationState,
       });
     } catch (error) {
       // La persistencia de trazabilidad no debe romper la respuesta al usuario.
@@ -251,6 +269,7 @@ class AdminAssistantService {
     input: AskAdminAssistantInput,
   ): AsyncGenerator<AdminAgentEvent> {
     const history = await this.buildHistory(input.sessionId);
+    const ownedSession = await this.getOwnedSession(input.sessionId, input.userId);
 
     for await (const event of adminReportAgent.run({
       question: input.question,
@@ -259,6 +278,7 @@ class AdminAssistantService {
       requestId: input.requestId,
       sessionId: input.sessionId,
       history,
+      conversationState: ownedSession?.conversationState,
     })) {
       if (event.type === "final") {
         await this.persistTurn({

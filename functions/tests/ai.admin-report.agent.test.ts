@@ -24,7 +24,10 @@ import analyticsRepository from "../src/services/ai/analytics/analytics.reposito
 import adminReportAgent, {
   MAX_TOOL_CALLS_PER_QUESTION,
 } from "../src/services/ai/analytics/admin-report.agent";
-import { AiRuntimeError } from "../src/services/ai/ai.error";
+import {
+  AI_INVALID_CONFIGURATION_CODE,
+  AiRuntimeError,
+} from "../src/services/ai/ai.error";
 import { RolUsuario } from "../src/models/usuario.model";
 
 const gemini = geminiAdapter as jest.Mocked<typeof geminiAdapter>;
@@ -295,6 +298,31 @@ describe("adminReportAgent", () => {
       AiRuntimeError,
     );
     expect(gemini.generateStructured).toHaveBeenCalledTimes(2);
+  });
+
+  it("reintenta una vez cuando Gemini devuelve JSON malformado", async () => {
+    gemini.generate.mockResolvedValue(buildGenerationResult([]));
+    gemini.generateStructured
+      .mockRejectedValueOnce(new SyntaxError("Unexpected token in JSON"))
+      .mockResolvedValueOnce(VALID_REPORT as never);
+
+    const result = await adminReportAgent.execute(askInput);
+
+    expect(result.report.summary).toBe(VALID_REPORT.summary);
+    expect(gemini.generateStructured).toHaveBeenCalledTimes(2);
+  });
+
+  it("no reintenta errores HTTP 400 de schema/configuracion del proveedor", async () => {
+    gemini.generate.mockResolvedValue(buildGenerationResult([]));
+    const providerError = new AiRuntimeError(
+      AI_INVALID_CONFIGURATION_CODE,
+      "La configuracion de responseJsonSchema para Gemini es invalida.",
+      400,
+    );
+    gemini.generateStructured.mockRejectedValue(providerError);
+
+    await expect(adminReportAgent.execute(askInput)).rejects.toBe(providerError);
+    expect(gemini.generateStructured).toHaveBeenCalledTimes(1);
   });
 
   it("emite estados legibles mientras investiga", async () => {

@@ -50,6 +50,12 @@ export const assignPointsBySaleSchema = z
       .min(1, "La descripción no puede estar vacía")
       .max(250, "La descripción no puede exceder 250 caracteres")
       .optional(),
+    externalReference: z
+      .string()
+      .trim()
+      .min(1, "La referencia externa no puede estar vacía")
+      .max(160, "La referencia externa no puede exceder 160 caracteres")
+      .optional(),
   })
   .strict();
 

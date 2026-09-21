@@ -81,7 +81,7 @@ function createFakeFirestore(initial: Record<string, Record<string, DocData>>) {
   };
 }
 
-const fixedNow = Timestamp.fromDate(new Date("2026-03-30T12:00:00.000Z"));
+const fixedNow = Timestamp.fromDate(new Date("2030-03-30T12:00:00.000Z"));
 let fakeFirestore = createFakeFirestore({});
 
 jest.mock("../src/config/app.firebase", () => ({
@@ -107,6 +107,7 @@ jest.mock("../src/modules/loyalty/services/loyalty-feature-flags.service", () =>
       loyaltyV1WritesEnabled: true,
       loyaltyPhysicalEarnEnabled: true,
       loyaltyDigitalEarnEnabled: true,
+      loyaltyRedemptionsEnabled: true,
     }),
   },
   default: {
@@ -114,6 +115,7 @@ jest.mock("../src/modules/loyalty/services/loyalty-feature-flags.service", () =>
       loyaltyV1WritesEnabled: true,
       loyaltyPhysicalEarnEnabled: true,
       loyaltyDigitalEarnEnabled: true,
+      loyaltyRedemptionsEnabled: true,
     }),
   },
 }));
@@ -197,6 +199,108 @@ describe("loyalty concurrency", () => {
       source: "staff-qr",
       customerNameSnapshot: "Cliente Uno",
     });
+  });
+
+  it("crea HOLD y redemption atómicos e idempotentes sin registrar CANJE legacy", async () => {
+    const input = {
+      memberId: "member_1",
+      points: 100,
+      externalReference: "checkout:attempt-1",
+      idempotencyKey: "checkout:attempt-1:hold",
+      actor,
+    };
+
+    const first = await loyaltyEngineService.createRedemption(input);
+    const retry = await loyaltyEngineService.createRedemption(input);
+
+    expect(retry.redemption.redemptionId).toBe(first.redemption.redemptionId);
+    expect(fakeFirestore.count("loyalty_redemptions")).toBe(1);
+    expect(fakeFirestore.count("loyalty_transactions")).toBe(1);
+    expect(fakeFirestore.count("usuariosApp/member_1/movimientos_puntos")).toBe(0);
+    expect(fakeFirestore.get("loyalty_wallets", "member_1")).toMatchObject({
+      availablePoints: 0,
+      heldPoints: 100,
+    });
+  });
+
+  it("registra CANJE legacy únicamente al confirmar", async () => {
+    const { redemption } = await loyaltyEngineService.createRedemption({
+      memberId: "member_1",
+      points: 100,
+      idempotencyKey: "checkout:attempt-confirm:hold",
+      actor,
+    });
+
+    await loyaltyEngineService.confirmRedemption(
+      redemption.redemptionId,
+      actor,
+      "checkout:attempt-confirm:confirm",
+    );
+
+    expect(fakeFirestore.count("usuariosApp/member_1/movimientos_puntos")).toBe(1);
+    expect(fakeFirestore.get("loyalty_wallets", "member_1")).toMatchObject({
+      availablePoints: 0,
+      heldPoints: 0,
+      lifetimeRedeemedPoints: 100,
+    });
+  });
+
+  it("libera un HOLD sin aparentar un canje en legacy", async () => {
+    const { redemption } = await loyaltyEngineService.createRedemption({
+      memberId: "member_1",
+      points: 100,
+      idempotencyKey: "checkout:attempt-cancel:hold",
+      actor,
+    });
+
+    await loyaltyEngineService.cancelRedemption(
+      redemption.redemptionId,
+      actor,
+      "checkout:attempt-cancel:release",
+    );
+
+    expect(fakeFirestore.count("usuariosApp/member_1/movimientos_puntos")).toBe(0);
+    expect(fakeFirestore.get("loyalty_wallets", "member_1")).toMatchObject({
+      availablePoints: 100,
+      heldPoints: 0,
+      lifetimeRedeemedPoints: 0,
+    });
+  });
+
+  it("restaura idempotentemente un canje confirmado durante refund total", async () => {
+    const { redemption } = await loyaltyEngineService.createRedemption({
+      memberId: "member_1",
+      points: 100,
+      idempotencyKey: "checkout:attempt-refund:hold",
+      actor,
+    });
+    await loyaltyEngineService.confirmRedemption(
+      redemption.redemptionId,
+      actor,
+      "checkout:attempt-refund:confirm",
+    );
+
+    const first = await loyaltyEngineService.refundConfirmedRedemption(
+      redemption.redemptionId,
+      actor,
+      "refund:order:1:fiera-points",
+    );
+    const retry = await loyaltyEngineService.refundConfirmedRedemption(
+      redemption.redemptionId,
+      actor,
+      "refund:order:1:fiera-points",
+    );
+
+    expect(retry.transactionId).toBe(first.transactionId);
+    expect(fakeFirestore.get("loyalty_wallets", "member_1")).toMatchObject({
+      availablePoints: 100,
+      heldPoints: 0,
+      lifetimeRedeemedPoints: 0,
+    });
+    expect(fakeFirestore.get("loyalty_redemptions", redemption.redemptionId)).toMatchObject({
+      status: "REFUNDED",
+    });
+    expect(fakeFirestore.count("usuariosApp/member_1/movimientos_puntos")).toBe(2);
   });
 
   it("caso 3: misma clave con body distinto devuelve conflicto", async () => {

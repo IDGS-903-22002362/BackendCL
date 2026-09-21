@@ -523,7 +523,7 @@ const productPerformanceSchema = z.object({
   limit: z.number().int().min(1).max(25).optional(),
 });
 
-interface PerformanceRow {
+export interface PerformanceRow {
   productId: string;
   sku: string;
   name: string;
@@ -550,7 +550,7 @@ interface PerformanceRow {
   segment: string | null;
 }
 
-const buildPerformanceRows = async (
+export const buildPerformanceRows = async (
   context: AnalyticsToolContext,
   period: ResolvedPeriod,
 ): Promise<{

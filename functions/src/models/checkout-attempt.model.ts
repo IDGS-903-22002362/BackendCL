@@ -1,6 +1,9 @@
 import { Timestamp } from "firebase-admin/firestore";
 import { CrearOrdenDTO } from "./orden.model";
-import { CheckoutPricingSnapshot } from "./checkout-pricing.model";
+import {
+  CheckoutPricingSnapshot,
+  PaymentComposition,
+} from "./checkout-pricing.model";
 
 export enum CheckoutAttemptStatus {
   CREATED = "created",
@@ -27,6 +30,10 @@ export interface CheckoutAttempt {
   status: CheckoutAttemptStatus;
   orderDraft: CrearOrdenDTO;
   pricingSnapshot: CheckoutPricingSnapshot;
+  paymentComposition: PaymentComposition;
+  /** Total bruto antes de aplicar FieraPuntos. */
+  grossTotal: number;
+  /** `total` conserva el monto que se cobra al proveedor. */
   total: number;
   currency: string;
   metodoPago: string;
@@ -47,6 +54,7 @@ export interface CheckoutAttempt {
   finalizedAt?: Timestamp;
   failureCode?: string;
   failureMessage?: string;
+  fieraPointsConfirmStatus?: "COMPLETED" | "FAILED";
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -59,6 +67,8 @@ export interface StartCheckoutAttemptResult {
   sessionId?: string;
   pagoId?: string;
   total: number;
+  grossTotal: number;
   currency: string;
   created: boolean;
+  paymentComposition: PaymentComposition;
 }

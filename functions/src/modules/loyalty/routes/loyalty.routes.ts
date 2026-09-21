@@ -17,6 +17,9 @@ import {
 import { LoyaltyPermission } from "../models/loyalty.enums";
 import {
   adjustmentSchema,
+  adminRedemptionsReportQuerySchema,
+  adminTopBalancesQuerySchema,
+  adminTopEarnersQuerySchema,
   adminTransactionsQuerySchema,
   earnPreviewQuerySchema,
   earnTransactionSchema,
@@ -146,6 +149,36 @@ router.get(
   requireLoyaltyPermission(LoyaltyPermission.TRANSACTIONS_READ_ANY),
   validateQuery(adminTransactionsQuerySchema),
   loyaltyController.getAdminTransactions,
+);
+
+const reportsRateLimit = createSimpleRateLimiter({
+  keyPrefix: "loyalty:admin-reports",
+  windowMs: 60_000,
+  maxRequests: 30,
+});
+
+router.get(
+  "/admin/reports/redemptions",
+  reportsRateLimit,
+  requireLoyaltyPermission(LoyaltyPermission.WALLET_READ_ANY),
+  validateQuery(adminRedemptionsReportQuerySchema),
+  loyaltyController.getAdminRedemptionsReport,
+);
+
+router.get(
+  "/admin/reports/top-balances",
+  reportsRateLimit,
+  requireLoyaltyPermission(LoyaltyPermission.WALLET_READ_ANY),
+  validateQuery(adminTopBalancesQuerySchema),
+  loyaltyController.getAdminTopBalancesReport,
+);
+
+router.get(
+  "/admin/reports/top-earners",
+  reportsRateLimit,
+  requireLoyaltyPermission(LoyaltyPermission.WALLET_READ_ANY),
+  validateQuery(adminTopEarnersQuerySchema),
+  loyaltyController.getAdminTopEarnersReport,
 );
 
 router.use(handleLoyaltyError);

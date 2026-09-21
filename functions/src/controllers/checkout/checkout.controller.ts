@@ -26,6 +26,42 @@ const getIdempotencyKey = (req: Request): string => {
   return normalized;
 };
 
+export const quoteFieraPoints = async (req: Request, res: Response) => {
+  try {
+    const userId = getAuthenticatedUid(req);
+    const data = await checkoutAttemptService.quoteFieraPoints(userId, req.body, {
+      clientOrigin: req.clientOrigin,
+      advertisingTrackingAllowed: req.advertisingTrackingAllowed,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    const mapped = mapCheckoutErrorToApiError(error);
+    if (mapped instanceof ApiError) {
+      return sendPublicError(res, mapped, req.requestId, {
+        fallbackCode: mapped.code ?? `HTTP_${mapped.statusCode}`,
+        logLabel: "checkout_fiera_points_quote",
+      });
+    }
+
+    if (error instanceof ApiError) {
+      return sendPublicError(res, error, req.requestId, {
+        fallbackCode: error.code ?? `HTTP_${error.statusCode}`,
+        logLabel: "checkout_fiera_points_quote",
+      });
+    }
+
+    return sendPublicError(res, error, req.requestId, {
+      fallbackMessage: "Error al cotizar FieraPuntos",
+      fallbackCode: "FIERA_POINTS_QUOTE_FAILED",
+      logLabel: "checkout_fiera_points_quote",
+    });
+  }
+};
+
 export const startCheckout = async (req: Request, res: Response) => {
   try {
     const userId = getAuthenticatedUid(req);
