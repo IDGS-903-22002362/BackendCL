@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import deviceTokenService from "../../services/notifications/device-token.service";
 import notificationBroadcastService from "../../services/notifications/notification-broadcast.service";
 import notificationEventService from "../../services/notifications/notification-event.service";
+import notificationInboxService from "../../services/notifications/notification-inbox.service";
 import notificationPreferencesService from "../../services/notifications/notification-preferences.service";
 import notificationProcessingService from "../../services/notifications/notification-processing.service";
 
@@ -119,6 +120,92 @@ export const updatePreferences = async (req: Request, res: Response) => {
   }
 };
 
+export const markInboxRead = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autenticado",
+      });
+    }
+
+    const { ids } = req.body as { ids: string[] };
+    const result = await notificationInboxService.markRead(req.user.uid, ids);
+
+    return res.status(200).json({
+      success: true,
+      message: "Notificaciones marcadas como leídas",
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar las notificaciones como leídas",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const markAllInboxRead = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autenticado",
+      });
+    }
+
+    const result = await notificationInboxService.markAllRead(req.user.uid);
+
+    return res.status(200).json({
+      success: true,
+      message: "Bandeja marcada como leída",
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error al marcar la bandeja como leída",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
+export const deleteInboxNotification = async (req: Request, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({
+        success: false,
+        message: "No autenticado",
+      });
+    }
+
+    const result = await notificationInboxService.deleteNotification(
+      req.user.uid,
+      req.params.notificationId,
+    );
+
+    if (!result.deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Notificación no encontrada",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Notificación eliminada",
+      data: result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Error al eliminar la notificación",
+      error: error instanceof Error ? error.message : "Error desconocido",
+    });
+  }
+};
+
 export const sendTestNotification = async (req: Request, res: Response) => {
   try {
     const { userId, title, body, deeplink, screen, priority } = req.body as {
@@ -174,18 +261,22 @@ export const sendBroadcastNotification = async (req: Request, res: Response) => 
       userIds?: string[];
     };
 
-    const result = await notificationBroadcastService.broadcast({
+    const result = await notificationBroadcastService.createBroadcast({
       title,
       body,
       deeplink,
       screen,
       priority,
       userIds,
+      createdBy: req.user?.uid,
     });
 
-    return res.status(200).json({
+    return res.status(202).json({
       success: true,
-      message: "Broadcast de notificación procesado",
+      message:
+        result.totalChunks === 0
+          ? "Broadcast sin destinatarios con dispositivos activos"
+          : "Broadcast de notificación encolado",
       data: result,
     });
   } catch (error) {

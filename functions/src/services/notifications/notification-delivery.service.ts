@@ -4,7 +4,10 @@ import { firestoreApp, messagingAppOficial } from "../../config/app.firebase";
 import { firestoreTienda } from "../../config/firebase";
 import {
   GeneratedPushCopy,
+  NotificationBroadcastChunk,
+  NotificationBroadcastTarget,
   NotificationDeliveryRecord,
+  NotificationDeliveryStatus,
   NotificationEligibilityResult,
   NotificationEvent,
 } from "../../models/notificacion.model";
@@ -17,6 +20,25 @@ const INVALID_FCM_CODES = new Set([
   "messaging/registration-token-not-registered",
   "messaging/invalid-argument",
 ]);
+
+export interface BroadcastChunkSendResult {
+  sent: number;
+  failed: number;
+  invalidTargets: Array<{
+    target: NotificationBroadcastTarget;
+    reason: string;
+  }>;
+  perTarget?: Array<{
+    target: NotificationBroadcastTarget;
+    status: Extract<
+      NotificationDeliveryStatus,
+      "sent" | "failed" | "invalid_token"
+    >;
+    providerMessageId?: string;
+    providerErrorCode?: string;
+    providerErrorMessage?: string;
+  }>;
+}
 
 class NotificationDeliveryService {
   private readonly baseLogger = logger.child({
@@ -166,6 +188,194 @@ class NotificationDeliveryService {
         },
       },
     };
+  }
+
+  private buildBroadcastDataPayload(
+    chunk: NotificationBroadcastChunk,
+  ): Record<string, string> {
+    return {
+      notificationId: `${chunk.broadcastId}:${chunk.chunkIndex}`,
+      eventId: chunk.broadcastId,
+      type: "manual_broadcast",
+      category: chunk.copy.category,
+      entityType: "user",
+      entityId: chunk.broadcastId,
+      deeplink: chunk.copy.deeplink,
+      screen: chunk.copy.screen,
+      priority: chunk.copy.priority,
+      sentAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Envia un lote de hasta 500 tokens con una sola llamada multicast.
+   * `response.responses[i]` corresponde a `chunk.targets[i]`.
+   */
+  async sendBroadcastChunk(
+    chunk: NotificationBroadcastChunk,
+  ): Promise<BroadcastChunkSendResult> {
+    const targets = chunk.targets;
+
+    if (targets.length === 0) {
+      return { sent: 0, failed: 0, invalidTargets: [] };
+    }
+
+    const response = await messagingAppOficial.sendEachForMulticast({
+      tokens: targets.map((target) => target.token),
+      notification: {
+        title: chunk.copy.title,
+        body: chunk.copy.body,
+      },
+      data: this.buildBroadcastDataPayload(chunk),
+      android: {
+        priority: chunk.copy.priority === "high" ? "high" : "normal",
+      },
+      apns: {
+        headers: {
+          "apns-priority": chunk.copy.priority === "high" ? "10" : "5",
+        },
+      },
+    });
+
+    const invalidTargets: BroadcastChunkSendResult["invalidTargets"] = [];
+    const perTarget: BroadcastChunkSendResult["perTarget"] = [];
+
+    response.responses.forEach((result, index) => {
+      const target = targets[index];
+
+      if (result.success) {
+        perTarget.push({
+          target,
+          status: "sent",
+          providerMessageId: result.messageId,
+        });
+        return;
+      }
+
+      const code = result.error?.code || "messaging/unknown";
+
+      if (INVALID_FCM_CODES.has(code)) {
+        invalidTargets.push({ target, reason: code });
+        perTarget.push({
+          target,
+          status: "invalid_token",
+          providerErrorCode: code,
+          providerErrorMessage: result.error?.message,
+        });
+        return;
+      }
+
+      perTarget.push({
+        target,
+        status: "failed",
+        providerErrorCode: code,
+        providerErrorMessage: result.error?.message,
+      });
+    });
+
+    if (response.failureCount > 0) {
+      this.baseLogger.warn("notification_broadcast_chunk_partial_failure", {
+        broadcastId: chunk.broadcastId,
+        chunkIndex: chunk.chunkIndex,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+        invalidTokens: invalidTargets.length,
+      });
+    }
+
+    return {
+      sent: response.successCount,
+      failed: response.failureCount,
+      invalidTargets,
+      perTarget,
+    };
+  }
+
+  /**
+   * Persiste un registro de envio por usuario (no por token) y el espejo
+   * in-app, todo con BulkWriter para no bloquear por documento.
+   */
+  async persistBroadcastResults(
+    chunk: NotificationBroadcastChunk,
+    perTarget: NonNullable<BroadcastChunkSendResult["perTarget"]>,
+  ): Promise<void> {
+    const now = Timestamp.now();
+    const byUser = new Map<string, (typeof perTarget)[number]>();
+
+    for (const entry of perTarget) {
+      const existing = byUser.get(entry.target.userId);
+
+      // Un usuario con varios dispositivos cuenta como entregado si al menos
+      // uno de sus tokens recibio la notificacion.
+      if (!existing || (existing.status !== "sent" && entry.status === "sent")) {
+        byUser.set(entry.target.userId, entry);
+      }
+    }
+
+    const deliveriesWriter = firestoreTienda.bulkWriter();
+    const inAppWriter = firestoreApp.bulkWriter();
+
+    for (const [userId, entry] of byUser) {
+      const deliveryRef = firestoreTienda
+        .collection(notificationCollections.deliveries)
+        .doc(`${chunk.broadcastId}_${chunk.chunkIndex}_${userId}`);
+
+      void deliveriesWriter.set(deliveryRef, {
+        eventId: chunk.broadcastId,
+        fingerprint: chunk.broadcastId,
+        userId,
+        eventType: "manual_broadcast",
+        category: chunk.copy.category,
+        status: entry.status,
+        channel: "push",
+        deliveryMode: "token",
+        entityType: "user",
+        entityId: userId,
+        title: chunk.copy.title,
+        body: chunk.copy.body,
+        deeplink: chunk.copy.deeplink,
+        screen: chunk.copy.screen,
+        priority: chunk.copy.priority,
+        providerMessageId: entry.providerMessageId,
+        providerErrorCode: entry.providerErrorCode,
+        providerErrorMessage: entry.providerErrorMessage,
+        createdAt: now,
+        ...(entry.status === "sent" ? { sentAt: now } : {}),
+      });
+
+      if (entry.status !== "sent") {
+        continue;
+      }
+
+      const inAppRef = firestoreApp
+        .collection(notificationCollections.systemNotifications)
+        .doc(`${chunk.broadcastId}_${userId}`);
+
+      void inAppWriter.set(inAppRef, {
+        tipo: "manual_broadcast",
+        categoria: chunk.copy.category,
+        canal: "in_app",
+        destinatarioUid: userId,
+        titulo: chunk.copy.title,
+        mensaje: chunk.copy.body,
+        leida: false,
+        payload: {
+          notificationId: `${chunk.broadcastId}:${chunk.chunkIndex}`,
+          eventId: chunk.broadcastId,
+          type: "manual_broadcast",
+          category: chunk.copy.category,
+          entityType: "user",
+          entityId: userId,
+          deeplink: chunk.copy.deeplink,
+          screen: chunk.copy.screen,
+          priority: chunk.copy.priority,
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    await Promise.all([deliveriesWriter.close(), inAppWriter.close()]);
   }
 
   async deliver(

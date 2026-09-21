@@ -58,6 +58,8 @@ class NotificationPreferencesService {
       matchdayEnabled: true,
       reactivationEnabled: true,
       recommendationsEnabled: true,
+      streakRemindersEnabled: true,
+      birthdayNotificationsEnabled: true,
       quietHours: {
         enabled: notificationConfig.defaults.quietHours.enabled,
         startHour: notificationConfig.defaults.quietHours.startHour,
@@ -91,9 +93,13 @@ class NotificationPreferencesService {
       };
     }
 
+    const data = snapshot.data() as NotificationPreferenceDocument;
+
     return {
       id: snapshot.id,
-      ...(snapshot.data() as NotificationPreferenceDocument),
+      ...data,
+      streakRemindersEnabled: data.streakRemindersEnabled !== false,
+      birthdayNotificationsEnabled: data.birthdayNotificationsEnabled !== false,
     };
   }
 
@@ -169,6 +175,10 @@ class NotificationPreferencesService {
         return preference.marketingEnabled && preference.matchdayEnabled;
       case "probable_repurchase":
         return preference.marketingEnabled && preference.recommendationsEnabled;
+      case "streak_reminder":
+        return preference.streakRemindersEnabled !== false;
+      case "birthday":
+        return preference.birthdayNotificationsEnabled !== false;
       case "manual_test":
       case "manual_broadcast":
         return true;

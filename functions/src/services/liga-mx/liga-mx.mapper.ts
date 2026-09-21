@@ -1,5 +1,9 @@
 import { createHash } from "crypto";
-import { obtenerNombreTorneo, obtenerPerfilDivision } from "../../config/liga-mx.config";
+import {
+  configuracionLigaMx,
+  obtenerNombreTorneo,
+  obtenerPerfilDivision,
+} from "../../config/liga-mx.config";
 import { fechaPartidoApiToIsoString } from "./liga-mx.datetime";
 import {
   CalendarioLigaMxDoc,
@@ -79,11 +83,116 @@ export const esMarcadorOficial = (estado: {
   );
 };
 
+type EstadoComparable = {
+  idMinutoAMinuto: number | null;
+  etiquetaMinutoAMinuto: string | null;
+};
+
+const obtenerMomentoPublicacionMarcador = (
+  fechaHoraPartido: string | null,
+): number | null => {
+  if (!fechaHoraPartido) {
+    return null;
+  }
+
+  const inicioMs = new Date(fechaHoraPartido).getTime();
+
+  if (Number.isNaN(inicioMs)) {
+    return null;
+  }
+
+  return inicioMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs;
+};
+
+/**
+ * El marcador solo se publica cuando la fuente lo declara oficial o cuando ya
+ * pasó el corte de publicación. Mientras el partido está en curso la fuente
+ * expone marcadores parciales (o ceros de un partido aún no jugado), y
+ * publicarlos hace que la app los muestre como resultado definitivo.
+ *
+ * Si no hay hora de partido confiable se conserva el comportamiento anterior
+ * para no ocultar resultados históricos.
+ */
+export const puedePublicarseMarcador = (input: {
+  fechaHoraPartido: string | null;
+  estado: EstadoComparable;
+  ahoraMs?: number;
+}): boolean => {
+  if (esMarcadorOficial(input.estado)) {
+    return true;
+  }
+
+  const momentoPublicacion = obtenerMomentoPublicacionMarcador(
+    input.fechaHoraPartido,
+  );
+
+  if (momentoPublicacion === null) {
+    return true;
+  }
+
+  return (input.ahoraMs ?? Date.now()) >= momentoPublicacion;
+};
+
+/**
+ * Ventana de silencio: desde que arranca el partido hasta el corte de
+ * publicación. Durante ese lapso no se consulta la API ni se escribe en la base,
+ * porque cualquier dato de la fuente todavía es parcial.
+ */
+export const partidoDentroDeVentanaDeSilencio = (
+  fechaHoraPartido: string | null,
+  ahoraMs = Date.now(),
+): boolean => {
+  if (!fechaHoraPartido) {
+    return false;
+  }
+
+  const inicioMs = new Date(fechaHoraPartido).getTime();
+
+  if (Number.isNaN(inicioMs)) {
+    return false;
+  }
+
+  return (
+    ahoraMs >= inicioMs &&
+    ahoraMs < inicioMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs
+  );
+};
+
+export const hayPartidoDentroDeVentanaDeSilencio = (
+  partidos: Array<{ fechaHoraPartido: string | null }>,
+  ahoraMs = Date.now(),
+): boolean => {
+  return partidos.some((partido) =>
+    partidoDentroDeVentanaDeSilencio(partido.fechaHoraPartido, ahoraMs),
+  );
+};
+
+/**
+ * Un partido se considera cerrado y publicable cuando la fuente lo reporta
+ * concluido y además ya pasó el corte de publicación. Esto evita tratar
+ * "Final del Primer Tiempo" como cierre y permite cerrar con "Marcador Final"
+ * sin esperar a que la fuente lo marque como oficial.
+ */
+export const esCierrePartidoPublicable = (
+  partido: {
+    fechaHoraPartido: string | null;
+    estado: EstadoComparable;
+  },
+  ahoraMs = Date.now(),
+): boolean => {
+  if (!esPartidoConcluido(partido.estado)) {
+    return false;
+  }
+
+  return puedePublicarseMarcador({
+    fechaHoraPartido: partido.fechaHoraPartido,
+    estado: partido.estado,
+    ahoraMs,
+  });
+};
+
 const debeOcultarMarcadorTemporal = (input: {
-  estado: {
-    idMinutoAMinuto: number | null;
-    etiquetaMinutoAMinuto: string | null;
-  };
+  estado: EstadoComparable;
   localGoles: number | null;
   visitaGoles: number | null;
   localPenales: number | null;
@@ -220,13 +329,22 @@ export const normalizarPartidoCalendario = (
   const visitaGoles = aNumeroNullable(raw.golVisita);
   const localPenales = aNumeroNullable(raw.penalLocal);
   const visitaPenales = aNumeroNullable(raw.penalVisita);
-  const ocultarMarcadorTemporal = debeOcultarMarcadorTemporal({
+  const fechaHoraPartido = resolverFechaHoraPartidoDesdeApi(raw);
+  const referenciaAhoraMs = Date.parse(sincronizadoEn);
+  const marcadorPublicable = puedePublicarseMarcador({
+    fechaHoraPartido,
     estado,
-    localGoles,
-    visitaGoles,
-    localPenales,
-    visitaPenales,
+    ahoraMs: Number.isNaN(referenciaAhoraMs) ? undefined : referenciaAhoraMs,
   });
+  const ocultarMarcadorTemporal =
+    !marcadorPublicable ||
+    debeOcultarMarcadorTemporal({
+      estado,
+      localGoles,
+      visitaGoles,
+      localPenales,
+      visitaPenales,
+    });
   const payloadSinHash: Omit<PartidoLigaMxDoc, "hashFuente"> = {
     id: String(raw.idPartido),
     idPartido: Number(raw.idPartido),
@@ -251,7 +369,7 @@ export const normalizarPartidoCalendario = (
       nombreCorto: aTextoNullable(raw.jornadaAbreviada),
       numero: aNumeroNullable(raw.numeroJornada),
     },
-    fechaHoraPartido: resolverFechaHoraPartidoDesdeApi(raw),
+    fechaHoraPartido,
     fecha: aTextoNullable(raw.fecha),
     hora: aTextoNullable(raw.hora),
     estado,

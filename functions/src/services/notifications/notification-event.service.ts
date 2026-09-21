@@ -16,6 +16,11 @@ import {
   resolveNotificationPriority,
 } from "./notification.utils";
 
+export interface EventLockResult {
+  acquired: boolean;
+  event: NotificationEvent | null;
+}
+
 export interface EnqueueNotificationEventInput {
   eventType: NotificationEventType;
   userId: string;
@@ -36,6 +41,12 @@ class NotificationEventService {
   private readonly baseLogger = logger.child({
     component: "notification-event-service",
   });
+
+  private isAlreadyExistsError(error: unknown): boolean {
+    const firestoreError = error as { code?: string | number };
+    const code = String(firestoreError.code ?? "").toLowerCase();
+    return code === "6" || code === "already-exists";
+  }
 
   private buildEventFingerprint(input: EnqueueNotificationEventInput): string {
     if (Array.isArray(input.fingerprintParts) && input.fingerprintParts.length) {
@@ -104,6 +115,18 @@ class NotificationEventService {
           input.eventType,
           input.userId,
           input.sourceData?.referenceOrderId || "repurchase",
+        );
+      case "streak_reminder":
+        return buildNotificationFingerprint(
+          input.eventType,
+          input.userId,
+          input.sourceData?.dayKey || "default",
+        );
+      case "birthday":
+        return buildNotificationFingerprint(
+          input.eventType,
+          input.userId,
+          input.sourceData?.yearKey || input.sourceData?.dayKey || "default",
         );
       case "manual_test":
       case "manual_broadcast":
@@ -185,9 +208,7 @@ class NotificationEventService {
 
       return { event, created: true };
     } catch (error) {
-      const firestoreError = error as { code?: string | number };
-
-      if (String(firestoreError?.code) !== "6") {
+      if (!this.isAlreadyExistsError(error)) {
         throw error;
       }
 
@@ -196,11 +217,30 @@ class NotificationEventService {
         throw error;
       }
 
+      const existing = existingSnapshot.data() as NotificationEvent;
+      if (existing.status === "failed") {
+        await eventRef.delete();
+        await eventRef.create(payload);
+
+        const event: NotificationEvent = {
+          id: eventRef.id,
+          ...payload,
+        };
+
+        this.baseLogger.info("notification_event_requeued_after_failure", {
+          eventId: event.id,
+          eventType: event.eventType,
+          userId: event.userId,
+        });
+
+        return { event, created: true };
+      }
+
       return {
         created: false,
         event: {
           id: existingSnapshot.id,
-          ...(existingSnapshot.data() as NotificationEvent),
+          ...existing,
         },
       };
     }
@@ -245,24 +285,33 @@ class NotificationEventService {
     };
   }
 
-  async markProcessing(eventId: string): Promise<NotificationEvent | null> {
+  /**
+   * Toma el lock del evento. `acquired` indica si fue *este* llamador quien lo
+   * tomo: el endpoint sincrono y el trigger de Firestore pueden competir por el
+   * mismo evento, y solo uno debe enviarlo.
+   */
+  async markProcessing(eventId: string): Promise<EventLockResult> {
     const eventRef = firestoreTienda
       .collection(notificationCollections.events)
       .doc(eventId);
-    let capturedEvent: NotificationEvent | null = null;
+    let result: EventLockResult = { acquired: false, event: null };
 
     await firestoreTienda.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(eventRef);
 
       if (!snapshot.exists) {
+        result = { acquired: false, event: null };
         return;
       }
 
       const event = snapshot.data() as NotificationEvent;
       if (event.status !== "queued" && event.status !== "failed") {
-        capturedEvent = {
-          id: snapshot.id,
-          ...event,
+        result = {
+          acquired: false,
+          event: {
+            id: snapshot.id,
+            ...event,
+          },
         };
         return;
       }
@@ -275,15 +324,18 @@ class NotificationEventService {
         lastError: null,
       });
 
-      capturedEvent = {
-        id: snapshot.id,
-        ...event,
-        status: "processing",
-        updatedAt: now,
+      result = {
+        acquired: true,
+        event: {
+          id: snapshot.id,
+          ...event,
+          status: "processing",
+          updatedAt: now,
+        },
       };
     });
 
-    return capturedEvent;
+    return result;
   }
 
   async markProcessed(eventId: string): Promise<void> {

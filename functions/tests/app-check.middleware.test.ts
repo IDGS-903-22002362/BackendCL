@@ -215,6 +215,8 @@ describe("firebase rules static validation", () => {
       "liga_mx_jugadores_actuales",
       "liga_mx_partidos_actuales",
       "liga_mx_detalles_partido_actuales",
+      "opta_contexto_actual",
+      "opta_match_stats_actuales",
     ]);
   });
 

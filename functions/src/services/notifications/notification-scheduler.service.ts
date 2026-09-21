@@ -13,6 +13,12 @@ import notificationAudienceService from "./notification-audience.service";
 import { notificationCollections } from "./collections";
 import notificationEventService from "./notification-event.service";
 import productRatingService from "../product-rating.service";
+import { evaluateRachaRisk, RACHA_TIMEZONE } from "../../utils/racha-risk.util";
+import {
+  BIRTHDAY_TIMEZONE,
+  evaluateBirthdayToday,
+  toCalendarDateKey,
+} from "../../utils/birthday.util";
 
 const CARRITOS_COLLECTION = "carritos";
 const ORDENES_COLLECTION = "ordenes";
@@ -256,6 +262,161 @@ class NotificationSchedulerService {
 
     this.baseLogger.info("notification_scheduler_rating_reminders", {
       candidateOrders: snapshot.size,
+      enqueued: results.length,
+    });
+
+    return results;
+  }
+
+  async enqueueStreakReminders(now = new Date()): Promise<NotificationEvent[]> {
+    const riskNow = evaluateRachaRisk({}, RACHA_TIMEZONE, now);
+    const yesterdayKey = riskNow.yesterdayKey;
+    const todayKey = riskNow.todayKey;
+    const pageSize = notificationConfig.scheduler.streakReminderPageSize;
+    const results: NotificationEvent[] = [];
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    let totalCandidates = 0;
+
+    while (true) {
+      let query: FirebaseFirestore.Query = firestoreApp
+        .collection(notificationCollections.users)
+        .where("streakLastDay", "==", yesterdayKey)
+        .limit(pageSize);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+
+      const snapshot = await query.get();
+      if (snapshot.empty) {
+        break;
+      }
+
+      for (const userDoc of snapshot.docs) {
+        totalCandidates += 1;
+        const userData = userDoc.data() as {
+          uid?: string;
+          activo?: boolean;
+          streakCount?: unknown;
+          streakLastDay?: unknown;
+        };
+        const userId = String(userData.uid || userDoc.id).trim();
+        const risk = evaluateRachaRisk(userData, RACHA_TIMEZONE, now);
+
+        if (!userId || userData.activo === false || !risk.atRisk) {
+          continue;
+        }
+
+        const event = await notificationEventService.enqueueEvent({
+          eventType: "streak_reminder",
+          userId,
+          sourceData: {
+            dayKey: todayKey,
+            streakCount: risk.streakCount,
+            streakLastDay: risk.streakLastDay,
+          },
+          triggerSource: "scheduler_streak_reminder",
+          fingerprintParts: ["streak_reminder", userId, todayKey],
+        });
+
+        results.push(event.event);
+      }
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      if (snapshot.size < pageSize) {
+        break;
+      }
+    }
+
+    this.baseLogger.info("notification_scheduler_streak_reminders", {
+      todayKey,
+      yesterdayKey,
+      totalCandidates,
+      enqueued: results.length,
+    });
+
+    return results;
+  }
+
+  async enqueueBirthdayNotifications(
+    now = new Date(),
+  ): Promise<NotificationEvent[]> {
+    const pageSize = notificationConfig.scheduler.birthdayPageSize;
+    const results: NotificationEvent[] = [];
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    let totalCandidates = 0;
+    let matchedBirthdays = 0;
+
+    while (true) {
+      let query: FirebaseFirestore.Query = firestoreApp
+        .collection(notificationCollections.users)
+        .orderBy("__name__")
+        .limit(pageSize);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+
+      const snapshot = await query.get();
+      if (snapshot.empty) {
+        break;
+      }
+
+      for (const userDoc of snapshot.docs) {
+        totalCandidates += 1;
+        const userData = userDoc.data() as {
+          uid?: string;
+          activo?: boolean;
+          nombre?: unknown;
+          fechaNacimiento?: unknown;
+        };
+        const userId = String(userData.uid || userDoc.id).trim();
+        const birthday = evaluateBirthdayToday(
+          userData.fechaNacimiento,
+          BIRTHDAY_TIMEZONE,
+          now,
+        );
+
+        if (!userId || userData.activo === false || !birthday.isBirthday) {
+          continue;
+        }
+
+        matchedBirthdays += 1;
+        const fullName =
+          typeof userData.nombre === "string" ? userData.nombre.trim() : "";
+        const firstName = fullName.split(/\s+/)[0] || undefined;
+        const dayKey = toCalendarDateKey(birthday.today);
+
+        const event = await notificationEventService.enqueueEvent({
+          eventType: "birthday",
+          userId,
+          sourceData: {
+            dayKey,
+            yearKey: String(birthday.today.year),
+            birthDate: birthday.birthDate
+              ? toCalendarDateKey(birthday.birthDate)
+              : null,
+            firstName,
+          },
+          triggerSource: "scheduler_birthday",
+          fingerprintParts: ["birthday", userId, String(birthday.today.year)],
+        });
+
+        results.push(event.event);
+      }
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      if (snapshot.size < pageSize) {
+        break;
+      }
+    }
+
+    this.baseLogger.info("notification_scheduler_birthdays", {
+      dayKey: toCalendarDateKey(
+        evaluateBirthdayToday(null, BIRTHDAY_TIMEZONE, now).today,
+      ),
+      totalCandidates,
+      matchedBirthdays,
       enqueued: results.length,
     });
 

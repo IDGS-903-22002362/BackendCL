@@ -256,6 +256,8 @@ const PUBLIC_STOREFRONT_READ_PREFIXES = [
   "/noticias",
   "/api/beneficios",
   "/beneficios",
+  "/api/patrocinadores",
+  "/patrocinadores",
   "/api/liga-mx",
   "/liga-mx",
   "/api/pickup-locations",

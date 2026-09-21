@@ -64,6 +64,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /opta_contexto_actual/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /opta_match_stats_actuales/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Logos de patrocinadores para el home de la app. Solo el backend escribe.
+    match /patrocinadores/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

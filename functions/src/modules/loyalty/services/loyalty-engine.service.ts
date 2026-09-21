@@ -47,6 +47,18 @@ function normalizeCustomerNameSnapshot(value: unknown): string | undefined {
   return normalized || undefined;
 }
 
+const UNIQUE_USER_CLAIM_FIELD_RE = /^[A-Za-z][A-Za-z0-9_]{2,80}$/;
+
+function assertUniqueUserClaimField(field: string): string {
+  if (!UNIQUE_USER_CLAIM_FIELD_RE.test(field)) {
+    throw new LoyaltyProblemError(
+      "INVALID_AMOUNT",
+      "El campo de reclamo de campaña no es válido",
+    );
+  }
+  return field;
+}
+
 export class LoyaltyEngineService {
   async getWallet(memberId: string): Promise<LoyaltyWallet> {
     try {
@@ -175,6 +187,64 @@ export class LoyaltyEngineService {
       legacyTipo: TipoMovimientoPuntos.AJUSTE,
       legacyOrigen: "admin",
     });
+  }
+
+  /**
+   * Bono de campaña (regalo masivo). Idempotente de verdad: además de la
+   * clave de 24h, marca un campo en el socio para que reejecutar el script
+   * días después no vuelva a acreditar.
+   */
+  async applyCampaignGiftBonus(
+    memberId: string,
+    input: {
+      campaignKey: string;
+      points: number;
+      description: string;
+      claimField: string;
+      actorId?: string;
+    },
+  ): Promise<LoyaltyTransaction | null> {
+    if (!Number.isInteger(input.points) || input.points <= 0) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT");
+    }
+    const campaignKey = input.campaignKey.trim();
+    if (!campaignKey || campaignKey.length > 80) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT", "campaignKey inválido");
+    }
+    const claimField = assertUniqueUserClaimField(input.claimField);
+    const existing = await firestoreApp.collection(USUARIOS).doc(memberId).get();
+    if (existing.data()?.[claimField]) {
+      return null;
+    }
+    const idempotencyKey = `gift:${campaignKey}:${memberId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.SERVICE,
+          actorId: input.actorId ?? "campaign-gift",
+          roles: ["SERVICE"],
+          permissions: [],
+        },
+        points: input.points,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: `bonus/campaign/${campaignKey}`,
+        description: input.description,
+        reasonCode: "CAMPAIGN_GIFT",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+        uniqueUserClaimField: claimField,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
   }
 
   async applyWelcomeBonus(memberId: string, actorId = "system"): Promise<LoyaltyTransaction | null> {
@@ -758,6 +828,7 @@ export class LoyaltyEngineService {
     lifetimeRedeemedDelta?: number;
     legacySkip?: boolean;
     skipIfDuplicate?: boolean;
+    uniqueUserClaimField?: string;
     requireCustomerRecipient?: boolean;
     postLedgerInTx?: (
       tx: FirebaseFirestore.Transaction,
@@ -871,6 +942,13 @@ export class LoyaltyEngineService {
         throw new LoyaltyProblemError("MEMBER_NOT_FOUND");
       }
 
+      const claimField = params.uniqueUserClaimField
+        ? assertUniqueUserClaimField(params.uniqueUserClaimField)
+        : undefined;
+      if (claimField && userSnap.data()?.[claimField]) {
+        throw new LoyaltyProblemError("DUPLICATE_TRANSACTION");
+      }
+
       const walletRef = firestoreApp
         .collection("loyalty_wallets")
         .doc(params.memberId);
@@ -981,6 +1059,14 @@ export class LoyaltyEngineService {
         tx.set(
           userRef,
           { bonoSocialRegistroAt: Timestamp.now() },
+          { merge: true },
+        );
+      }
+
+      if (claimField) {
+        tx.set(
+          userRef,
+          { [claimField]: Timestamp.now() },
           { merge: true },
         );
       }

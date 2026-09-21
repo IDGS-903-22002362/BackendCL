@@ -4,12 +4,17 @@ import * as queryController from "../controllers/notifications/notifications.que
 import {
   validateBody,
   validateParams,
+  validateQuery,
 } from "../middleware/validation.middleware";
 import {
   deviceIdParamSchema,
   enqueueNotificationEventSchema,
+  broadcastIdParamSchema,
   broadcastNotificationSchema,
+  inboxQuerySchema,
   manualNotificationTestSchema,
+  markInboxReadSchema,
+  inboxNotificationIdParamSchema,
   registerDeviceTokenSchema,
   updateDeviceTokenSchema,
   updateNotificationPreferencesSchema,
@@ -190,6 +195,187 @@ router.put(
 
 /**
  * @swagger
+ * /api/notificaciones/inbox:
+ *   get:
+ *     summary: Listar la bandeja de notificaciones del usuario autenticado
+ *     description: >
+ *       Devuelve el historial in-app del usuario ordenado de la más reciente a
+ *       la más antigua, junto con el total de no leídas. Incluye notificaciones
+ *       cuyo push no llegó al dispositivo, porque el espejo in-app se escribe
+ *       siempre que se procesa el evento.
+ *       La paginación es por cursor: manda `cursor` con el `nextCursor` de la
+ *       respuesta anterior para pedir la página siguiente.
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *           default: 20
+ *       - in: query
+ *         name: cursor
+ *         required: false
+ *         schema:
+ *           type: string
+ *           example: "8sJk2mQpZ1aBcDeFgHiJ"
+ *     responses:
+ *       200:
+ *         description: Bandeja obtenida
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 items:
+ *                   - id: "8sJk2mQpZ1aBcDeFgHiJ"
+ *                     type: "order_shipped"
+ *                     category: "order"
+ *                     title: "Tu pedido va en camino"
+ *                     body: "Sigue tu envío desde la app"
+ *                     read: false
+ *                     createdAt: "2026-08-26T17:04:12.000Z"
+ *                     payload:
+ *                       notificationId: "evt_123:in_app"
+ *                       eventId: "evt_123"
+ *                       type: "order_shipped"
+ *                       category: "order"
+ *                       entityType: "order"
+ *                       entityId: "ord_456"
+ *                       deeplink: "clubleon://shop/order/ord_456"
+ *                       screen: "order_detail"
+ *                       priority: "high"
+ *                 unreadCount: 3
+ *                 nextCursor: "8sJk2mQpZ1aBcDeFgHiJ"
+ *                 hasMore: true
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/inbox",
+  authMiddleware,
+  validateQuery(inboxQuerySchema),
+  queryController.listInbox,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/inbox/leidas:
+ *   post:
+ *     summary: Marcar notificaciones de la bandeja como leídas
+ *     description: >
+ *       Solo se actualizan los documentos cuyo destinatario es el usuario
+ *       autenticado; los ids ajenos o inexistentes se ignoran en silencio.
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [ids]
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 maxItems: 50
+ *                 items:
+ *                   type: string
+ *           example:
+ *             ids: ["8sJk2mQpZ1aBcDeFgHiJ"]
+ *     responses:
+ *       200:
+ *         description: Notificaciones marcadas como leídas
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Notificaciones marcadas como leídas"
+ *               data:
+ *                 updated: 1
+ *                 unreadCount: 2
+ *       400:
+ *         $ref: '#/components/responses/400BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/inbox/leidas",
+  authMiddleware,
+  validateBody(markInboxReadSchema),
+  commandController.markInboxRead,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/inbox/leer-todo:
+ *   post:
+ *     summary: Marcar toda la bandeja del usuario como leída
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Bandeja marcada como leída
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Bandeja marcada como leída"
+ *               data:
+ *                 updated: 5
+ *                 unreadCount: 0
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.post(
+  "/inbox/leer-todo",
+  authMiddleware,
+  commandController.markAllInboxRead,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/inbox/{notificationId}:
+ *   delete:
+ *     summary: Eliminar una notificación de la bandeja del usuario
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: notificationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Notificación eliminada
+ *       404:
+ *         description: Notificación no encontrada
+ */
+router.delete(
+  "/inbox/:notificationId",
+  authMiddleware,
+  validateParams(inboxNotificationIdParamSchema),
+  commandController.deleteInboxNotification,
+);
+
+/**
+ * @swagger
  * /api/notificaciones/prueba:
  *   post:
  *     summary: Enviar una notificación push de prueba
@@ -234,12 +420,15 @@ router.post(
  * @swagger
  * /api/notificaciones/broadcast:
  *   post:
- *     summary: Enviar una notificación push broadcast
+ *     summary: Encolar una notificación push broadcast
  *     description: >
  *       Endpoint administrativo para enviar un mensaje ad-hoc a todos los
  *       dispositivos activos, o solo a una lista de userIds.
  *       Si `userIds` está vacío u omitido, se incluyen todos los usuarios con
  *       al menos un dispositivo push habilitado.
+ *       El envío es asíncrono: la respuesta 202 confirma que el broadcast quedó
+ *       encolado en lotes de 500 tokens. Usa
+ *       `GET /api/notificaciones/broadcast/{broadcastId}` para ver el avance.
  *     tags: [Notifications]
  *     security:
  *       - BearerAuth: []
@@ -257,8 +446,19 @@ router.post(
  *             priority: "high"
  *             userIds: []
  *     responses:
- *       200:
- *         description: Broadcast procesado
+ *       202:
+ *         description: Broadcast encolado
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Broadcast de notificación encolado"
+ *               data:
+ *                 broadcastId: "8sJk2mQpZ1aBcDeFgHiJ"
+ *                 status: "queued"
+ *                 targetedUsers: 4820
+ *                 totalTokens: 5931
+ *                 totalChunks: 12
  *       400:
  *         $ref: '#/components/responses/400BadRequest'
  *       401:
@@ -274,6 +474,44 @@ router.post(
   requireAdmin,
   validateBody(broadcastNotificationSchema),
   commandController.sendBroadcastNotification,
+);
+
+/**
+ * @swagger
+ * /api/notificaciones/broadcast/{broadcastId}:
+ *   get:
+ *     summary: Consultar el avance de un broadcast
+ *     description: >
+ *       Devuelve los contadores acumulados del broadcast: lotes completados,
+ *       envíos exitosos, fallidos y tokens dados de baja por inválidos.
+ *     tags: [Notifications]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: broadcastId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: "8sJk2mQpZ1aBcDeFgHiJ"
+ *     responses:
+ *       200:
+ *         description: Estado del broadcast
+ *       401:
+ *         $ref: '#/components/responses/401Unauthorized'
+ *       403:
+ *         $ref: '#/components/responses/403Forbidden'
+ *       404:
+ *         $ref: '#/components/responses/404NotFound'
+ *       500:
+ *         $ref: '#/components/responses/500ServerError'
+ */
+router.get(
+  "/broadcast/:broadcastId",
+  authMiddleware,
+  requireAdmin,
+  validateParams(broadcastIdParamSchema),
+  queryController.getBroadcastStatus,
 );
 
 /**

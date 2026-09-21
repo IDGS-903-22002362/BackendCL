@@ -13,14 +13,17 @@ import {
   SenalesContextoLigaMx,
   TemporadaLigaMxApi,
 } from "./liga-mx-context.resolver";
+import { esVentanaSemanalClasificacion } from "./liga-mx.datetime";
 import {
   construirCalendarioActual,
   construirClasificacionActual,
   construirContextoActual,
   construirPlantillaActual,
   fusionarPartidosCalendario,
+  esCierrePartidoPublicable,
   esMarcadorOficial,
-  esPartidoConcluido,
+  hayPartidoDentroDeVentanaDeSilencio,
+  partidoDentroDeVentanaDeSilencio,
   normalizarDetallePartido,
   normalizarFilaClasificacion,
   normalizarCuerpoTecnico,
@@ -95,6 +98,16 @@ class LigaMxService {
       const plantillaExistente = await this.obtenerPlantillaActual(divisionKey);
       const requiereCargaInicial =
         !calendarioExistente || !clasificacionExistente || !plantillaExistente;
+      const partidoEnCurso = hayPartidoDentroDeVentanaDeSilencio(
+        calendarioExistente?.partidos ?? [],
+      );
+
+      // Con un partido en curso no se consulta nada de esta división hasta el
+      // corte de publicación, para no guardar datos parciales.
+      if (partidoEnCurso && !cambioContexto && !requiereCargaInicial) {
+        continue;
+      }
+
       const partidoPendienteDeCierre = this.obtenerPartidoPendienteDeCierre(
         calendarioExistente?.partidos ?? [],
       );
@@ -105,28 +118,19 @@ class LigaMxService {
           divisionKey,
           partidoPendienteDeCierre,
         ));
+      // Calendario y plantilla solo se consultan al cierre del partido
+      // (o en carga inicial y cambio de torneo).
       const debeRefrescarCalendario =
-        cambioContexto ||
-        requiereCargaInicial ||
-        debeMonitorearCierre ||
-        (await this.debeSincronizar(
-          `calendario-actual-${divisionKey}`,
-          configuracionLigaMx.ttlMs.calendario,
-        ));
+        cambioContexto || requiereCargaInicial || debeMonitorearCierre;
       const debeRefrescarClasificacion =
         cambioContexto ||
         requiereCargaInicial ||
-        (await this.debeSincronizar(
-          `clasificacion-actual-${divisionKey}`,
-          configuracionLigaMx.ttlMs.clasificacion,
-        ));
-      const debeRefrescarPlantilla =
-        cambioContexto ||
-        requiereCargaInicial ||
-        (await this.debeSincronizar(
-          `plantilla-actual-${divisionKey}`,
-          configuracionLigaMx.ttlMs.plantilla,
-        ));
+        (esVentanaSemanalClasificacion() &&
+          (await this.debeSincronizar(
+            `clasificacion-actual-${divisionKey}`,
+            configuracionLigaMx.ttlMs.clasificacion,
+          )));
+      const debeRefrescarPlantilla = cambioContexto || requiereCargaInicial;
 
       if (
         !debeRefrescarCalendario &&
@@ -607,11 +611,15 @@ class LigaMxService {
   private async sincronizarDetallePartido(
     partido: PartidoLigaMxDoc,
     force: boolean,
-  ): Promise<DetallePartidoLigaMxDoc> {
+  ): Promise<DetallePartidoLigaMxDoc | null> {
     const claveEstado = `detalle-partido-${partido.id}`;
     const ttlMs = this.obtenerTtlDetallePartido(partido);
     const ref = firestoreApp.collection(COLECCIONES.detallesPartidoActuales).doc(partido.id);
     const existente = await this.obtenerDetallePartidoActual(partido.id);
+
+    if (partidoDentroDeVentanaDeSilencio(partido.fechaHoraPartido)) {
+      return existente;
+    }
 
     if (!force && existente && !(await this.debeSincronizar(claveEstado, ttlMs))) {
       return existente;
@@ -884,10 +892,17 @@ class LigaMxService {
     );
   }
 
-  private async esMarcadorPendienteDeCierre(
+  /**
+   * Un partido se consulta solo desde el corte de publicación: mientras está en
+   * curso la fuente no se toca, aunque reporte fases como "Final del Primer
+   * Tiempo". Después del corte se insiste hasta que el marcador quede oficial,
+   * con un tope para no consultar indefinidamente un partido que la fuente deja
+   * en "Marcador Final". Si el marcador aún no se publicó, no aplica el tope.
+   */
+  private debeMonitorearCierreDePartido(
     partido: PartidoLigaMxDoc,
     ahoraMs = Date.now(),
-  ): Promise<boolean> {
+  ): boolean {
     if (!partido.fechaHoraPartido || esMarcadorOficial(partido.estado)) {
       return false;
     }
@@ -898,36 +913,40 @@ class LigaMxService {
       return false;
     }
 
-    if (esPartidoConcluido(partido.estado)) {
+    if (
+      ahoraMs <
+      fechaPartidoMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs
+    ) {
+      return false;
+    }
+
+    const marcadorPublicado =
+      partido.local.goles !== null || partido.visita.goles !== null;
+
+    if (!marcadorPublicado) {
       return true;
     }
 
     return (
-      ahoraMs >=
-      fechaPartidoMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs
+      ahoraMs <
+      fechaPartidoMs + configuracionLigaMx.ventanaSeguimientoResultadoFinMs
     );
+  }
+
+  private async esMarcadorPendienteDeCierre(
+    partido: PartidoLigaMxDoc,
+    ahoraMs = Date.now(),
+  ): Promise<boolean> {
+    return this.debeMonitorearCierreDePartido(partido, ahoraMs);
   }
 
   private obtenerPartidoPendienteDeCierre(
     partidos: PartidoLigaMxDoc[],
     ahoraMs = Date.now(),
   ): PartidoLigaMxDoc | null {
-    const candidatos = partidos.filter((partido) => {
-      if (!partido.fechaHoraPartido || esMarcadorOficial(partido.estado)) {
-        return false;
-      }
-
-      const fechaPartidoMs = new Date(partido.fechaHoraPartido).getTime();
-
-      if (Number.isNaN(fechaPartidoMs)) {
-        return false;
-      }
-
-      return (
-        ahoraMs >=
-        fechaPartidoMs + configuracionLigaMx.ventanaSeguimientoResultadoInicioMs
-      );
-    });
+    const candidatos = partidos.filter((partido) =>
+      this.debeMonitorearCierreDePartido(partido, ahoraMs),
+    );
 
     if (!candidatos.length) {
       return null;
@@ -943,13 +962,14 @@ class LigaMxService {
   private obtenerPartidosRecienFinalizados(
     partidosAnteriores: PartidoLigaMxDoc[],
     partidosActuales: PartidoLigaMxDoc[],
+    ahoraMs = Date.now(),
   ): PartidoLigaMxDoc[] {
     const anterioresPorId = new Map(
       partidosAnteriores.map((partido) => [partido.id, partido]),
     );
 
     return partidosActuales.filter((partidoActual) => {
-      if (!esMarcadorOficial(partidoActual.estado)) {
+      if (!esCierrePartidoPublicable(partidoActual, ahoraMs)) {
         return false;
       }
 
@@ -959,7 +979,7 @@ class LigaMxService {
         return true;
       }
 
-      return !esMarcadorOficial(partidoAnterior.estado);
+      return !esCierrePartidoPublicable(partidoAnterior, ahoraMs);
     });
   }
 

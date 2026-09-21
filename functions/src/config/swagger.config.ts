@@ -74,6 +74,10 @@ import {
   createBeneficioSchema,
   updateBeneficioSchema,
 } from "../middleware/validators/beneficio.validator";
+import {
+  createPatrocinadorSchema,
+  updatePatrocinadorSchema,
+} from "../middleware/validators/patrocinador.validator";
 import { createAiSessionSchema } from "../middleware/validators/ai-session.validator";
 import { sendAiMessageSchema } from "../middleware/validators/ai-chat.validator";
 import {
@@ -183,6 +187,10 @@ const swaggerDefinition = {
     {
       name: "Beneficios",
       description: "Gestión de publicaciones informativas de beneficios",
+    },
+    {
+      name: "Patrocinadores",
+      description: "Gestión de logos e información de patrocinadores",
     },
     {
       name: "Gallery",
@@ -362,6 +370,8 @@ const swaggerDefinition = {
       DeleteNewsImage: zodToJsonSchema(deleteNewsImageSchema),
       CreateBenefit: zodToJsonSchema(createBeneficioSchema),
       UpdateBenefit: zodToJsonSchema(updateBeneficioSchema),
+      CreateSponsor: zodToJsonSchema(createPatrocinadorSchema),
+      UpdateSponsor: zodToJsonSchema(updatePatrocinadorSchema),
       CreateAiSession: zodToJsonSchema(createAiSessionSchema),
       CreatePublicAiSession: zodToJsonSchema(createPublicAiSessionSchema),
       SendAiMessage: zodToJsonSchema(sendAiMessageSchema),
@@ -1191,6 +1201,52 @@ const swaggerDefinition = {
             type: "string",
             format: "date-time",
             example: "2026-04-30T12:30:00Z",
+          },
+        },
+      },
+      Sponsor: {
+        type: "object",
+        properties: {
+          id: { type: "string", example: "sponsor_12345" },
+          nombre: {
+            type: "string",
+            example: "Banco Local",
+          },
+          imagenBlanca: {
+            type: "string",
+            format: "uri",
+            example:
+              "https://storage.googleapis.com/.../patrocinadores/logo-blanco.png",
+          },
+          imagenNegra: {
+            type: "string",
+            format: "uri",
+            example:
+              "https://storage.googleapis.com/.../patrocinadores/logo-negro.png",
+          },
+          imagen: {
+            type: "string",
+            format: "uri",
+            example:
+              "https://storage.googleapis.com/.../patrocinadores/logo-exclusivo.png",
+          },
+          exclusivo: {
+            type: "boolean",
+            example: false,
+          },
+          estatus: {
+            type: "boolean",
+            example: true,
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-09-04T12:00:00Z",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            example: "2026-09-04T12:30:00Z",
           },
         },
       },

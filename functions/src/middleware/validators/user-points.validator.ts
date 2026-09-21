@@ -34,6 +34,22 @@ export const assignUserPointsSchema = z
   })
   .strict();
 
+/**
+ * Clave de deduplicación que el sistema origen ya tiene garantizada (p. ej.
+ * `pos-sale:V-1787359777105`). Cuando viene, manda sobre la clave derivada del
+ * folio: es la única forma de que la acumulación en vivo, el reproceso de
+ * pendientes y la reparación histórica compartan identidad en el ledger.
+ */
+export const externalTransactionIdSchema = z
+  .string({ invalid_type_error: "El identificador externo debe ser texto" })
+  .trim()
+  .min(1, "El identificador externo no puede estar vacío")
+  .max(160, "El identificador externo no puede exceder 160 caracteres")
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9:._#-]*$/,
+    "El identificador externo contiene caracteres no permitidos",
+  );
+
 export const assignPointsBySaleSchema = z
   .object({
     folioVenta: saleFolioSchema,

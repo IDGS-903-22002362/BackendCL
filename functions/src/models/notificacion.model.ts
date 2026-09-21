@@ -18,6 +18,8 @@ export type NotificationEventType =
   | "promo_campaign"
   | "matchday_campaign"
   | "probable_repurchase"
+  | "streak_reminder"
+  | "birthday"
   | "manual_test"
   | "manual_broadcast";
 
@@ -30,6 +32,8 @@ export type NotificationCategory =
   | "matchday"
   | "reactivation"
   | "recommendation"
+  | "streak"
+  | "birthday"
   | "test";
 
 export type NotificationPriority = "normal" | "high";
@@ -57,6 +61,7 @@ export type NotificationEntityType =
   | "campaign"
   | "promo"
   | "user"
+  | "streak"
   | "notification";
 
 export interface NotificationQuietHours {
@@ -79,6 +84,8 @@ export interface NotificationPreferenceDocument {
   matchdayEnabled: boolean;
   reactivationEnabled: boolean;
   recommendationsEnabled: boolean;
+  streakRemindersEnabled: boolean;
+  birthdayNotificationsEnabled: boolean;
   quietHours: NotificationQuietHours;
   timezone: string;
   locale: string;
@@ -203,10 +210,128 @@ export interface NotificationEligibilityResult {
   timezone: string;
 }
 
+export type NotificationBroadcastStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type NotificationBroadcastChunkStatus =
+  | "queued"
+  | "processing"
+  | "done"
+  | "failed";
+
+/** Texto ya resuelto de un broadcast. Se congela al crear el job. */
+export interface NotificationBroadcastCopy {
+  title: string;
+  body: string;
+  deeplink: string;
+  screen: string;
+  category: NotificationCategory;
+  priority: NotificationPriority;
+}
+
+export interface NotificationBroadcastTarget {
+  userId: string;
+  deviceId: string;
+  token: string;
+}
+
+export interface NotificationBroadcastJob {
+  id?: string;
+  status: NotificationBroadcastStatus;
+  copy: NotificationBroadcastCopy;
+  requestedUserIds: string[];
+  targetedUsers: number;
+  totalTokens: number;
+  totalChunks: number;
+  chunksCompleted: number;
+  sent: number;
+  failed: number;
+  invalidTokens: number;
+  createdBy?: string;
+  lastError?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  completedAt?: Timestamp;
+}
+
+export interface NotificationBroadcastChunk {
+  id?: string;
+  broadcastId: string;
+  chunkIndex: number;
+  status: NotificationBroadcastChunkStatus;
+  copy: NotificationBroadcastCopy;
+  targets: NotificationBroadcastTarget[];
+  attempt: number;
+  sent: number;
+  failed: number;
+  invalidTokens: number;
+  lastError?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  processedAt?: Timestamp;
+}
+
+export interface NotificationBroadcastCreationResult {
+  broadcastId: string;
+  status: NotificationBroadcastStatus;
+  targetedUsers: number;
+  totalTokens: number;
+  totalChunks: number;
+}
+
 export interface NotificationProcessingResult {
   eventId: string;
   status: NotificationEventStatus;
   skipReason?: string;
   deliveries: NotificationDeliveryRecord[];
   copy?: GeneratedPushCopy;
+}
+
+/**
+ * Payload de navegación del espejo in-app. Mismos campos que viajan en `data`
+ * del push, para que el cliente resuelva el destino con la misma lógica.
+ */
+export interface NotificationInboxPayload {
+  notificationId: string;
+  eventId: string;
+  type: string;
+  category: string;
+  entityType: string;
+  entityId: string;
+  deeplink: string;
+  screen: string;
+  priority: string;
+}
+
+/** Notificación de la bandeja del usuario, ya normalizada para el cliente. */
+export interface NotificationInboxItem {
+  id: string;
+  type: string;
+  category: string;
+  title: string;
+  body: string;
+  read: boolean;
+  createdAt: string;
+  readAt?: string;
+  payload: NotificationInboxPayload;
+}
+
+export interface NotificationInboxPage {
+  items: NotificationInboxItem[];
+  unreadCount: number;
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface NotificationInboxReadResult {
+  updated: number;
+  unreadCount: number;
+}
+
+export interface NotificationInboxDeleteResult {
+  deleted: boolean;
+  unreadCount: number;
 }

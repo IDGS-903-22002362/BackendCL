@@ -82,41 +82,56 @@ export const syncUserLevelOnPointsChange = onDocumentWritten(
       return;
     }
 
-    const beforeData = event.data?.before?.data();
-    const afterData = afterSnap.data();
+    const ref = afterSnap.ref;
 
-    const pointsBefore = getPointsFromUserData(beforeData);
-    const pointsAfter = getPointsFromUserData(afterData);
-    const pointsChanged = pointsBefore !== pointsAfter;
+    // El snapshot del evento puede llegar con minutos de retraso y traer un
+    // saldo ya superado. Reescribir `puntosActuales` desde él pisa puntos
+    // legítimos: es el patrón "leer, calcular, escribir absoluto" que provocó
+    // el incidente POS. Se relee dentro de una transacción y este trigger sólo
+    // mantiene `nivel`; el saldo lo mueve exclusivamente el motor de loyalty.
+    const result = await ref.firestore.runTransaction(async (tx) => {
+      const fresh = await tx.get(ref);
+      if (!fresh.exists) {
+        return null;
+      }
 
-    const expectedLevel = getLevelByPoints(pointsAfter);
-    const currentLevel = typeof afterData?.nivel === "string" ? afterData.nivel.trim() : "";
-    const needsLevelSync = currentLevel !== expectedLevel;
+      const data = fresh.data();
+      const points = getPointsFromUserData(data);
+      const expectedLevel = getLevelByPoints(points);
+      const currentLevel =
+        typeof data?.nivel === "string" ? data.nivel.trim() : "";
+      const needsLevelSync = currentLevel !== expectedLevel;
 
-    const currentStoredPoints = normalizePoints(afterData?.puntosActuales);
-    const needsPointsSync = currentStoredPoints !== pointsAfter;
+      // Único caso en que este trigger toca el saldo: materializar el campo
+      // legacy `puntos` cuando `puntosActuales` no existe todavía.
+      const needsPointsBackfill = normalizePoints(data?.puntosActuales) === null;
 
-    if (!pointsChanged && !needsLevelSync && !needsPointsSync) {
+      if (!needsLevelSync && !needsPointsBackfill) {
+        return null;
+      }
+
+      const update: Record<string, unknown> = {
+        nivel: expectedLevel,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      if (needsPointsBackfill) {
+        update.puntosActuales = points;
+      }
+
+      tx.set(ref, update, { merge: true });
+      return { points, expectedLevel, needsLevelSync, needsPointsBackfill };
+    });
+
+    if (!result) {
       return;
     }
 
-    await afterSnap.ref.set(
-      {
-        puntosActuales: pointsAfter,
-        nivel: expectedLevel,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
     logger.info("Nivel sincronizado por cambio de puntos", {
       userId: event.params.userId,
-      pointsBefore,
-      pointsAfter,
-      level: expectedLevel,
-      pointsChanged,
-      needsLevelSync,
-      needsPointsSync,
+      points: result.points,
+      level: result.expectedLevel,
+      needsLevelSync: result.needsLevelSync,
+      needsPointsBackfill: result.needsPointsBackfill,
     });
   },
 );

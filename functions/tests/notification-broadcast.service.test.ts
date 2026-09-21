@@ -1,6 +1,43 @@
 const listActiveDevices = jest.fn();
-const enqueueEvent = jest.fn();
-const processQueuedEvent = jest.fn();
+const optedOutDocs = jest.fn();
+const broadcastDocSet = jest.fn();
+const bulkWriterSet = jest.fn();
+const bulkWriterClose = jest.fn();
+
+let broadcastDocIdSequence = 0;
+const chunkDocRefs: string[] = [];
+
+jest.mock("../src/config/firebase", () => ({
+  firestoreTienda: {
+    collection: jest.fn((name: string) => ({
+      doc: jest.fn((docId?: string) => {
+        if (name === "notificacionBroadcasts") {
+          return {
+            id: docId || `broadcast_${++broadcastDocIdSequence}`,
+            set: broadcastDocSet,
+          };
+        }
+
+        chunkDocRefs.push(docId as string);
+        return { id: docId, path: `${name}/${docId}` };
+      }),
+    })),
+    bulkWriter: jest.fn(() => ({
+      set: bulkWriterSet,
+      close: bulkWriterClose,
+    })),
+  },
+}));
+
+jest.mock("../src/config/app.firebase", () => ({
+  firestoreApp: {
+    collectionGroup: jest.fn(() => ({
+      where: jest.fn(() => ({
+        get: optedOutDocs,
+      })),
+    })),
+  },
+}));
 
 jest.mock("../src/services/notifications/device-token.service", () => ({
   __esModule: true,
@@ -9,86 +46,132 @@ jest.mock("../src/services/notifications/device-token.service", () => ({
   },
 }));
 
-jest.mock("../src/services/notifications/notification-event.service", () => ({
-  __esModule: true,
-  default: {
-    enqueueEvent,
-  },
-}));
+import notificationBroadcastService, {
+  BROADCAST_CHUNK_SIZE,
+} from "../src/services/notifications/notification-broadcast.service";
 
-jest.mock("../src/services/notifications/notification-processing.service", () => ({
-  __esModule: true,
-  default: {
-    processQueuedEvent,
-  },
-}));
+const device = (userId: string, deviceId: string, token: string) => ({
+  userId,
+  deviceId,
+  token,
+  enabled: true,
+});
 
-import notificationBroadcastService from "../src/services/notifications/notification-broadcast.service";
+const optedOut = (userIds: string[]) => ({
+  docs: userIds.map((userId) => ({
+    data: () => ({ userId, pushEnabled: false }),
+    ref: { parent: { parent: { id: userId } } },
+  })),
+});
 
-describe("notificationBroadcastService", () => {
+describe("notificationBroadcastService.createBroadcast", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    broadcastDocIdSequence = 0;
+    chunkDocRefs.length = 0;
+    broadcastDocSet.mockResolvedValue(undefined);
+    bulkWriterClose.mockResolvedValue(undefined);
+    optedOutDocs.mockResolvedValue(optedOut([]));
   });
 
-  it("broadcasts to unique users with active devices", async () => {
+  it("deduplica tokens repetidos y cuenta usuarios unicos", async () => {
     listActiveDevices.mockResolvedValue([
-      { userId: "uid_1", deviceId: "d1", token: "token_1", enabled: true },
-      { userId: "uid_1", deviceId: "d2", token: "token_2", enabled: true },
-      { userId: "uid_2", deviceId: "d3", token: "token_3", enabled: true },
+      device("uid_1", "d1", "token_1"),
+      device("uid_1", "d2", "token_2"),
+      // Mismo token bajo otro deviceId: no debe enviarse dos veces.
+      device("uid_1", "d3", "token_1"),
+      device("uid_2", "d4", "token_3"),
     ]);
-    enqueueEvent
-      .mockResolvedValueOnce({
-        event: { id: "evt_1", fingerprint: "fp_1" },
-        created: true,
-      })
-      .mockResolvedValueOnce({
-        event: { id: "evt_2", fingerprint: "fp_2" },
-        created: true,
-      });
-    processQueuedEvent
-      .mockResolvedValueOnce({
-        eventId: "evt_1",
-        status: "processed",
-        deliveries: [],
-      })
-      .mockResolvedValueOnce({
-        eventId: "evt_2",
-        status: "skipped",
-        skipReason: "no_active_tokens",
-        deliveries: [],
-      });
 
-    const result = await notificationBroadcastService.broadcast({
+    const result = await notificationBroadcastService.createBroadcast({
       title: "Hola",
       body: "Entra para ver novedades",
-      deeplink: "clubleon://shop/home",
-      screen: "home",
     });
 
     expect(listActiveDevices).toHaveBeenCalledWith(undefined);
-    expect(enqueueEvent).toHaveBeenCalledTimes(2);
-    expect(enqueueEvent.mock.calls[0][0].eventType).toBe("manual_broadcast");
+    expect(result.totalTokens).toBe(3);
     expect(result.targetedUsers).toBe(2);
-    expect(result.sent).toBe(1);
-    expect(result.skipped).toBe(1);
-    expect(result.failed).toBe(0);
+    expect(result.totalChunks).toBe(1);
+    expect(result.status).toBe("queued");
   });
 
-  it("passes userIds filter to device listing", async () => {
+  it("excluye usuarios con pushEnabled en false", async () => {
     listActiveDevices.mockResolvedValue([
-      { userId: "uid_9", deviceId: "d9", token: "token_9", enabled: true },
+      device("uid_1", "d1", "token_1"),
+      device("uid_2", "d2", "token_2"),
+      device("uid_3", "d3", "token_3"),
     ]);
-    enqueueEvent.mockResolvedValue({
-      event: { id: "evt_9", fingerprint: "fp_9" },
-      created: true,
-    });
-    processQueuedEvent.mockResolvedValue({
-      eventId: "evt_9",
-      status: "processed",
-      deliveries: [],
+    optedOutDocs.mockResolvedValue(optedOut(["uid_2"]));
+
+    const result = await notificationBroadcastService.createBroadcast({
+      title: "Hola",
+      body: "Solo para quienes aceptan push",
     });
 
-    await notificationBroadcastService.broadcast({
+    expect(result.totalTokens).toBe(2);
+    expect(result.targetedUsers).toBe(2);
+  });
+
+  it("trocea la audiencia en lotes de 500", async () => {
+    const devices = Array.from({ length: 1200 }, (_, index) =>
+      device(`uid_${index}`, `d_${index}`, `token_${index}`),
+    );
+    listActiveDevices.mockResolvedValue(devices);
+
+    const result = await notificationBroadcastService.createBroadcast({
+      title: "Hola",
+      body: "Broadcast grande",
+    });
+
+    expect(BROADCAST_CHUNK_SIZE).toBe(500);
+    expect(result.totalTokens).toBe(1200);
+    expect(result.totalChunks).toBe(3);
+    expect(bulkWriterSet).toHaveBeenCalledTimes(3);
+
+    const chunkSizes = bulkWriterSet.mock.calls.map(
+      (call) => (call[1] as { targets: unknown[] }).targets.length,
+    );
+    expect(chunkSizes).toEqual([500, 500, 200]);
+  });
+
+  it("marca el job como completed sin crear lotes cuando no hay audiencia", async () => {
+    listActiveDevices.mockResolvedValue([]);
+
+    const result = await notificationBroadcastService.createBroadcast({
+      title: "Hola",
+      body: "Sin destinatarios",
+    });
+
+    expect(result.status).toBe("completed");
+    expect(result.totalChunks).toBe(0);
+    expect(result.totalTokens).toBe(0);
+    expect(bulkWriterSet).not.toHaveBeenCalled();
+  });
+
+  it("congela el copy del admin sin pasar por la IA", async () => {
+    listActiveDevices.mockResolvedValue([device("uid_1", "d1", "token_1")]);
+
+    await notificationBroadcastService.createBroadcast({
+      title: "Titulo del admin",
+      body: "Cuerpo del admin",
+      priority: "high",
+    });
+
+    const job = broadcastDocSet.mock.calls[0][0];
+    expect(job.copy).toEqual({
+      title: "Titulo del admin",
+      body: "Cuerpo del admin",
+      deeplink: "clubleon://shop/home",
+      screen: "home",
+      category: "test",
+      priority: "high",
+    });
+  });
+
+  it("pasa el filtro de userIds al listado de dispositivos", async () => {
+    listActiveDevices.mockResolvedValue([device("uid_9", "d9", "token_9")]);
+
+    await notificationBroadcastService.createBroadcast({
       title: "Hola",
       body: "Solo para ti",
       userIds: ["uid_9"],

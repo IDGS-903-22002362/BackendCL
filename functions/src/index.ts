@@ -25,12 +25,16 @@ import {
   enqueueInactiveUserNotifications,
   enqueueProductRatingReminderNotifications,
   enqueueProbableRepurchaseNotifications,
+  enqueueStreakReminderNotifications,
+  enqueueBirthdayNotifications,
 } from "./notifications.cron";
 import { processNotificationEventTrigger } from "./services/notifications/notification-processor.trigger";
+import { processBroadcastChunkTrigger } from "./services/notifications/notification-broadcast.trigger";
 import { processPaymentEventTrigger } from "./services/payments/payment-event.trigger";
 import { API_RUNTIME_SECRETS } from "./config/runtime-secrets";
 import { scheduledAccountDeletion } from "./deletion-scheduler.function";
 import { syncLigaMxData } from "./liga-mx.cron";
+import { syncOptaMatchStats } from "./opta.cron";
 import { syncTrabajadorClubCortesias } from "./trabajador-club-cortesias.cron";
 import { syncUserLevelOnPointsChange } from "./puntos-nivel.trigger";
 import {
@@ -84,6 +88,7 @@ export const syncInstagramPostsFunction = syncInstagramPosts;
 export const scheduledAccountDeletionFunction = scheduledAccountDeletion;
 export const processTryOnJob = processTryOnJobTrigger;
 export const processNotificationEvent = processNotificationEventTrigger;
+export const processBroadcastChunk = processBroadcastChunkTrigger;
 export const processPaymentEvent = processPaymentEventTrigger;
 export const reconcileAplazoPaymentsFunction = reconcileAplazoPayments;
 export const expirePickupOrdersFunction = expirePickupOrders;
@@ -94,10 +99,13 @@ export const probableRepurchaseNotifications =
   enqueueProbableRepurchaseNotifications;
 export const productRatingReminderNotifications =
   enqueueProductRatingReminderNotifications;
+export const streakReminderNotifications = enqueueStreakReminderNotifications;
+export const birthdayNotifications = enqueueBirthdayNotifications;
 export const userLevelSyncFunction = syncUserLevelOnPointsChange;
 export const loyaltyPointsExpirationJobFunction = loyaltyPointsExpirationJob;
 export const loyaltyRedemptionReleaseJobFunction = loyaltyRedemptionReleaseJob;
 export const syncLigaMxDataFunction = syncLigaMxData;
+export const syncOptaMatchStatsFunction = syncOptaMatchStats;
 export const syncTrabajadorClubCortesiasFunction = syncTrabajadorClubCortesias;
 export const recalculateRecommendationAggregatesFunction =
   recalculateRecommendationAggregates;

@@ -4,6 +4,7 @@ import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import { toDayKey, previousDayKey } from "../utils/day-key.util";
 import { RachaCheckInResult } from "../models/racha.model";
+import { RACHA_TIMEZONE } from "../utils/racha-risk.util";
 
 export class RachaService {
     private usersCollection = firestoreApp.collection("usuariosApp");
@@ -14,7 +15,7 @@ export class RachaService {
      * - Si su último día fue ayer => incrementa.
      * - Si se saltó días => reinicia a 1.
      */
-    async checkIn(uid: string, timeZone = "America/Mexico_City"): Promise<RachaCheckInResult> {
+    async checkIn(uid: string, timeZone = RACHA_TIMEZONE): Promise<RachaCheckInResult> {
         const userRef = this.usersCollection.doc(uid);
 
         return await firestoreApp.runTransaction(async (tx) => {
@@ -73,7 +74,7 @@ export class RachaService {
     /**
      * Solo para mostrar info sin modificar (útil para el perfil)
      */
-    async getRacha(uid: string, timeZone = "America/Mexico_City") {
+    async getRacha(uid: string, timeZone = RACHA_TIMEZONE) {
         const doc = await this.usersCollection.doc(uid).get();
         if (!doc.exists) return null;
         const data = doc.data() || {};

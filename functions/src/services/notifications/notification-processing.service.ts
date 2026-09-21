@@ -7,7 +7,7 @@ import notificationAiService from "./notification-ai.service";
 import notificationDeliveryService from "./notification-delivery.service";
 import notificationEligibilityService from "./notification-eligibility.service";
 import notificationEventService from "./notification-event.service";
-import { isTransactionalNotification } from "./notification.utils";
+import { isTimeSensitiveNotification } from "./notification.utils";
 
 class NotificationProcessingService {
   private readonly baseLogger = logger.child({
@@ -28,21 +28,22 @@ class NotificationProcessingService {
   }
 
   async processQueuedEvent(eventId: string): Promise<NotificationProcessingResult> {
-    const lockedEvent = await notificationEventService.markProcessing(eventId);
+    const lock = await notificationEventService.markProcessing(eventId);
 
-    if (!lockedEvent) {
+    if (!lock.event) {
       return this.buildNoopResult(eventId, "failed", "event_not_found");
     }
 
-    if (lockedEvent.status !== "processing") {
+    // Otro proceso ya tomo el evento; reprocesarlo aqui duplicaria el push.
+    if (!lock.acquired) {
       return this.buildNoopResult(
         eventId,
-        lockedEvent.status,
-        lockedEvent.skipReason,
+        lock.event.status,
+        lock.event.skipReason || "already_locked",
       );
     }
 
-    return this.processLockedEvent(lockedEvent);
+    return this.processLockedEvent(lock.event);
   }
 
   async processLockedEvent(
@@ -69,7 +70,7 @@ class NotificationProcessingService {
       }
 
       const copy = await notificationAiService.generateCopy(event);
-      if (!copy.send && !isTransactionalNotification(event.eventType)) {
+      if (!copy.send && !isTimeSensitiveNotification(event.eventType)) {
         const skipReason = "ai_opt_out";
         const skippedDelivery = await notificationDeliveryService.recordSkipped(
           event,

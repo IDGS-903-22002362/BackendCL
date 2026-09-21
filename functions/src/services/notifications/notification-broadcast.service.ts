@@ -1,8 +1,23 @@
-import { randomUUID } from "crypto";
+import { Timestamp } from "firebase-admin/firestore";
+import { firestoreTienda } from "../../config/firebase";
+import {
+  NotificationBroadcastChunk,
+  NotificationBroadcastCopy,
+  NotificationBroadcastCreationResult,
+  NotificationBroadcastJob,
+  NotificationBroadcastTarget,
+} from "../../models/notificacion.model";
 import logger from "../../utils/logger";
-import deviceTokenService from "./device-token.service";
-import notificationEventService from "./notification-event.service";
-import notificationProcessingService from "./notification-processing.service";
+import notificationBroadcastAudienceService from "./notification-broadcast-audience.service";
+import { notificationCollections } from "./collections";
+
+/** Limite duro de `sendEachForMulticast` en firebase-admin. */
+export const BROADCAST_CHUNK_SIZE = 500;
+
+const DEFAULT_DEEPLINK = "clubleon://shop/home";
+const DEFAULT_SCREEN = "home";
+const DEFAULT_TITLE = "Club Leon";
+const DEFAULT_BODY = "Entra para ver novedades.";
 
 export type BroadcastNotificationInput = {
   title: string;
@@ -11,20 +26,7 @@ export type BroadcastNotificationInput = {
   screen?: string;
   priority?: "normal" | "high";
   userIds?: string[];
-};
-
-export type BroadcastNotificationResult = {
-  broadcastId: string;
-  targetedUsers: number;
-  sent: number;
-  failed: number;
-  skipped: number;
-  results: Array<{
-    userId: string;
-    status: "processed" | "failed" | "skipped";
-    skipReason?: string;
-    eventId?: string;
-  }>;
+  createdBy?: string;
 };
 
 class NotificationBroadcastService {
@@ -32,10 +34,41 @@ class NotificationBroadcastService {
     component: "notification-broadcast-service",
   });
 
-  async broadcast(
+  private truncate(value: string | undefined, max: number): string | undefined {
+    const normalized = value?.trim();
+    return normalized ? normalized.slice(0, max) : undefined;
+  }
+
+  /**
+   * El copy de un broadcast lo escribe el admin, asi que se resuelve una sola
+   * vez para todo el job en lugar de generarlo por usuario.
+   */
+  private buildCopy(input: BroadcastNotificationInput): NotificationBroadcastCopy {
+    return {
+      title: this.truncate(input.title, 80) || DEFAULT_TITLE,
+      body: this.truncate(input.body, 180) || DEFAULT_BODY,
+      deeplink: this.truncate(input.deeplink, 200) || DEFAULT_DEEPLINK,
+      screen: this.truncate(input.screen, 80) || DEFAULT_SCREEN,
+      category: "test",
+      priority: input.priority === "high" ? "high" : "normal",
+    };
+  }
+
+  private chunkTargets(
+    targets: NotificationBroadcastTarget[],
+  ): NotificationBroadcastTarget[][] {
+    const chunks: NotificationBroadcastTarget[][] = [];
+
+    for (let index = 0; index < targets.length; index += BROADCAST_CHUNK_SIZE) {
+      chunks.push(targets.slice(index, index + BROADCAST_CHUNK_SIZE));
+    }
+
+    return chunks;
+  }
+
+  async createBroadcast(
     input: BroadcastNotificationInput,
-  ): Promise<BroadcastNotificationResult> {
-    const broadcastId = randomUUID();
+  ): Promise<NotificationBroadcastCreationResult> {
     const requestedUserIds = [
       ...new Set(
         (input.userIds || [])
@@ -44,111 +77,95 @@ class NotificationBroadcastService {
       ),
     ];
 
-    const activeDevices = await deviceTokenService.listActiveDevices(
-      requestedUserIds.length > 0 ? requestedUserIds : undefined,
-    );
+    const copy = this.buildCopy(input);
+    const audience =
+      await notificationBroadcastAudienceService.resolve(requestedUserIds);
+    const chunks = this.chunkTargets(audience.targets);
+    const now = Timestamp.now();
 
-    const targetUserIds = [
-      ...new Set(
-        activeDevices
-          .map((device) => device.userId?.trim())
-          .filter((userId): userId is string => Boolean(userId)),
-      ),
-    ];
+    const broadcastRef = firestoreTienda
+      .collection(notificationCollections.broadcasts)
+      .doc();
 
-    this.baseLogger.info("notification_broadcast_started", {
-      broadcastId,
-      targetedUsers: targetUserIds.length,
-      requestedUsers: requestedUserIds.length,
-      title: input.title,
-    });
+    const job: Omit<NotificationBroadcastJob, "id"> = {
+      status: chunks.length === 0 ? "completed" : "queued",
+      copy,
+      requestedUserIds,
+      targetedUsers: audience.targetedUsers,
+      totalTokens: audience.targets.length,
+      totalChunks: chunks.length,
+      chunksCompleted: 0,
+      sent: 0,
+      failed: 0,
+      invalidTokens: 0,
+      createdBy: input.createdBy,
+      createdAt: now,
+      updatedAt: now,
+      ...(chunks.length === 0 ? { completedAt: now } : {}),
+    };
 
-    const results: BroadcastNotificationResult["results"] = [];
-    let sent = 0;
-    let failed = 0;
-    let skipped = 0;
+    await broadcastRef.set(job);
 
-    for (const userId of targetUserIds) {
-      const requestKey = `${broadcastId}:${userId}`;
+    if (chunks.length > 0) {
+      const writer = firestoreTienda.bulkWriter();
 
-      try {
-        const enqueued = await notificationEventService.enqueueEvent({
-          eventType: "manual_broadcast",
-          userId,
-          priority: input.priority,
-          sourceData: {
-            title: input.title,
-            body: input.body,
-            deeplink: input.deeplink,
-            screen: input.screen,
-            priority: input.priority,
-            requestKey,
-            broadcastId,
-          },
-          fingerprintParts: ["manual_broadcast", broadcastId, userId],
-          triggerSource: "manual_broadcast_endpoint",
-        });
+      chunks.forEach((targets, chunkIndex) => {
+        const chunkRef = firestoreTienda
+          .collection(notificationCollections.broadcastChunks)
+          .doc(`${broadcastRef.id}_${chunkIndex}`);
 
-        const processingResult =
-          await notificationProcessingService.processQueuedEvent(
-            enqueued.event.id || enqueued.event.fingerprint,
-          );
+        const chunk: Omit<NotificationBroadcastChunk, "id"> = {
+          broadcastId: broadcastRef.id,
+          chunkIndex,
+          status: "queued",
+          copy,
+          targets,
+          attempt: 0,
+          sent: 0,
+          failed: 0,
+          invalidTokens: 0,
+          createdAt: now,
+          updatedAt: now,
+        };
 
-        const status =
-          processingResult.status === "processed"
-            ? "processed"
-            : processingResult.status === "failed"
-              ? "failed"
-              : "skipped";
+        void writer.set(chunkRef, chunk);
+      });
 
-        if (status === "processed") {
-          sent += 1;
-        } else if (status === "failed") {
-          failed += 1;
-        } else {
-          skipped += 1;
-        }
-
-        results.push({
-          userId,
-          status,
-          skipReason: processingResult.skipReason,
-          eventId: processingResult.eventId,
-        });
-      } catch (error) {
-        failed += 1;
-        const message =
-          error instanceof Error ? error.message : "Error desconocido";
-
-        this.baseLogger.error("notification_broadcast_user_failed", {
-          broadcastId,
-          userId,
-          message,
-        });
-
-        results.push({
-          userId,
-          status: "failed",
-          skipReason: message,
-        });
-      }
+      await writer.close();
     }
 
-    this.baseLogger.info("notification_broadcast_finished", {
-      broadcastId,
-      targetedUsers: targetUserIds.length,
-      sent,
-      failed,
-      skipped,
+    this.baseLogger.info("notification_broadcast_created", {
+      broadcastId: broadcastRef.id,
+      targetedUsers: audience.targetedUsers,
+      totalTokens: audience.targets.length,
+      totalChunks: chunks.length,
+      requestedUsers: requestedUserIds.length,
     });
 
     return {
-      broadcastId,
-      targetedUsers: targetUserIds.length,
-      sent,
-      failed,
-      skipped,
-      results,
+      broadcastId: broadcastRef.id,
+      status: job.status,
+      targetedUsers: audience.targetedUsers,
+      totalTokens: audience.targets.length,
+      totalChunks: chunks.length,
+    };
+  }
+
+  async getBroadcast(
+    broadcastId: string,
+  ): Promise<NotificationBroadcastJob | null> {
+    const snapshot = await firestoreTienda
+      .collection(notificationCollections.broadcasts)
+      .doc(broadcastId.trim())
+      .get();
+
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return {
+      id: snapshot.id,
+      ...(snapshot.data() as NotificationBroadcastJob),
     };
   }
 }
