@@ -303,6 +303,28 @@ export const deleteGallery = async (req: Request, res: Response): Promise<Respon
     }
 };
 
+export const destroyPermanently = async (req: Request, res: Response): Promise<Response> => {
+    try {
+        const { id } = req.params;
+        const result = await galleryService.permanentlyDelete(id);
+
+        return res.status(200).json({
+            success: true,
+            message: "Galería eliminada permanentemente",
+            data: {
+                id,
+                deletedMediaCount: result.deletedMediaCount,
+            },
+        });
+    } catch (error: any) {
+        const statusCode = error.message?.includes("no encontrada") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            message: error.message || "Error al eliminar permanentemente la galería",
+        });
+    }
+};
+
 export const reactivate = async (req: Request, res: Response) => {
     try {
         const { id } = req.params;

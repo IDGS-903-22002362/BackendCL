@@ -1,18 +1,36 @@
 const batchSet = jest.fn();
 const batchUpdate = jest.fn();
+const batchDelete = jest.fn();
 const batchCommit = jest.fn();
-const storageBucket = jest.fn();
+const storageFileDelete = jest.fn(async () => undefined);
+const storageDeleteFiles = jest.fn(async () => undefined);
+const storageBucket = jest.fn(() => ({
+  file: jest.fn(() => ({ delete: storageFileDelete })),
+  deleteFiles: storageDeleteFiles,
+}));
 
 const existingDocs = new Set<string>();
+const galleryDataById = new Map<string, Record<string, unknown>>();
+const mediaDocsByGallery = new Map<string, Array<{
+  ref: { id: string };
+  data: () => Record<string, unknown>;
+}>>();
 
 const mediaDocRef = {
   id: "media_1",
 };
 
 const galleryDocRef = {
-  get: jest.fn(async () => ({ exists: existingDocs.has("gal_1") })),
+  get: jest.fn(async () => ({
+    exists: existingDocs.has("gal_1"),
+    id: "gal_1",
+    data: () => galleryDataById.get("gal_1"),
+  })),
   collection: jest.fn(() => ({
     doc: jest.fn(() => mediaDocRef),
+    get: jest.fn(async () => ({
+      docs: mediaDocsByGallery.get("gal_1") ?? [],
+    })),
   })),
 };
 
@@ -26,6 +44,7 @@ jest.mock("../src/config/app.firebase", () => ({
     batch: jest.fn(() => ({
       set: batchSet,
       update: batchUpdate,
+      delete: batchDelete,
       commit: batchCommit,
     })),
   },
@@ -61,6 +80,8 @@ describe("galeria service addMediaMetadata", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     existingDocs.clear();
+    galleryDataById.clear();
+    mediaDocsByGallery.clear();
   });
 
   it("guarda metadata y actualiza arrays legacy sin usar Storage", async () => {
@@ -124,6 +145,57 @@ describe("galeria service addMediaMetadata", () => {
 
     expect(error.code).toBe("NOT_FOUND");
     expect(error.message).toBe("Galeria no encontrada");
+  });
+});
+
+describe("galeria service permanentlyDelete", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    existingDocs.clear();
+    galleryDataById.clear();
+    mediaDocsByGallery.clear();
+  });
+
+  it("borra documento, subcoleccion media y archivos de Storage", async () => {
+    existingDocs.add("gal_1");
+    galleryDataById.set("gal_1", {
+      descripcion: "Galeria de prueba",
+      imagenes: [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/galeria/gal_1/foto.jpg",
+      ],
+      videos: [
+        "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/reels/gal_1/reel.mp4",
+      ],
+      estatus: false,
+      createdAt: nowDate,
+      updatedAt: nowDate,
+    });
+    mediaDocsByGallery.set("gal_1", [
+      {
+        ref: { id: "media_1" },
+        data: () => ({
+          url: "https://storage.googleapis.com/app-oficial-leon.firebasestorage.app/galeria/gal_1/foto.jpg",
+          storagePath: "galeria/gal_1/foto.jpg",
+        }),
+      },
+    ]);
+
+    const result = await galleryService.permanentlyDelete("gal_1");
+
+    expect(result).toEqual({ deletedMediaCount: 2 });
+    expect(storageDeleteFiles).toHaveBeenCalledWith({ prefix: "galeria/gal_1/" });
+    expect(storageDeleteFiles).toHaveBeenCalledWith({ prefix: "reels/gal_1/" });
+    expect(storageFileDelete).toHaveBeenCalled();
+    expect(batchDelete).toHaveBeenCalled();
+    expect(batchCommit).toHaveBeenCalled();
+  });
+
+  it("lanza error si la galeria no existe", async () => {
+    await expect(galleryService.permanentlyDelete("gal_1")).rejects.toThrow(
+      "Galería no encontrada",
+    );
+    expect(storageDeleteFiles).not.toHaveBeenCalled();
+    expect(batchDelete).not.toHaveBeenCalled();
   });
 });
 

@@ -17,15 +17,45 @@ export class GalleryServiceError extends Error {
 class GalleryService {
 
     private collection = firestoreApp.collection(GALERIA_COLLECTION);
-    //private extractFilePathFromUrl(url: string): string | null {
-    //try {
-    // const decoded = decodeURIComponent(url);
-    // const match = decoded.match(/\/o\/(.*?)\?/);
-    // return match ? match[1] : null;
-    //} catch {
-    //return null;
-    //}
-    //}
+
+    private extractStoragePath(urlOrPath: string): string | null {
+        const value = urlOrPath.trim();
+        if (!value) return null;
+
+        if (!value.startsWith("http://") && !value.startsWith("https://")) {
+            return value.replace(/^\/+/, "");
+        }
+
+        try {
+            const parsed = new URL(value);
+
+            if (parsed.hostname === "storage.googleapis.com") {
+                const parts = parsed.pathname.split("/").filter(Boolean);
+                return parts.length > 1 ? decodeURIComponent(parts.slice(1).join("/")) : null;
+            }
+
+            if (parsed.hostname === "firebasestorage.googleapis.com") {
+                const match = parsed.pathname.match(/\/o\/(.+)$/);
+                return match ? decodeURIComponent(match[1]) : null;
+            }
+        } catch {
+            return null;
+        }
+
+        return null;
+    }
+
+    private async deleteStorageObject(urlOrPath: string): Promise<void> {
+        const filePath = this.extractStoragePath(urlOrPath);
+        if (!filePath) return;
+
+        try {
+            await storageAppOficial.bucket().file(filePath).delete();
+        } catch (error: any) {
+            if (error?.code === 404) return;
+            console.warn("No se pudo eliminar archivo de storage:", error?.message || error);
+        }
+    }
 
     private mapDoc(doc: FirebaseFirestore.DocumentSnapshot): Galeria {
 
@@ -164,23 +194,7 @@ class GalleryService {
             throw new Error("Galería no encontrada");
         }
 
-        // 🔑 Extraer el path del archivo desde la URL de Firebase Storage
-        try {
-            const bucket = storageAppOficial.bucket();
-            const urlObj = new URL(imageUrl);
-            const pathParts = urlObj.pathname.split('/');
-            // La URL es: https://storage.googleapis.com/BUCKET_NAME/ruta/al/archivo
-            const filePath = pathParts.slice(2).join('/'); // Remover /BUCKET_NAME/
-
-            if (filePath) {
-                const file = bucket.file(filePath);
-                await file.delete().catch(err => {
-                    console.warn("No se pudo eliminar archivo de storage:", err.message);
-                });
-            }
-        } catch (error) {
-            console.warn("Error al extraer path de URL:", error);
-        }
+        await this.deleteStorageObject(imageUrl);
 
         // Eliminar del documento
         await docRef.update({
@@ -199,22 +213,7 @@ class GalleryService {
             throw new Error("Galería no encontrada");
         }
 
-        // 🔑 Extraer el path del archivo desde la URL
-        try {
-            const bucket = storageAppOficial.bucket();
-            const urlObj = new URL(videoUrl);
-            const pathParts = urlObj.pathname.split('/');
-            const filePath = pathParts.slice(2).join('/');
-
-            if (filePath) {
-                const file = bucket.file(filePath);
-                await file.delete().catch(err => {
-                    console.warn("No se pudo eliminar archivo de storage:", err.message);
-                });
-            }
-        } catch (error) {
-            console.warn("Error al extraer path de URL:", error);
-        }
+        await this.deleteStorageObject(videoUrl);
 
         // Eliminar del documento
         await docRef.update({
@@ -266,6 +265,52 @@ class GalleryService {
             estatus: false,
             updatedAt: admin.firestore.Timestamp.now()
         });
+    }
+
+    async permanentlyDelete(id: string): Promise<{ deletedMediaCount: number }> {
+        const docRef = this.collection.doc(id);
+        const snapshot = await docRef.get();
+
+        if (!snapshot.exists) {
+            throw new Error("Galería no encontrada");
+        }
+
+        const gallery = this.mapDoc(snapshot);
+        const mediaSnapshot = await docRef.collection("media").get();
+        const mediaUrls = new Set<string>();
+        const storagePaths = new Set<string>();
+
+        for (const url of [...gallery.imagenes, ...gallery.videos]) {
+            if (url) mediaUrls.add(url);
+        }
+
+        for (const mediaDoc of mediaSnapshot.docs) {
+            const data = mediaDoc.data() as { url?: string; storagePath?: string };
+            if (data.url) mediaUrls.add(data.url);
+            if (data.storagePath) storagePaths.add(data.storagePath);
+        }
+
+        const bucket = storageAppOficial.bucket();
+
+        await Promise.all([
+            ...[...mediaUrls].map((url) => this.deleteStorageObject(url)),
+            ...[...storagePaths].map((path) => this.deleteStorageObject(path)),
+            bucket.deleteFiles({ prefix: `galeria/${id}/` }).catch(() => undefined),
+            bucket.deleteFiles({ prefix: `reels/${id}/` }).catch(() => undefined),
+        ]);
+
+        const refsToDelete = [
+            ...mediaSnapshot.docs.map((doc) => doc.ref),
+            docRef,
+        ];
+
+        for (let index = 0; index < refsToDelete.length; index += 450) {
+            const batch = firestoreApp.batch();
+            refsToDelete.slice(index, index + 450).forEach((ref) => batch.delete(ref));
+            await batch.commit();
+        }
+
+        return { deletedMediaCount: mediaUrls.size };
     }
 
 }
