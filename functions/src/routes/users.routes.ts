@@ -27,7 +27,7 @@ import {
   assignUserPointsSchema,
   staffAssignmentHistoryQuerySchema,
 } from "../middleware/validators/user-points.validator";
-import { ROLES_ASIGNACION_PUNTOS } from "../models/usuario.model";
+import { ROLES_ASIGNACION_PUNTOS, RolUsuario } from "../models/usuario.model";
 import {
   legacyAssignPoints,
   legacyAssignPointsBySale,
@@ -320,6 +320,17 @@ router.get(
  *       500:
  *         $ref: '#/components/responses/500ServerError'
  */
+router.get(
+  "/club-busqueda",
+  authMiddleware,
+  verifyRole([
+    RolUsuario.ADMIN,
+    RolUsuario.EMPLEADO,
+    RolUsuario.EMPLEADO_CLUB,
+  ]),
+  queryController.searchClub,
+);
+
 router.get("/:id", authMiddleware, queryController.getById);
 
 /**

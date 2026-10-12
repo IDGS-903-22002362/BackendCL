@@ -353,6 +353,47 @@ export class LoyaltyEngineService {
     }
   }
 
+  async applyMinijuegoPrizeBonus(
+    memberId: string,
+    playId: string,
+    points: number,
+    prizeName: string,
+    actorId = memberId,
+  ): Promise<LoyaltyTransaction | null> {
+    if (points <= 0 || !Number.isInteger(points)) {
+      throw new LoyaltyProblemError("INVALID_AMOUNT");
+    }
+
+    const idempotencyKey = `minijuego-play:${playId}`;
+    try {
+      return await this.executeMutation({
+        memberId,
+        actor: {
+          actorType: LoyaltyActorType.USER,
+          actorId,
+          roles: ["CLIENTE"],
+          permissions: [],
+        },
+        points,
+        type: LoyaltyTransactionType.BONUS,
+        channel: LoyaltyChannel.SYSTEM,
+        externalTransactionId: idempotencyKey,
+        idempotencyKey,
+        operation: "bonus/minijuego-prize",
+        description: `Premio de minijuego: ${prizeName}`,
+        reasonCode: "MINIJUEGO_PRIZE",
+        legacyTipo: TipoMovimientoPuntos.BONIFICACION,
+        legacyOrigen: "promo",
+        skipIfDuplicate: true,
+      });
+    } catch (error) {
+      if (error instanceof LoyaltyProblemError && error.code === "DUPLICATE_TRANSACTION") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async applyProfileCompletionBonus(
     memberId: string,
     actorId = "system",

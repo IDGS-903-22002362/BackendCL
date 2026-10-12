@@ -5,6 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "npm run dev --prefix functions",
+    "emulators:firestore": "npx -y firebase-tools@latest emulators:start --only firestore --project app-oficial-leon --import=./emulator-data --export-on-exit=./emulator-data",
     "build": "npm run build --prefix functions",
     "start": "npm run shell --prefix functions",
     "deploy": "npm run deploy --prefix functions",

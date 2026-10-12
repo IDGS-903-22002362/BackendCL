@@ -17,6 +17,8 @@ export interface ActualizarBeneficioDTO {
   redireccion?: BeneficioRedireccion;
   puntosRecompensa?: number;
   estatus?: boolean;
+  /** Solo permite volver un minijuego a beneficio estándar sin borrar su configuración. */
+  tipo?: "estandar";
 }
 
 export type { BeneficioDestinoModulo, BeneficioRedireccion };

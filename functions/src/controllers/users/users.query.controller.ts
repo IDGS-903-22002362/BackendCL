@@ -150,6 +150,25 @@ export const getByLine = async (req: Request, res: Response) => {
 };
 */
 
+export const searchClub = async (req: Request, res: Response) => {
+  try {
+    const term = typeof req.query.q === "string" ? req.query.q : "";
+    const usuarios = await userAppService.searchClubUsers(term);
+
+    res.status(200).json({
+      success: true,
+      count: usuarios.length,
+      data: usuarios,
+    });
+  } catch (error) {
+    console.error("Error en GET /api/usuarios/club-busqueda:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error al buscar usuarios",
+    });
+  }
+};
+
 export const search = async (req: Request, res: Response) => {
   try {
     const { termino } = req.params;

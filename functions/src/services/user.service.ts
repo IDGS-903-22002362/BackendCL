@@ -212,6 +212,29 @@ export class UserAppService {
     }
   }
 
+  async searchClubUsers(
+    term: string,
+  ): Promise<Array<{ uid: string; nombre: string; email: string }>> {
+    const query = term.trim().toLowerCase();
+    if (query.length < 2) return [];
+
+    const snapshot = await firestoreApp.collection(USUARIOSAPP_COLLECTION).get();
+    const matches: Array<{ uid: string; nombre: string; email: string }> = [];
+
+    for (const doc of snapshot.docs) {
+      const data = doc.data();
+      const nombre = typeof data.nombre === "string" ? data.nombre : "";
+      const email = typeof data.email === "string" ? data.email : "";
+      const haystack = `${nombre} ${email} ${doc.id}`.toLowerCase();
+      if (!haystack.includes(query)) continue;
+
+      matches.push({ uid: doc.id, nombre, email });
+      if (matches.length >= 20) break;
+    }
+
+    return matches;
+  }
+
   async existsByEmail(email: string): Promise<boolean> {
     const snapshot = await firestoreApp
       .collection(USUARIOSAPP_COLLECTION)
