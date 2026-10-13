@@ -6,6 +6,29 @@ import { admin } from "../config/firebase.admin";
 import { RolUsuario } from "../models/usuario.model";
 import { isCustomerOnlyAccount } from "./usuario-roles";
 
+async function loadUsuarioAppByJwtUid(uid: string): Promise<{
+  id: string;
+  data: FirebaseFirestore.DocumentData;
+} | null> {
+  const snapshot = await firestoreApp.collection("usuariosApp").doc(uid).get();
+  if (!snapshot.exists) return null;
+
+  const data = snapshot.data() ?? {};
+  if (
+    typeof data.uid === "string" &&
+    data.uid.trim().length > 0 &&
+    data.uid !== snapshot.id
+  ) {
+    console.error("usuarios_app_uid_mismatch", {
+      docId: snapshot.id,
+      fieldUid: data.uid,
+    });
+    return null;
+  }
+
+  return { id: snapshot.id, data };
+}
+
 // Middleware de autenticación con JWT propio
 export const authMiddleware = async (
   req: Request,
@@ -39,23 +62,16 @@ export const authMiddleware = async (
       nombre: string;
     };
 
-    // Buscar el usuario en Firestore para obtener datos adicionales
-    const snapshot = await firestoreApp
-      .collection("usuariosApp")
-      .where("uid", "==", decoded.uid)
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
+    const usuario = await loadUsuarioAppByJwtUid(decoded.uid);
+    if (!usuario) {
       res.status(404).json({ message: "Usuario no registrado en la base de datos" });
       return;
     }
 
-    // Combinar datos del token y de Firestore
     req.user = {
       ...decoded,
-      ...snapshot.docs[0].data(),
-      uid: decoded.uid, // Asegurar que uid esté presente
+      ...usuario.data,
+      uid: usuario.id,
     };
 
     next();
@@ -437,6 +453,60 @@ export const optionalAuthMiddleware = (
     req.user = decoded;
   } catch (error) {
     console.warn("Token opcional inválido");
+  }
+
+  next();
+};
+
+/**
+ * Auth opcional para el catálogo de beneficios.
+ * Un Bearer válido carga el usuario de Firestore (correo real).
+ * Sin token, o con token inválido, el catálogo sigue público y anónimo.
+ */
+export const optionalAuthWithUserMiddleware = async (
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    next();
+    return;
+  }
+
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    next();
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(authHeader.split(" ")[1], jwtSecret) as {
+      uid: string;
+      email: string;
+      rol: RolUsuario;
+      nombre: string;
+    };
+    const usuario = await loadUsuarioAppByJwtUid(decoded.uid);
+    if (usuario) {
+      const userData = usuario.data;
+      const storedEmail =
+        typeof userData.email === "string" ? userData.email : decoded.email;
+      req.user = {
+        ...decoded,
+        ...userData,
+        uid: usuario.id,
+        email: storedEmail,
+        rol: (userData.rol as RolUsuario) ?? decoded.rol,
+        nombre:
+          typeof userData.nombre === "string" ? userData.nombre : decoded.nombre,
+      };
+    }
+  } catch (error) {
+    console.warn("optional_auth_with_user_skipped", {
+      route: req.originalUrl,
+      reason: error instanceof Error ? error.message : "invalid_token",
+    });
   }
 
   next();

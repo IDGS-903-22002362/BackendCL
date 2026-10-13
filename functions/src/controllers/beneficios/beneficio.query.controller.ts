@@ -1,16 +1,30 @@
 import { Request, Response } from "express";
 import beneficioService from "../../services/beneficio.service";
+import minijuegoService from "../../services/minijuego.service";
+import { viewerFromRequest } from "../../services/minijuego.logic";
 
-export const getAll = async (_req: Request, res: Response) => {
+function setCatalogCacheHeaders(res: Response): void {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Vary", "Authorization");
+  if (process.env.IS_LOCAL !== "true") return;
+  res.setHeader("X-Backend-Environment", "local");
+  res.setHeader("X-Backend-Version", "minigames-uid-local-v1");
+}
+
+export const getAll = async (req: Request, res: Response) => {
+  setCatalogCacheHeaders(res);
   try {
     const beneficios = await beneficioService.getAllBeneficios();
+    const data = await minijuegoService.presentCatalog(
+      beneficios,
+      viewerFromRequest(req),
+      (item) => beneficioService.serializeBeneficioForApi(item),
+    );
 
     return res.status(200).json({
       success: true,
-      count: beneficios.length,
-      data: beneficios.map((item) =>
-        beneficioService.serializeBeneficioForApi(item),
-      ),
+      count: data.length,
+      data,
     });
   } catch (error) {
     console.error("Error en GET /api/beneficios:", error);
@@ -44,6 +58,7 @@ export const getMyReclamados = async (req: Request, res: Response) => {
 };
 
 export const getById = async (req: Request, res: Response) => {
+  setCatalogCacheHeaders(res);
   try {
     const { id } = req.params;
     const beneficio = await beneficioService.getBeneficioById(id);
@@ -55,9 +70,22 @@ export const getById = async (req: Request, res: Response) => {
       });
     }
 
+    const data = await minijuegoService.presentOne(
+      beneficio,
+      viewerFromRequest(req),
+      (item) => beneficioService.serializeBeneficioForApi(item),
+    );
+
+    if (!data) {
+      return res.status(404).json({
+        success: false,
+        message: `Beneficio con ID ${id} no encontrado`,
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      data: beneficioService.serializeBeneficioForApi(beneficio),
+      data,
     });
   } catch (error) {
     console.error("Error en GET /api/beneficios/:id:", error);

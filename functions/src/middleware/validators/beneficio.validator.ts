@@ -52,5 +52,6 @@ export const updateBeneficioSchema = z
     redireccion: beneficioRedireccionSchema.optional(),
     puntosRecompensa: puntosRecompensaSchema.optional(),
     estatus: z.boolean().optional(),
+    tipo: z.literal("estandar").optional(),
   })
   .strict();

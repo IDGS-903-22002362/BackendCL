@@ -25,6 +25,18 @@ if (process.env.SERVICE_ACCOUNT_APP_OFICIAL) {
   }
 }
 
+const firestoreEmulatorHost = process.env.FIRESTORE_EMULATOR_HOST?.trim() ?? "";
+if (isCloudFunction && firestoreEmulatorHost) {
+  throw new Error(
+    "FIRESTORE_EMULATOR_HOST está definido en Cloud Functions. Producción debe usar Firestore real.",
+  );
+}
+if (process.env.IS_LOCAL === "true" && !firestoreEmulatorHost) {
+  throw new Error(
+    "El servidor local requiere FIRESTORE_EMULATOR_HOST. Sin el emulador, los minijuegos se guardan en Firestore real.",
+  );
+}
+
 const adminApps = Array.isArray(admin.apps) ? admin.apps : [];
 let appOficial = adminApps.find((app) => app?.name === "APP_OFICIAL");
 
@@ -62,5 +74,8 @@ console.log("🔥 App oficial inicializada:", {
   appName: appOficial.name,
   projectId: appOficial.options.projectId,
   mode: isCloudFunction ? "cloud" : "local",
+  firestore: firestoreEmulatorHost
+    ? `emulator ${firestoreEmulatorHost}`
+    : "cloud",
   hasServiceAccount: Boolean(serviceAccount),
 });

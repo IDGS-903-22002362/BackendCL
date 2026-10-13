@@ -8,10 +8,13 @@ import {
   Beneficio,
   BeneficioClaimResult,
   BeneficioMediaTipo,
+  BeneficioMinijuegoTipo,
   BeneficioRedireccion,
+  BeneficioTipo,
   BENEFICIO_DESTINOS,
   MAX_BENEFICIO_IMAGENES,
   MAX_BENEFICIO_PUNTOS_RECOMPENSA,
+  MINIJUEGO_TIPOS_BENEFICIO,
 } from "../models/beneficios.model";
 import loyaltyEngineService from "../modules/loyalty/services/loyalty-engine.service";
 
@@ -82,6 +85,17 @@ export class BeneficioService {
     return value === "imagen" || value === "video" ? value : undefined;
   }
 
+  private readBeneficioTipo(value: unknown): BeneficioTipo | undefined {
+    return value === "estandar" || value === "minijuego" ? value : undefined;
+  }
+
+  private readMinijuegoTipo(value: unknown): BeneficioMinijuegoTipo | undefined {
+    return typeof value === "string" &&
+      (MINIJUEGO_TIPOS_BENEFICIO as readonly string[]).includes(value)
+      ? (value as BeneficioMinijuegoTipo)
+      : undefined;
+  }
+
   private readRedireccion(value: unknown): BeneficioRedireccion | undefined {
     if (!value || typeof value !== "object") {
       return undefined;
@@ -133,6 +147,9 @@ export class BeneficioService {
       mediaTipo: this.readMediaTipo(data.mediaTipo),
       redireccion: this.readRedireccion(data.redireccion),
       puntosRecompensa: this.readPuntosRecompensa(data.puntosRecompensa),
+      tipo: this.readBeneficioTipo(data.tipo),
+      minijuegoId: this.readString(data.minijuegoId),
+      minijuegoTipo: this.readMinijuegoTipo(data.minijuegoTipo),
       estatus: data.estatus === true,
       createdAt: this.normalizeDate(data.createdAt),
       updatedAt: this.normalizeDate(data.updatedAt),
@@ -164,6 +181,13 @@ export class BeneficioService {
       ...(mediaTipo ? { mediaTipo } : {}),
       ...(beneficio.redireccion ? { redireccion: beneficio.redireccion } : {}),
       puntosRecompensa,
+      tipo: beneficio.tipo === "minijuego" ? "minijuego" : "estandar",
+      ...(beneficio.tipo === "minijuego" && beneficio.minijuegoId
+        ? { minijuegoId: beneficio.minijuegoId }
+        : {}),
+      ...(beneficio.tipo === "minijuego" && beneficio.minijuegoTipo
+        ? { minijuegoTipo: beneficio.minijuegoTipo }
+        : {}),
       estatus: beneficio.estatus === true,
       createdAt: beneficio.createdAt,
       updatedAt: beneficio.updatedAt,
@@ -235,15 +259,36 @@ export class BeneficioService {
       throw new Error(`Beneficio con ID ${id} no encontrado`);
     }
 
+    const current = snapshot.data() ?? {};
+    const minijuegoId = this.readString(current.minijuegoId);
+    const keepsMinijuego =
+      this.readBeneficioTipo(current.tipo) === "minijuego" &&
+      dto.tipo !== "estandar";
     const updateData = {
       ...dto,
       ...(dto.puntosRecompensa !== undefined
-        ? { puntosRecompensa: this.readPuntosRecompensa(dto.puntosRecompensa) }
+        ? {
+            puntosRecompensa: keepsMinijuego
+              ? 0
+              : this.readPuntosRecompensa(dto.puntosRecompensa),
+          }
+        : {}),
+      ...(keepsMinijuego && dto.redireccion !== undefined
+        ? { redireccion: { modulo: "none" as const } }
         : {}),
       updatedAt: new Date(),
     };
 
     await docRef.update(this.convertDatesToTimestamp(updateData));
+
+    if (minijuegoId) {
+      const { default: minijuegoService } = await import("./minijuego.service");
+      if (dto.tipo === "estandar") {
+        await minijuegoService.setEstatus(minijuegoId, false);
+      } else if (dto.estatus !== undefined) {
+        await minijuegoService.setEstatus(minijuegoId, dto.estatus);
+      }
+    }
 
     const updatedDoc = await docRef.get();
     return this.mapDocToBeneficio(updatedDoc);
@@ -376,10 +421,17 @@ export class BeneficioService {
       throw new Error(`Beneficio con ID ${id} no encontrado`);
     }
 
+    const minijuegoId = this.readString(snapshot.data()?.minijuegoId);
+
     await docRef.update({
       estatus: false,
       updatedAt: admin.firestore.Timestamp.now(),
     });
+
+    if (minijuegoId) {
+      const { default: minijuegoService } = await import("./minijuego.service");
+      await minijuegoService.setEstatus(minijuegoId, false);
+    }
   }
 
   async permanentlyDeleteBeneficio(id: string): Promise<string[]> {
@@ -392,6 +444,12 @@ export class BeneficioService {
 
     const beneficio = this.mapDocToBeneficio(snapshot);
     const mediaUrls = this.collectMediaUrls(beneficio);
+    const minijuegoId = this.readString(snapshot.data()?.minijuegoId);
+
+    if (minijuegoId) {
+      const { default: minijuegoService } = await import("./minijuego.service");
+      await minijuegoService.deleteLinked(minijuegoId);
+    }
 
     await docRef.delete();
 

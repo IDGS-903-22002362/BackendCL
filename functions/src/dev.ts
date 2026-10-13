@@ -24,6 +24,7 @@ app.listen(PORT, () => {
   │   📡 API URL:   http://localhost:${PORT}/api              │
   │   📝 Swagger:   http://localhost:${PORT}/api-docs      │
   │   👤 Admin SDK: Inicializado                           │
+  │   🔥 Firestore: ${process.env.FIRESTORE_EMULATOR_HOST ? `emulator ${process.env.FIRESTORE_EMULATOR_HOST}` : "cloud"} │
   │                                                        │
   ╰────────────────────────────────────────────────────────╯
   `);
