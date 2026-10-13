@@ -6,7 +6,7 @@ import { viewerFromRequest } from "../../services/minijuego.logic";
 function setCatalogCacheHeaders(res: Response): void {
   res.setHeader("Cache-Control", "private, no-store");
   res.setHeader("Vary", "Authorization");
-  if (process.env.NODE_ENV === "production") return;
+  if (process.env.IS_LOCAL !== "true") return;
   res.setHeader("X-Backend-Environment", "local");
   res.setHeader("X-Backend-Version", "minigames-uid-local-v1");
 }

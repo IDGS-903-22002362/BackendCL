@@ -113,7 +113,7 @@ export class MinijuegoService {
         adminView: viewer.adminView,
       });
       if (
-        process.env.NODE_ENV !== "production" &&
+        process.env.IS_LOCAL === "true" &&
         beneficio.tipo === "minijuego"
       ) {
         console.info(
@@ -144,7 +144,7 @@ export class MinijuegoService {
       result.push(json);
     }
 
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.IS_LOCAL === "true") {
       console.info("beneficios_catalog", {
         authPresent: Boolean(viewer.uid),
         authenticatedUid: viewer.uid ?? null,
@@ -193,7 +193,7 @@ export class MinijuegoService {
   async createMinijuegoBeneficio(
     input: GuardarMinijuegoInput,
   ): Promise<Record<string, unknown>> {
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.IS_LOCAL === "true") {
       console.info("[LOCAL SAVE minijuego]", {
         visibilidad: input.minijuego?.audiencia?.visibilidad ?? null,
         usuariosPermitidos: input.minijuego?.audiencia?.usuariosPermitidos ?? [],
@@ -250,7 +250,7 @@ export class MinijuegoService {
     beneficioId: string,
     input: GuardarMinijuegoInput,
   ): Promise<Record<string, unknown>> {
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.IS_LOCAL === "true") {
       console.info("[LOCAL SAVE minijuego]", {
         visibilidad: input.minijuego?.audiencia?.visibilidad ?? null,
         usuariosPermitidos: input.minijuego?.audiencia?.usuariosPermitidos ?? [],

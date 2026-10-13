@@ -5,6 +5,9 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "npm run dev --prefix functions",
+    "emulator": "npx -y firebase-tools@latest emulators:start --only firestore --project app-oficial-leon --import=./emulator-data --export-on-exit=./emulator-data",
+    "emulator:export": "npx -y firebase-tools@latest emulators:export ./emulator-data --only firestore --project app-oficial-leon --force",
+    "emulator:import": "npx -y firebase-tools@latest emulators:start --only firestore --project app-oficial-leon --import=./emulator-data",
     "emulators:firestore": "npx -y firebase-tools@latest emulators:start --only firestore --project app-oficial-leon --import=./emulator-data --export-on-exit=./emulator-data",
     "build": "npm run build --prefix functions",
     "start": "npm run shell --prefix functions",
@@ -14,7 +17,11 @@
     "watch": "tsc --watch",
     "seed": "ts-node-dev src/scripts/seed.ts",
     "diagnostico": "ts-node-dev src/scripts/diagnostico.ts",
-    "docs:firebase": "npx -y tsx tools/firebase-uml.ts"
+    "docs:firebase": "npx -y tsx tools/firebase-uml.ts",
+    "test:minigames": "npm run test:minigames --prefix functions",
+    "test:minigame-probabilities": "npm run test:minigame-probabilities --prefix functions",
+    "simulate:minigame": "npm run simulate:minigame --prefix functions",
+    "stress:minigame": "npm run stress:minigame --prefix functions"
   },
   "keywords": [
     "club-leon",
