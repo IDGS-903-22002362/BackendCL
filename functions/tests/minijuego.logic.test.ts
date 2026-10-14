@@ -12,6 +12,7 @@ import {
   pickWeightedPrize,
   pointsLedgerAmount,
   prepareMinijuegoWrite,
+  resolveBeneficioEspecialEstado,
   resolveSpecialStock,
   rouletteSegmentLabel,
   rouletteSegments,
@@ -736,6 +737,103 @@ describe("minijuego logic", () => {
         ],
       }),
     ).toThrow(expect.objectContaining({ code: "MINIGAME_INVALID_PRIZE" }));
+  });
+
+  it("guarda términos y vigencia solo en el premio especial", () => {
+    const prepared = prepareMinijuegoWrite({
+      beneficio: {
+        titulo: "Cartas",
+        descripcion: "Prueba",
+        estatus: true,
+      },
+      minijuego: {
+        tipo: "cartas",
+        intentosPorUsuario: 1,
+        audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
+      },
+      premios: [
+        {
+          nombre: "10 puntos",
+          tipo: "points",
+          valor: 10,
+          terminos: "No deben guardarse",
+          validoDesde: "2026-01-01T00:00:00.000Z",
+          caducaEl: "2026-02-01T00:00:00.000Z",
+        },
+        {
+          nombre: "Boletos",
+          tipo: "physical",
+          stock: 1,
+          especial: true,
+          terminos: " Canje en taquilla. ",
+          validoDesde: "2026-03-01T00:00:00.000Z",
+          caducaEl: "2026-04-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(prepared.premios[0].terminos).toBeUndefined();
+    expect(prepared.premios[0].validoDesde).toBeUndefined();
+    expect(prepared.premios[1]).toMatchObject({
+      especial: true,
+      terminos: "Canje en taquilla.",
+      validoDesde: new Date("2026-03-01T00:00:00.000Z"),
+      caducaEl: new Date("2026-04-01T00:00:00.000Z"),
+    });
+  });
+
+  it("rechaza una caducidad anterior al inicio de vigencia", () => {
+    expect(() =>
+      prepareMinijuegoWrite({
+        beneficio: {
+          titulo: "Cartas",
+          descripcion: "Prueba",
+          estatus: true,
+        },
+        minijuego: {
+          tipo: "cartas",
+          intentosPorUsuario: 1,
+          audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
+        },
+        premios: [
+          {
+            nombre: "Boletos",
+            tipo: "physical",
+            stock: 1,
+            especial: true,
+            validoDesde: "2026-05-01T00:00:00.000Z",
+            caducaEl: "2026-04-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    ).toThrow(expect.objectContaining({ code: "MINIGAME_INVALID_DATE" }));
+  });
+
+  it("calcula vigente, pendiente y caducado sin inventar fechas", () => {
+    const now = new Date("2026-10-14T18:00:00.000Z");
+
+    expect(resolveBeneficioEspecialEstado(now, null, null)).toBe("vigente");
+    expect(
+      resolveBeneficioEspecialEstado(
+        now,
+        new Date("2026-11-01T00:00:00.000Z"),
+        new Date("2026-12-01T00:00:00.000Z"),
+      ),
+    ).toBe("pendiente");
+    expect(
+      resolveBeneficioEspecialEstado(
+        now,
+        new Date("2026-01-01T00:00:00.000Z"),
+        new Date("2026-02-01T00:00:00.000Z"),
+      ),
+    ).toBe("caducado");
+    expect(
+      resolveBeneficioEspecialEstado(
+        now,
+        new Date("2026-01-01T00:00:00.000Z"),
+        new Date("2026-12-31T00:00:00.000Z"),
+      ),
+    ).toBe("vigente");
   });
 
   it("no marca adminView si el rol no es de staff", () => {

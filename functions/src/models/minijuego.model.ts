@@ -56,6 +56,9 @@ export interface MinijuegoPremio {
   color?: string;
   imagenUrl?: string;
   descripcion?: string;
+  terminos?: string;
+  validoDesde?: Date;
+  caducaEl?: Date;
   especial?: boolean;
   maxGanadores?: number;
 }
@@ -99,6 +102,9 @@ export interface PremioInput {
   stock?: number | null;
   weight?: number;
   descripcion?: string;
+  terminos?: string;
+  validoDesde?: string | null;
+  caducaEl?: string | null;
   imagenUrl?: string;
   color?: string;
   especial?: boolean;

@@ -65,9 +65,28 @@ export type PreparedPremio = {
   color: string;
   imagenUrl?: string;
   descripcion?: string;
+  terminos?: string;
+  validoDesde?: Date;
+  caducaEl?: Date;
   especial?: boolean;
   maxGanadores?: number;
 };
+
+export type BeneficioEspecialEstado = "pendiente" | "caducado" | "vigente";
+
+export function resolveBeneficioEspecialEstado(
+  now: Date,
+  validoDesde?: Date | null,
+  caducaEl?: Date | null,
+): BeneficioEspecialEstado {
+  if (validoDesde && now.getTime() < validoDesde.getTime()) {
+    return "pendiente";
+  }
+  if (caducaEl && now.getTime() > caducaEl.getTime()) {
+    return "caducado";
+  }
+  return "vigente";
+}
 
 export type PlayDecision =
   | { type: "replay"; playId: string }
@@ -639,6 +658,30 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
     );
   }
 
+  let terminos: string | undefined;
+  let validoDesde: Date | null = null;
+  let caducaEl: Date | null = null;
+  if (premio.especial === true) {
+    const rawTerminos = premio.terminos?.trim() ?? "";
+    if (rawTerminos.length > 4000) {
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_PRIZE",
+        400,
+        "Los términos del premio son demasiado largos.",
+      );
+    }
+    if (rawTerminos) terminos = rawTerminos;
+    validoDesde = parseOptionalDate(premio.validoDesde);
+    caducaEl = parseOptionalDate(premio.caducaEl);
+    if (validoDesde && caducaEl && caducaEl.getTime() < validoDesde.getTime()) {
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_DATE",
+        400,
+        "La caducidad no puede ser anterior al inicio de la vigencia.",
+      );
+    }
+  }
+
   const color =
     premio.color && COLOR_RE.test(premio.color)
       ? premio.color
@@ -665,6 +708,9 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
       ? { imagenUrl: readImageUrl(premio.imagenUrl) }
       : {}),
     ...(descripcion ? { descripcion } : {}),
+    ...(terminos ? { terminos } : {}),
+    ...(validoDesde ? { validoDesde } : {}),
+    ...(caducaEl ? { caducaEl } : {}),
     ...(premio.especial === true ? { especial: true } : {}),
   };
 }

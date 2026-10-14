@@ -23,12 +23,17 @@ type DocRef = {
   collection: (name: string) => CollectionRef;
 };
 
+type QueryRef = {
+  get: () => Promise<QuerySnap>;
+};
+
 type CollectionRef = {
   __kind: "collection";
   path: string;
   id: string;
   doc: (id?: string) => DocRef;
   get: () => Promise<QuerySnap>;
+  where: (field: string, op: string, value: unknown) => QueryRef;
 };
 
 type DocSnap = {
@@ -213,6 +218,23 @@ function createMemoryFirestore() {
       },
       get() {
         return Promise.resolve(query(path));
+      },
+      where(field: string, op: string, value: unknown) {
+        return {
+          get() {
+            const found = childPaths(path)
+              .map((docPath) => snapshot(docPath))
+              .filter((snap) => {
+                if (op !== "==") return false;
+                return snap.data()?.[field] === value;
+              });
+            return Promise.resolve({
+              empty: found.length === 0,
+              size: found.length,
+              docs: found,
+            });
+          },
+        };
       },
     };
   }

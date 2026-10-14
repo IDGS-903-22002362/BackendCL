@@ -9,11 +9,13 @@ jest.mock("../src/services/minijuego.service", () => ({
     acknowledge: jest.fn(),
     createMinijuegoBeneficio: jest.fn(),
     updateMinijuegoBeneficio: jest.fn(),
+    listMisBeneficios: jest.fn(),
   },
 }));
 
 import {
   acknowledge,
+  getMisBeneficios,
   getPendingPlay,
   play,
 } from "../src/controllers/minijuegos/minijuego.controller";
@@ -110,6 +112,33 @@ describe("minijuego play controller", () => {
     expect(mockedService.getPendingPlay).toHaveBeenCalledWith("game-1", {
       uid: "uid-a",
       email: "a@club.com",
+    });
+  });
+
+  it("lista mis beneficios solo con el uid del JWT", async () => {
+    mockedService.listMisBeneficios.mockResolvedValue([
+      { playId: "play-1", premioNombre: "Boletos" },
+    ] as never);
+    const req = {
+      params: {},
+      query: { uid: "uid-ajeno" },
+      user: { uid: "uid-real", email: "socio@club.com" },
+    } as unknown as Parameters<typeof getMisBeneficios>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof getMisBeneficios>[1];
+
+    await getMisBeneficios(req, res);
+
+    expect(mockedService.listMisBeneficios).toHaveBeenCalledWith({
+      uid: "uid-real",
+      email: "socio@club.com",
+    });
+    expect((res as unknown as { status: jest.Mock }).status).toHaveBeenCalledWith(
+      200,
+    );
+    expect((res as unknown as { json: jest.Mock }).json).toHaveBeenCalledWith({
+      success: true,
+      count: 1,
+      data: [{ playId: "play-1", premioNombre: "Boletos" }],
     });
   });
 

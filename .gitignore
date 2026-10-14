@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+.env.local
+.secret.local
 serviceAccountKey.json
 *.log
 .DS_Store

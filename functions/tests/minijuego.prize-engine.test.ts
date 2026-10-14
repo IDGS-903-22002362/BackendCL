@@ -658,6 +658,110 @@ describe("motor real de premios", () => {
     expect(playsOf(id, [...winners, ...extra]).filter((play) => play.prizeId === "especial")).toHaveLength(2);
     assertInvariants(id, [...winners, ...extra], prizes);
   });
+
+  it("mis beneficios solo lista los premios del socio y conserva la copia", async () => {
+    prizeRoll.mode = "zero";
+    const id = "mis-beneficios";
+    const prizes = onlySpecial(id, 2).map((premio) => ({
+      ...premio,
+      terminos: "Canje en tienda con identificación.",
+      validoDesde: new Date("2020-01-01T00:00:00.000Z"),
+      caducaEl: new Date("2099-12-31T00:00:00.000Z"),
+      imagenUrl: "https://cdn.example/premio.png",
+    }));
+    seedGame(id, prizes);
+    seedUser("ganador");
+    seedUser("otro");
+    const minePlay = await participate(id, "ganador", nextKey("mio"));
+    const otherPlay = await participate(id, "otro", nextKey("otro"));
+
+    memoryFirestore.put(`minijuegos/${id}/premios/especial`, {
+      ...(memoryFirestore.read(`minijuegos/${id}/premios/especial`) ?? {}),
+      terminos: "Términos cambiados después",
+      validoDesde: null,
+      caducaEl: null,
+    });
+    memoryFirestore.put("ganadoresPremioEspecial/legacy-play", {
+      id: "legacy-play",
+      playId: "legacy-play",
+      minijuegoId: id,
+      beneficioId: id,
+      beneficioTitulo: "Cartas",
+      uid: "legado",
+      premioId: "especial",
+      premioNombre: "2 boletos León vs América",
+      createdAt: Timestamp.fromDate(new Date("2026-02-01T00:00:00.000Z")),
+    });
+
+    const mine = await minijuegoService.listMisBeneficios({ uid: "ganador" });
+    const other = await minijuegoService.listMisBeneficios({ uid: "otro" });
+    const legacy = await minijuegoService.listMisBeneficios({ uid: "legado" });
+
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({
+      playId: minePlay.id,
+      premioNombre: "2 boletos León vs América",
+      terminos: "Canje en tienda con identificación.",
+      premioImagenUrl: "https://cdn.example/premio.png",
+      estado: "vigente",
+    });
+    expect(mine[0]).not.toHaveProperty("email");
+    expect(mine[0]).not.toHaveProperty("telefono");
+    expect(other).toHaveLength(1);
+    expect(other[0]?.playId).toBe(otherPlay.id);
+    expect(other[0]?.playId).not.toBe(mine[0]?.playId);
+    expect(legacy).toHaveLength(1);
+    expect(legacy[0]?.terminos).toBe("Términos cambiados después");
+    expect(legacy[0]?.caducaEl).toBeNull();
+  });
+
+  it("completa la caducidad vacía con el premio actual o el fin de la campaña", async () => {
+    const id = "caducidad-campana";
+    const fin = new Date("2026-10-28T06:00:00.000Z");
+    const inicio = new Date("2026-10-13T06:00:00.000Z");
+    seedGame(id, onlySpecial(id, 1));
+    memoryFirestore.put(`minijuegos/${id}`, {
+      ...(memoryFirestore.read(`minijuegos/${id}`) ?? {}),
+      fechaInicio: Timestamp.fromDate(inicio),
+      fechaFin: Timestamp.fromDate(fin),
+    });
+    memoryFirestore.put("ganadoresPremioEspecial/sin-fecha", {
+      id: "sin-fecha",
+      playId: "sin-fecha",
+      minijuegoId: id,
+      beneficioId: id,
+      beneficioTitulo: "Cartas",
+      uid: "ganador-fecha",
+      premioId: "especial",
+      premioNombre: "Boletos americaa",
+      terminos: "",
+      validoDesde: null,
+      caducaEl: null,
+      premioImagenUrl: "",
+      createdAt: Timestamp.fromDate(new Date("2026-10-14T18:00:00.000Z")),
+    });
+
+    const fromCampaign = await minijuegoService.listMisBeneficios({
+      uid: "ganador-fecha",
+    });
+    expect(fromCampaign).toHaveLength(1);
+    expect(fromCampaign[0]?.caducaEl).toBe(fin.toISOString());
+    expect(fromCampaign[0]?.validoDesde).toBe(inicio.toISOString());
+    expect(fromCampaign[0]?.estado).toBe("vigente");
+
+    const prizeEnd = new Date("2026-11-02T06:00:00.000Z");
+    memoryFirestore.put(`minijuegos/${id}/premios/especial`, {
+      ...(memoryFirestore.read(`minijuegos/${id}/premios/especial`) ?? {}),
+      terminos: "Presentar identificación en taquilla.",
+      caducaEl: Timestamp.fromDate(prizeEnd),
+    });
+    const fromPrize = await minijuegoService.listMisBeneficios({
+      uid: "ganador-fecha",
+    });
+    expect(fromPrize[0]?.caducaEl).toBe(prizeEnd.toISOString());
+    expect(fromPrize[0]?.terminos).toBe("Presentar identificación en taquilla.");
+    expect(fromPrize[0]?.validoDesde).toBe(inicio.toISOString());
+  });
 });
 
 function dartFiles(dir: string): string[] {

@@ -61,6 +61,19 @@ export const updateBeneficioMinijuego = async (req: Request, res: Response) => {
   }
 };
 
+export const getMisBeneficios = async (req: Request, res: Response) => {
+  try {
+    const data = await minijuegoService.listMisBeneficios(actorFromRequest(req));
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    return respondError(
+      res,
+      error,
+      "Error en GET /api/minijuegos/me/beneficios:",
+    );
+  }
+};
+
 export const getDetails = async (req: Request, res: Response) => {
   try {
     const data = await minijuegoService.getDetails(

@@ -5,6 +5,15 @@ import {
   PRIZE_TYPES,
 } from "../../models/minijuego.model";
 
+function readIsoDate(
+  value: string | null | undefined,
+): { ok: true; date: Date | null } | { ok: false } {
+  if (value == null || value.trim() === "") return { ok: true, date: null };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { ok: false };
+  return { ok: true, date };
+}
+
 const premioSchema = z
   .object({
     id: z.string().trim().min(1).max(100).optional(),
@@ -14,12 +23,46 @@ const premioSchema = z
     stock: z.number().int().min(0).nullable().optional(),
     weight: z.number().int().min(1).max(10_000).optional(),
     descripcion: z.string().trim().max(200).optional(),
+    terminos: z.string().trim().max(4000).optional(),
+    validoDesde: z.string().trim().max(40).nullable().optional(),
+    caducaEl: z.string().trim().max(40).nullable().optional(),
     imagenUrl: z.string().trim().max(2000).optional(),
     color: z.string().trim().max(7).optional(),
     especial: z.boolean().optional(),
     maxGanadores: z.number().int().min(0).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((premio, ctx) => {
+    const desde = readIsoDate(premio.validoDesde);
+    const hasta = readIsoDate(premio.caducaEl);
+    if (!desde.ok) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["validoDesde"],
+        message: "Fecha inválida.",
+      });
+    }
+    if (!hasta.ok) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["caducaEl"],
+        message: "Fecha inválida.",
+      });
+    }
+    if (
+      desde.ok &&
+      hasta.ok &&
+      desde.date &&
+      hasta.date &&
+      hasta.date.getTime() < desde.date.getTime()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["caducaEl"],
+        message: "La caducidad no puede ser anterior al inicio de la vigencia.",
+      });
+    }
+  });
 
 export const guardarMinijuegoSchema = z
   .object({

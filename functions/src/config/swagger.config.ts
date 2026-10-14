@@ -1234,6 +1234,13 @@ const swaggerDefinition = {
             type: "boolean",
             example: false,
           },
+          url: {
+            type: "string",
+            format: "uri",
+            example: "https://clubleon.mx",
+            description:
+              "Enlace opcional del patrocinador exclusivo. Si viene vacío, el banner no se abre.",
+          },
           estatus: {
             type: "boolean",
             example: true,

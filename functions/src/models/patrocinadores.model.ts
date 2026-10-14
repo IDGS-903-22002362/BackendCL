@@ -7,6 +7,8 @@ export interface Patrocinador {
   imagenNegra?: string;
   /** Logo unico del patrocinador exclusivo, o logo legado. */
   imagen?: string;
+  /** Enlace opcional del banner exclusivo. */
+  url?: string;
   exclusivo: boolean;
   estatus: boolean;
   createdAt: Date;

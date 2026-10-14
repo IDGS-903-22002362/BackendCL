@@ -46,6 +46,44 @@ export class PatrocinadorService {
       : undefined;
   }
 
+  private readHttpUrl(value: unknown): string | undefined {
+    const text = this.readString(value);
+    if (!text) {
+      return undefined;
+    }
+
+    try {
+      const parsed = new URL(text);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return undefined;
+      }
+      return text;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readSponsorUrl(value: unknown): string | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    if (typeof value !== "string") {
+      throw new Error("La URL debe usar http o https");
+    }
+
+    if (!value.trim()) {
+      return undefined;
+    }
+
+    const url = this.readHttpUrl(value);
+    if (!url) {
+      throw new Error("La URL debe usar http o https");
+    }
+
+    return url;
+  }
+
   private collectMediaUrls(patrocinador: Patrocinador): string[] {
     return [
       patrocinador.imagenBlanca,
@@ -67,6 +105,7 @@ export class PatrocinadorService {
       imagenBlanca: this.readString(data.imagenBlanca),
       imagenNegra: this.readString(data.imagenNegra),
       imagen: this.readString(data.imagen),
+      url: this.readHttpUrl(data.url),
       exclusivo: data.exclusivo === true,
       estatus: data.estatus === true,
       createdAt: this.normalizeDate(data.createdAt),
@@ -85,6 +124,7 @@ export class PatrocinadorService {
         ? { imagenNegra: patrocinador.imagenNegra }
         : {}),
       ...(patrocinador.imagen ? { imagen: patrocinador.imagen } : {}),
+      ...(patrocinador.url ? { url: patrocinador.url } : {}),
       exclusivo: patrocinador.exclusivo === true,
       estatus: patrocinador.estatus === true,
       createdAt: patrocinador.createdAt,
@@ -129,9 +169,11 @@ export class PatrocinadorService {
     const now = new Date();
     const docRef = this.collection.doc();
 
+    const url = this.readSponsorUrl(dto.url);
     const patrocinador: Patrocinador = {
       id: docRef.id,
       nombre: dto.nombre.trim(),
+      ...(url ? { url } : {}),
       exclusivo: dto.exclusivo === true,
       estatus: dto.estatus ?? true,
       createdAt: now,
@@ -172,6 +214,11 @@ export class PatrocinadorService {
 
     if (dto.exclusivo !== undefined) {
       updateData.exclusivo = dto.exclusivo;
+    }
+
+    if (dto.url !== undefined) {
+      const url = this.readSponsorUrl(dto.url);
+      updateData.url = url ?? admin.firestore.FieldValue.delete();
     }
 
     await docRef.update(this.convertDatesToTimestamp(updateData));

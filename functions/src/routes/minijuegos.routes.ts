@@ -3,6 +3,7 @@ import {
   acknowledge,
   getDetails,
   getGanadoresEspecial,
+  getMisBeneficios,
   getPendingPlay,
   play,
 } from "../controllers/minijuegos/minijuego.controller";
@@ -22,6 +23,8 @@ const MINIJUEGO_STAFF_ROLES = [
 ];
 
 const router = Router();
+
+router.get("/me/beneficios", authMiddleware, getMisBeneficios);
 
 router.get(
   "/:id/pending-play",

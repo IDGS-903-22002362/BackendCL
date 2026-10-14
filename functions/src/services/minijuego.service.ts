@@ -24,6 +24,7 @@ import {
   buildSpecialWinner,
   resolveSpecialStock,
   rouletteSegmentLabel,
+  resolveBeneficioEspecialEstado,
   rouletteSegments,
   toSpecialWinnersView,
   prepareMinijuegoWrite,
@@ -535,6 +536,7 @@ export class MinijuegoService {
       if (prize.descripcion) playData.prizeDescription = prize.descripcion;
       if (prize.valor != null) playData.prizeValue = prize.valor;
       if (prize.imagenUrl) playData.prizeImageUrl = prize.imagenUrl;
+      if (winnerProfile) Object.assign(playData, this.especialSnapshot(prize));
 
       tx.set(playRef, playData);
       if (typeof prize.stock === "number") {
@@ -568,6 +570,7 @@ export class MinijuegoService {
             premioId: prize.id,
             premioNombre: prize.nombre,
             createdAt: now,
+            ...this.especialSnapshot(prize),
           },
         );
       }
@@ -817,6 +820,11 @@ export class MinijuegoService {
           ? { maxGanadores: premio.maxGanadores }
           : {}),
         ...(premio.descripcion ? { descripcion: premio.descripcion } : {}),
+        ...(premio.terminos ? { terminos: premio.terminos } : {}),
+        ...(premio.validoDesde
+          ? { validoDesde: premio.validoDesde.toISOString() }
+          : {}),
+        ...(premio.caducaEl ? { caducaEl: premio.caducaEl.toISOString() } : {}),
         ...(premio.imagenUrl ? { imagenUrl: premio.imagenUrl } : {}),
         ...(premio.color ? { color: premio.color } : {}),
       })),
@@ -880,6 +888,13 @@ export class MinijuegoService {
     if (premio.valor != null) document.valor = premio.valor;
     if (premio.imagenUrl) document.imagenUrl = premio.imagenUrl;
     if (premio.descripcion) document.descripcion = premio.descripcion;
+    if (premio.terminos) document.terminos = premio.terminos;
+    if (premio.validoDesde) {
+      document.validoDesde = admin.firestore.Timestamp.fromDate(premio.validoDesde);
+    }
+    if (premio.caducaEl) {
+      document.caducaEl = admin.firestore.Timestamp.fromDate(premio.caducaEl);
+    }
     return document;
   }
 
@@ -1043,6 +1058,15 @@ export class MinijuegoService {
         : {}),
       ...(typeof data.descripcion === "string"
         ? { descripcion: data.descripcion }
+        : {}),
+      ...(typeof data.terminos === "string" && data.terminos.trim()
+        ? { terminos: data.terminos.trim() }
+        : {}),
+      ...(this.optionalDate(data.validoDesde)
+        ? { validoDesde: this.optionalDate(data.validoDesde) }
+        : {}),
+      ...(this.optionalDate(data.caducaEl)
+        ? { caducaEl: this.optionalDate(data.caducaEl) }
         : {}),
       ...(data.especial === true ? { especial: true } : {}),
       ...(typeof data.maxGanadores === "number"
@@ -1228,6 +1252,41 @@ export class MinijuegoService {
     };
   }
 
+  async listMisBeneficios(actor: MinijuegoActor) {
+    const uid = actor.uid.trim();
+    if (!uid) return [];
+
+    const snapshot = await firestoreApp
+      .collection(GANADORES_ESPECIAL_COLLECTION)
+      .where("uid", "==", uid)
+      .get();
+    const rows = snapshot.docs
+      .map((doc) => ({ id: doc.id, data: doc.data() }))
+      .filter((row) => row.data.uid === uid);
+    const prizes = new Map<string, MinijuegoPremio | null>();
+    const games = new Map<string, Minijuego | null>();
+
+    for (const row of rows) {
+      if (!this.needsPrizeFallback(row.data)) continue;
+      const minijuegoId =
+        typeof row.data.minijuegoId === "string" ? row.data.minijuegoId : "";
+      const premioId =
+        typeof row.data.premioId === "string" ? row.data.premioId : "";
+      const key = `${minijuegoId}/${premioId}`;
+      if (!prizes.has(key)) {
+        prizes.set(key, await this.loadPremio(minijuegoId, premioId));
+      }
+      if (minijuegoId && !games.has(minijuegoId)) {
+        games.set(minijuegoId, await this.loadOne(minijuegoId));
+      }
+    }
+
+    const now = new Date();
+    return rows
+      .map((row) => this.toMisBeneficio(row.id, row.data, prizes, games, now))
+      .sort((left, right) => right.ganadoEl.localeCompare(left.ganadoEl));
+  }
+
   async getGanadoresEspecial(minijuegoId: string) {
     const minijuegoSnap = await this.collection.doc(minijuegoId).get();
     if (!minijuegoSnap.exists) {
@@ -1283,6 +1342,100 @@ export class MinijuegoService {
         };
       })
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  private especialSnapshot(prize: MinijuegoPremio): FirebaseFirestore.DocumentData {
+    return {
+      terminos: prize.terminos ?? "",
+      validoDesde: prize.validoDesde
+        ? admin.firestore.Timestamp.fromDate(prize.validoDesde)
+        : null,
+      caducaEl: prize.caducaEl
+        ? admin.firestore.Timestamp.fromDate(prize.caducaEl)
+        : null,
+      premioImagenUrl: prize.imagenUrl ?? "",
+    };
+  }
+
+  private needsPrizeFallback(data: FirebaseFirestore.DocumentData): boolean {
+    return (
+      !this.presentText(data, "terminos") ||
+      !this.presentDate(data, "validoDesde") ||
+      !this.presentDate(data, "caducaEl") ||
+      !this.presentText(data, "premioImagenUrl")
+    );
+  }
+
+  private presentText(
+    data: FirebaseFirestore.DocumentData,
+    key: string,
+  ): string | null {
+    if (!Object.prototype.hasOwnProperty.call(data, key)) return null;
+    if (typeof data[key] !== "string") return null;
+    const text = data[key].trim();
+    return text || null;
+  }
+
+  private presentDate(
+    data: FirebaseFirestore.DocumentData,
+    key: string,
+  ): Date | null {
+    if (!Object.prototype.hasOwnProperty.call(data, key)) return null;
+    return this.optionalDate(data[key]) ?? null;
+  }
+
+  private async loadPremio(
+    minijuegoId: string,
+    premioId: string,
+  ): Promise<MinijuegoPremio | null> {
+    if (!minijuegoId || !premioId) return null;
+    const snapshot = await this.premios(minijuegoId).doc(premioId).get();
+    if (!snapshot.exists) return null;
+    return this.mapPremio(snapshot);
+  }
+
+  private toMisBeneficio(
+    id: string,
+    data: FirebaseFirestore.DocumentData,
+    prizes: Map<string, MinijuegoPremio | null>,
+    games: Map<string, Minijuego | null>,
+    now: Date,
+  ) {
+    const minijuegoId =
+      typeof data.minijuegoId === "string" ? data.minijuegoId : "";
+    const premioId = typeof data.premioId === "string" ? data.premioId : "";
+    const prize = prizes.get(`${minijuegoId}/${premioId}`) ?? null;
+    const game = games.get(minijuegoId) ?? null;
+    const terminos = this.presentText(data, "terminos") ?? prize?.terminos ?? "";
+    const validoDesde =
+      this.presentDate(data, "validoDesde") ??
+      prize?.validoDesde ??
+      game?.fechaInicio ??
+      null;
+    const caducaEl =
+      this.presentDate(data, "caducaEl") ??
+      prize?.caducaEl ??
+      game?.fechaFin ??
+      null;
+    const imagen =
+      this.presentText(data, "premioImagenUrl") ??
+      prize?.imagenUrl?.trim() ??
+      "";
+    const ganadoEl = this.normalizeDate(data.createdAt);
+
+    return {
+      playId: typeof data.playId === "string" ? data.playId : id,
+      beneficioTitulo:
+        typeof data.beneficioTitulo === "string" ? data.beneficioTitulo : "",
+      premioNombre:
+        typeof data.premioNombre === "string" ? data.premioNombre : "",
+      premioImagenUrl: imagen || null,
+      ganadoEl: ganadoEl.toISOString(),
+      terminos,
+      validoDesde: validoDesde ? validoDesde.toISOString() : null,
+      caducaEl: caducaEl ? caducaEl.toISOString() : null,
+      estado: resolveBeneficioEspecialEstado(now, validoDesde, caducaEl),
+    };
   }
 
   private normalizeDate(value: unknown): Date {

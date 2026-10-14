@@ -32,8 +32,8 @@ if (isCloudFunction && firestoreEmulatorHost) {
   );
 }
 if (process.env.IS_LOCAL === "true" && !firestoreEmulatorHost) {
-  throw new Error(
-    "El servidor local requiere FIRESTORE_EMULATOR_HOST. Sin el emulador, los minijuegos se guardan en Firestore real.",
+  console.warn(
+    "Servidor local usando Firestore real. Los minijuegos y demás escrituras no van al emulador.",
   );
 }
 
