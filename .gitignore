@@ -1,8 +1,13 @@
 node_modules/
 dist/
 .env
+.env.local
+.secret.local
 serviceAccountKey.json
 *.log
 .DS_Store
 serviceAccountAppOficial.json
 AGENTS.md
+emulator-data/
+emulator-data-*/
+emulator-seed/

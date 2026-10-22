@@ -11,7 +11,13 @@ import {
   updateBeneficioSchema,
 } from "../middleware/validators/beneficio.validator";
 import { removeBeneficioImagenSchema } from "../middleware/validators/beneficio-media.validator";
-import { authMiddleware } from "../utils/middlewares";
+import { authMiddleware, optionalAuthWithUserMiddleware } from "../utils/middlewares";
+import {
+  createBeneficioMinijuego,
+  listGanadoresEspecial,
+  updateBeneficioMinijuego,
+} from "../controllers/minijuegos/minijuego.controller";
+import { guardarMinijuegoSchema } from "../middleware/validators/minijuego.validator";
 import { handleMultipart } from "../middleware/multipart-handler";
 import { verifyRole } from "../middleware/validation.middleware";
 import { RolUsuario } from "../models/usuario.model";
@@ -48,7 +54,7 @@ const router = Router();
  *                   items:
  *                     $ref: '#/components/schemas/Benefit'
  */
-router.get("/", queryController.getAll);
+router.get("/", optionalAuthWithUserMiddleware, queryController.getAll);
 
 router.get(
   "/me/reclamados",
@@ -87,6 +93,14 @@ router.post(
   commandController.create,
 );
 
+router.post(
+  "/minijuego",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateBody(guardarMinijuegoSchema),
+  createBeneficioMinijuego,
+);
+
 /**
  * @swagger
  * /api/beneficios/{id}:
@@ -105,7 +119,28 @@ router.post(
  *       404:
  *         description: Beneficio no encontrado
  */
-router.get("/:id", validateParams(idParamSchema), queryController.getById);
+router.get(
+  "/ganadores-especial",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  listGanadoresEspecial,
+);
+
+router.get(
+  "/:id",
+  optionalAuthWithUserMiddleware,
+  validateParams(idParamSchema),
+  queryController.getById,
+);
+
+router.put(
+  "/:id/minijuego",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  validateParams(idParamSchema),
+  validateBody(guardarMinijuegoSchema),
+  updateBeneficioMinijuego,
+);
 
 /**
  * @swagger

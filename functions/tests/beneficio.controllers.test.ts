@@ -1,9 +1,20 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 
+jest.mock("../src/services/minijuego.service", () => ({
+  __esModule: true,
+  default: {
+    presentCatalog: jest.fn(async (items: unknown[]) => items),
+    presentOne: jest.fn(async (item: unknown) => item),
+    setEstatus: jest.fn(),
+    deleteLinked: jest.fn(),
+  },
+}));
+
 jest.mock("../src/services/beneficio.service", () => ({
   __esModule: true,
   default: {
     getAllBeneficios: jest.fn(),
+    serializeBeneficioForApi: jest.fn((item: unknown) => item),
     getBeneficioById: jest.fn(),
     createBeneficio: jest.fn(),
     updateBeneficio: jest.fn(),
@@ -43,6 +54,7 @@ const createMockResponse = () => {
   const res: Record<string, jest.Mock> = {
     status: jest.fn(),
     json: jest.fn(),
+    setHeader: jest.fn(),
   };
 
   res.status.mockReturnValue(res);
@@ -72,6 +84,11 @@ describe("beneficio controllers", () => {
     await queryController.getAll(req, res);
 
     expect(mockedBeneficioService.getAllBeneficios).toHaveBeenCalled();
+    expect((res as any).setHeader).toHaveBeenCalledWith(
+      "Cache-Control",
+      "private, no-store",
+    );
+    expect((res as any).setHeader).toHaveBeenCalledWith("Vary", "Authorization");
     expect((res as any).status).toHaveBeenCalledWith(200);
     expect((res as any).json).toHaveBeenCalledWith({
       success: true,

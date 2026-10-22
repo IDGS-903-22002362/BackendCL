@@ -27,15 +27,17 @@ jest.mock("../src/services/galeria.service", () => {
     GalleryServiceError,
     default: {
       addMediaMetadata: jest.fn(),
+      permanentlyDelete: jest.fn(),
     },
   };
 });
 
-import { addMediaMetadata } from "../src/controllers/galeria/galeria.command.controller";
+import { addMediaMetadata, destroyPermanently } from "../src/controllers/galeria/galeria.command.controller";
 import galleryService, { GalleryServiceError } from "../src/services/galeria.service";
 
 const mockedGalleryService = galleryService as unknown as {
   addMediaMetadata: jest.Mock;
+  permanentlyDelete: jest.Mock;
 };
 
 const createMockResponse = () => {
@@ -175,6 +177,55 @@ describe("galeria media metadata controller", () => {
     expect((res as any).json).toHaveBeenCalledWith({
       success: false,
       message: "Galeria no encontrada",
+    });
+  });
+});
+
+describe("galeria destroyPermanently controller", () => {
+  beforeEach(() => {
+    mockedGalleryService.permanentlyDelete.mockReset();
+  });
+
+  it("elimina la galeria de forma permanente", async () => {
+    mockedGalleryService.permanentlyDelete.mockResolvedValue({
+      deletedMediaCount: 2,
+    });
+
+    const req = {
+      params: { id: "gal_1" },
+    } as unknown as Parameters<typeof destroyPermanently>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof destroyPermanently>[1];
+
+    await destroyPermanently(req, res);
+
+    expect(mockedGalleryService.permanentlyDelete).toHaveBeenCalledWith("gal_1");
+    expect((res as any).status).toHaveBeenCalledWith(200);
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: true,
+      message: "Galería eliminada permanentemente",
+      data: {
+        id: "gal_1",
+        deletedMediaCount: 2,
+      },
+    });
+  });
+
+  it("responde 404 cuando la galeria no existe", async () => {
+    mockedGalleryService.permanentlyDelete.mockRejectedValue(
+      new Error("Galería no encontrada"),
+    );
+
+    const req = {
+      params: { id: "missing" },
+    } as unknown as Parameters<typeof destroyPermanently>[0];
+    const res = createMockResponse() as unknown as Parameters<typeof destroyPermanently>[1];
+
+    await destroyPermanently(req, res);
+
+    expect((res as any).status).toHaveBeenCalledWith(404);
+    expect((res as any).json).toHaveBeenCalledWith({
+      success: false,
+      message: "Galería no encontrada",
     });
   });
 });

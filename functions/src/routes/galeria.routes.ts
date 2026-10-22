@@ -260,6 +260,23 @@ router.delete(
 
 /**
  * @swagger
+ * /api/galeria/{id}/permanente:
+ *   delete:
+ *     summary: Eliminar galería de forma permanente
+ *     description: Borra el documento, su metadata y los archivos de Storage. Esta acción no se puede deshacer.
+ *     tags: [Galeria]
+ *     security:
+ *       - BearerAuth: []
+ */
+router.delete(
+    "/:id/permanente",
+    authMiddleware,
+    verifyRole(GALERIA_STAFF_ROLES),
+    command.destroyPermanently
+);
+
+/**
+ * @swagger
  * /api/galeria/{id}:
  *   delete:
  *     summary: Eliminar (desactivar) una galería
