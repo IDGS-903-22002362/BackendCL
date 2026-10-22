@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import {
+  DevicePushToken,
   NotificationCategory,
   NotificationEntityType,
   NotificationEventType,
@@ -270,3 +271,17 @@ export const bypassesQuietHours = (
   isTimeSensitiveNotification(eventType) ||
   eventType === "manual_test" ||
   eventType === "manual_broadcast";
+
+export const handlesStreakReminderOnDevice = (
+  device: Pick<DevicePushToken, "platform" | "buildNumber">,
+  minAndroidBuild: number,
+): boolean => {
+  if (device.platform !== "android") {
+    return false;
+  }
+
+  // Un buildNumber ausente o no numerico se trata como build viejo: mejor un
+  // aviso repetido que dejar al usuario sin recordatorio.
+  const build = Number(device.buildNumber);
+  return Number.isInteger(build) && build >= minAndroidBuild;
+};

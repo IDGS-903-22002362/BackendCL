@@ -261,4 +261,93 @@ describe("notificationEligibilityService", () => {
     expect(result.reason).toBe("duplicate_delivery");
     expect(orderByMock).not.toHaveBeenCalled();
   });
+
+  const buildDevice = (
+    id: string,
+    platform: "ios" | "android",
+    buildNumber?: string,
+  ) => ({
+    id,
+    deviceId: id,
+    token: `token_${id}`,
+    enabled: true,
+    platform,
+    buildNumber,
+    timezone: "America/Mexico_City",
+  });
+
+  const loadAtRiskStreakService = (devices: Array<Record<string, unknown>>) => {
+    const { evaluateRachaRisk } = require("../src/utils/racha-risk.util");
+    const yesterdayKey = evaluateRachaRisk({ streakCount: 5 }).yesterdayKey;
+
+    return loadService({
+      devices,
+      userData: {
+        activo: true,
+        streakCount: 5,
+        streakLastDay: yesterdayKey,
+      },
+    });
+  };
+
+  it("skips streak_reminder when every device is an Android build with local streak notifications", async () => {
+    const { notificationEligibilityService, whereMock } = loadAtRiskStreakService([
+      buildDevice("android-11", "android", "11"),
+      buildDevice("android-14", "android", "14"),
+    ]);
+
+    const result = await notificationEligibilityService.evaluate(buildStreakEvent());
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe("streak_reminder_local_on_device");
+    expect(result.devices).toEqual([]);
+    expect(whereMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps iOS and older Android devices for streak_reminder", async () => {
+    const { notificationEligibilityService } = loadAtRiskStreakService([
+      buildDevice("ios-1", "ios", "12"),
+      buildDevice("android-10", "android", "10"),
+      buildDevice("android-11", "android", "11"),
+      buildDevice("android-legacy", "android"),
+    ]);
+
+    const result = await notificationEligibilityService.evaluate(buildStreakEvent());
+
+    expect(result.allowed).toBe(true);
+    expect(
+      result.devices.map((device: { deviceId: string }) => device.deviceId),
+    ).toEqual(["ios-1", "android-10", "android-legacy"]);
+  });
+
+  it("reads the Android build threshold for streak_reminder from env", async () => {
+    process.env.NOTIFICATIONS_STREAK_LOCAL_ANDROID_MIN_BUILD = "12";
+
+    const { notificationEligibilityService } = loadAtRiskStreakService([
+      buildDevice("android-11", "android", "11"),
+    ]);
+
+    const result = await notificationEligibilityService.evaluate(buildStreakEvent());
+
+    expect(result.allowed).toBe(true);
+    expect(result.devices).toHaveLength(1);
+  });
+
+  it("does not filter new Android devices for other event types", async () => {
+    const { notificationEligibilityService } = loadService({
+      devices: [buildDevice("android-11", "android", "11")],
+    });
+
+    const result = await notificationEligibilityService.evaluate(
+      buildStreakEvent({
+        eventType: "manual_test",
+        category: "test",
+        entityType: "user",
+        fingerprint: "manual_fingerprint_1",
+      }),
+    );
+
+    expect(result.allowed).toBe(true);
+    expect(result.devices).toHaveLength(1);
+  });
 });

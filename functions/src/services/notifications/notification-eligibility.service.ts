@@ -24,6 +24,7 @@ import notificationUserContextService from "./user-context.service";
 import {
   bypassesQuietHours,
   getNotificationDayKey,
+  handlesStreakReminderOnDevice,
   isWithinQuietHours,
 } from "./notification.utils";
 
@@ -406,8 +407,8 @@ class NotificationEligibilityService {
       };
     }
 
-    const devices = await deviceTokenService.getActiveTokens(event.userId);
-    if (devices.length === 0) {
+    const activeDevices = await deviceTokenService.getActiveTokens(event.userId);
+    if (activeDevices.length === 0) {
       this.baseLogger.warn("notification_no_active_tokens", {
         eventId: event.id,
         eventType: event.eventType,
@@ -426,11 +427,32 @@ class NotificationEligibilityService {
     }
 
     const timezone = resolveNotificationTimezone(
-      preference.timezone || devices[0]?.timezone,
+      preference.timezone || activeDevices[0]?.timezone,
       notificationConfig.defaults.timezone,
     );
     const now = new Date();
     const localDayKey = getNotificationDayKey(now, timezone);
+    const devices =
+      event.eventType === "streak_reminder"
+        ? activeDevices.filter(
+            (device) =>
+              !handlesStreakReminderOnDevice(
+                device,
+                notificationConfig.streakReminder.localAndroidMinBuild,
+              ),
+          )
+        : activeDevices;
+
+    if (devices.length === 0) {
+      return {
+        allowed: false,
+        reason: "streak_reminder_local_on_device",
+        devices,
+        preference,
+        localDayKey,
+        timezone,
+      };
+    }
 
     if (
       !bypassesQuietHours(event.eventType) &&

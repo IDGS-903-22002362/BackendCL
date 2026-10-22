@@ -3,6 +3,7 @@ import {
   buildNotificationFingerprint,
   bypassesQuietHours,
   getNotificationDayKey,
+  handlesStreakReminderOnDevice,
   isWithinQuietHours,
 } from "../src/services/notifications/notification.utils";
 
@@ -75,5 +76,24 @@ describe("notification.utils", () => {
     expect(bypassesQuietHours("order_confirmed")).toBe(true);
     expect(bypassesQuietHours("cart_abandoned")).toBe(false);
     expect(bypassesQuietHours("inactive_user")).toBe(false);
+  });
+
+  it("detects Android builds that schedule streak reminders on the device", () => {
+    expect(
+      handlesStreakReminderOnDevice({ platform: "android", buildNumber: "11" }, 11),
+    ).toBe(true);
+    expect(
+      handlesStreakReminderOnDevice({ platform: "android", buildNumber: "10" }, 11),
+    ).toBe(false);
+    expect(
+      handlesStreakReminderOnDevice({ platform: "ios", buildNumber: "20" }, 11),
+    ).toBe(false);
+    expect(handlesStreakReminderOnDevice({ platform: "android" }, 11)).toBe(false);
+    expect(
+      handlesStreakReminderOnDevice(
+        { platform: "android", buildNumber: "1.2.2+11" },
+        11,
+      ),
+    ).toBe(false);
   });
 });

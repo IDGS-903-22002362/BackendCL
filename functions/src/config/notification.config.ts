@@ -115,6 +115,14 @@ export const notificationConfig = {
       24,
     ),
   },
+  streakReminder: {
+    // Desde este build la app Android programa sus propios avisos de racha
+    // (18:00 y cuenta regresiva 21-23 h), asi que no recibe el push de las 23:00.
+    localAndroidMinBuild: toInt(
+      process.env.NOTIFICATIONS_STREAK_LOCAL_ANDROID_MIN_BUILD,
+      11,
+    ),
+  },
   scheduler: {
     abandonedCartBatchSize: toInt(
       process.env.NOTIFICATIONS_ABANDONED_CART_BATCH_SIZE,
