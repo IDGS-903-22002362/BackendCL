@@ -432,14 +432,14 @@ describe("minijuego logic", () => {
         audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
       },
       premios: [
-        { id: "p10", nombre: "4 puntos", tipo: "points", valor: 4, weight: 30 },
-        { id: "p20", nombre: "8 puntos", tipo: "points", valor: 8, weight: 25 },
+        { id: "p10", nombre: "4 puntos", tipo: "points", valor: 4, probabilidad: 60 },
+        { id: "p20", nombre: "8 puntos", tipo: "points", valor: 8, probabilidad: 39.7 },
         {
           id: "esp",
           nombre: "2 boletos León vs América",
           tipo: "physical",
           stock: 1,
-          weight: 1,
+          probabilidad: 0.3,
           especial: true,
           maxGanadores: 1,
         },
@@ -669,7 +669,7 @@ describe("minijuego logic", () => {
     }
   });
 
-  it("guarda un solo premio especial y usa peso 1 si no se indica", () => {
+  it("guarda un solo premio especial con su probabilidad porcentual", () => {
     const prepared = prepareMinijuegoWrite({
       beneficio: {
         titulo: "Ruleta",
@@ -682,12 +682,13 @@ describe("minijuego logic", () => {
         audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
       },
       premios: [
-        { nombre: "10 puntos", tipo: "points", valor: 10 },
+        { nombre: "10 puntos", tipo: "points", valor: 10, probabilidad: 99.7 },
         {
           nombre: "2 boletos para León vs América",
           tipo: "physical",
           stock: 1,
           especial: true,
+          probabilidad: 0.3,
         },
       ],
     });
@@ -695,7 +696,8 @@ describe("minijuego logic", () => {
     expect(prepared.premios[1]).toMatchObject({
       especial: true,
       stock: 1,
-      weight: 1,
+      probabilidad: 0.3,
+      weight: 300,
     });
     expect(prepared.premios[0].stock).toBeNull();
     expect(prepared.premios[0].especial).toBeUndefined();
@@ -713,8 +715,8 @@ describe("minijuego logic", () => {
           audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
         },
         premios: [
-          { nombre: "Boletos", tipo: "physical", stock: 1, especial: true },
-          { nombre: "Playera", tipo: "physical", stock: 1, especial: true },
+          { nombre: "Boletos", tipo: "physical", stock: 1, especial: true, probabilidad: 50 },
+          { nombre: "Playera", tipo: "physical", stock: 1, especial: true, probabilidad: 50 },
         ],
       }),
     ).toThrow(expect.objectContaining({ code: "MINIGAME_INVALID_PRIZE" }));
@@ -732,8 +734,8 @@ describe("minijuego logic", () => {
           audiencia: { visibilidad: "publico", usuariosPermitidos: [] },
         },
         premios: [
-          { nombre: "Boletos", tipo: "physical", stock: 1, especial: true },
-          { nombre: "Playera", tipo: "physical", stock: 1, especial: true },
+          { nombre: "Boletos", tipo: "physical", stock: 1, especial: true, probabilidad: 50 },
+          { nombre: "Playera", tipo: "physical", stock: 1, especial: true, probabilidad: 50 },
         ],
       }),
     ).toThrow(expect.objectContaining({ code: "MINIGAME_INVALID_PRIZE" }));
@@ -756,6 +758,7 @@ describe("minijuego logic", () => {
           nombre: "10 puntos",
           tipo: "points",
           valor: 10,
+          probabilidad: 99.7,
           terminos: "No deben guardarse",
           validoDesde: "2026-01-01T00:00:00.000Z",
           caducaEl: "2026-02-01T00:00:00.000Z",
@@ -765,6 +768,7 @@ describe("minijuego logic", () => {
           tipo: "physical",
           stock: 1,
           especial: true,
+          probabilidad: 0.3,
           terminos: " Canje en taquilla. ",
           validoDesde: "2026-03-01T00:00:00.000Z",
           caducaEl: "2026-04-01T00:00:00.000Z",
@@ -801,6 +805,7 @@ describe("minijuego logic", () => {
             tipo: "physical",
             stock: 1,
             especial: true,
+            probabilidad: 100,
             validoDesde: "2026-05-01T00:00:00.000Z",
             caducaEl: "2026-04-01T00:00:00.000Z",
           },

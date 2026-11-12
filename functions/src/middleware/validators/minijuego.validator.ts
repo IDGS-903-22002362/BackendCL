@@ -21,7 +21,12 @@ const premioSchema = z
     tipo: z.enum(PRIZE_TYPES),
     valor: z.number().int().min(0).max(100_000).optional(),
     stock: z.number().int().min(0).nullable().optional(),
-    weight: z.number().int().min(1).max(10_000).optional(),
+    // Obsoleto: se acepta para no romper paneles abiertos antes del cambio,
+    // pero se ignora. La configuración usa probabilidad.
+    weight: z.number().int().min(0).max(100_000).optional(),
+    // Porcentaje con hasta 3 decimales. La precisión y la suma exacta de
+    // 100 % se validan en prepareMinijuegoWrite.
+    probabilidad: z.number().finite().min(0).max(100).optional(),
     descripcion: z.string().trim().max(200).optional(),
     terminos: z.string().trim().max(4000).optional(),
     validoDesde: z.string().trim().max(40).nullable().optional(),

@@ -3,6 +3,7 @@ import { getFirestore } from "firebase-admin/firestore";
 import * as path from "path";
 import * as fs from "fs";
 import { STORE_FIRESTORE_DATABASE } from "./firestore.constants";
+import { assertLocalFirestoreTarget } from "./local-firestore-guard";
 
 let serviceAccount;
 
@@ -27,6 +28,8 @@ let tiendaApp = admin.apps.find((app) => app?.name === "TIENDA_APP");
 
 if (!tiendaApp) {
   const projectId = process.env.FIREBASE_PROJECT_ID || "e-comerce-leon";
+  // En desarrollo local exige el emulador (no afecta Cloud Functions).
+  assertLocalFirestoreTarget({ app: "TIENDA_APP", projectId });
   const storageBucket =
     process.env.STORAGE_BUCKET || `${projectId}.firebasestorage.app`;
 

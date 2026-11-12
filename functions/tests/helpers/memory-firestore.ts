@@ -10,7 +10,8 @@ type StoredDoc = {
 type WriteOp =
   | { op: "set"; path: string; data: DocData; merge: boolean }
   | { op: "update"; path: string; data: DocData }
-  | { op: "create"; path: string; data: DocData };
+  | { op: "create"; path: string; data: DocData }
+  | { op: "delete"; path: string };
 
 type DocRef = {
   __kind: "doc";
@@ -23,17 +24,19 @@ type DocRef = {
   collection: (name: string) => CollectionRef;
 };
 
-type QueryRef = {
-  get: () => Promise<QuerySnap>;
-};
+/** Solo "==" encuentra documentos; cualquier otro operador devuelve vacío. */
+type QueryFilter = { field: string; op: string; value: unknown };
 
 type CollectionRef = {
   __kind: "collection";
   path: string;
   id: string;
+  filters: QueryFilter[];
+  max?: number;
   doc: (id?: string) => DocRef;
   get: () => Promise<QuerySnap>;
-  where: (field: string, op: string, value: unknown) => QueryRef;
+  where: (field: string, op: string, value: unknown) => CollectionRef;
+  limit: (max: number) => CollectionRef;
 };
 
 type DocSnap = {
@@ -140,6 +143,10 @@ function createMemoryFirestore() {
   }
 
   function apply(write: WriteOp): void {
+    if (write.op === "delete") {
+      if (docs.delete(write.path)) bumpCollection(write.path);
+      return;
+    }
     if (write.op === "update") {
       if (!docs.has(write.path)) {
         throw new Error(`No existe el documento ${write.path}`);
@@ -168,8 +175,20 @@ function createMemoryFirestore() {
     };
   }
 
-  function query(collectionPath: string): QuerySnap {
-    const found = childPaths(collectionPath).map((path) => snapshot(path));
+  function query(
+    collectionPath: string,
+    filters: QueryFilter[] = [],
+    max?: number,
+  ): QuerySnap {
+    const matched = childPaths(collectionPath)
+      .map((path) => snapshot(path))
+      .filter((snap) =>
+        filters.every(
+          (filter) =>
+            filter.op === "==" && snap.data()?.[filter.field] === filter.value,
+        ),
+      );
+    const found = max == null ? matched : matched.slice(0, max);
     return {
       empty: found.length === 0,
       size: found.length,
@@ -208,33 +227,28 @@ function createMemoryFirestore() {
     };
   }
 
-  function collectionApi(path: string): CollectionRef {
+  function collectionApi(
+    path: string,
+    filters: QueryFilter[] = [],
+    max?: number,
+  ): CollectionRef {
     return {
       __kind: "collection",
       path,
       id: path.split("/").pop() ?? path,
+      filters,
+      max,
       doc(id?: string) {
         return docApi(id ? `${path}/${id}` : `${path}/${autoId()}`);
       },
       get() {
-        return Promise.resolve(query(path));
+        return Promise.resolve(query(path, filters, max));
       },
       where(field: string, op: string, value: unknown) {
-        return {
-          get() {
-            const found = childPaths(path)
-              .map((docPath) => snapshot(docPath))
-              .filter((snap) => {
-                if (op !== "==") return false;
-                return snap.data()?.[field] === value;
-              });
-            return Promise.resolve({
-              empty: found.length === 0,
-              size: found.length,
-              docs: found,
-            });
-          },
-        };
+        return collectionApi(path, [...filters, { field, op, value }], max);
+      },
+      limit(next: number) {
+        return collectionApi(path, filters, next);
       },
     };
   }
@@ -250,7 +264,7 @@ function createMemoryFirestore() {
           if (!collectionReads.has(ref.path)) {
             collectionReads.set(ref.path, collectionVersions.get(ref.path) ?? 0);
           }
-          return query(ref.path);
+          return query(ref.path, ref.filters, ref.max);
         }
         if (!docReads.has(ref.path)) {
           docReads.set(ref.path, versionOf(ref.path));
@@ -278,6 +292,9 @@ function createMemoryFirestore() {
           path: ref.path,
           data: sanitize(data) as DocData,
         });
+      },
+      delete(ref: DocRef) {
+        writes.push({ op: "delete", path: ref.path });
       },
     };
 

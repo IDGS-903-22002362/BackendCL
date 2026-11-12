@@ -12,9 +12,11 @@ import {
   PrizeType,
 } from "../models/minijuego.model";
 import loyaltyEngineService from "../modules/loyalty/services/loyalty-engine.service";
+import { percentToUnits } from "./minijuego.probability";
 import {
   BeneficioViewer,
   MinijuegoError,
+  adminPrizeProbabilities,
   PreparedPremio,
   assertPlayable,
   assertIdempotencyKey,
@@ -793,6 +795,7 @@ export class MinijuegoService {
   }
 
   private toAdminMinijuego(minijuego: Minijuego, premios: MinijuegoPremio[]) {
+    const probabilidades = adminPrizeProbabilities(premios);
     return {
       id: minijuego.id,
       tipo: minijuego.tipo,
@@ -808,13 +811,17 @@ export class MinijuegoService {
         visibilidad: minijuego.audiencia.visibilidad,
         usuariosPermitidos: [...minijuego.audiencia.usuariosPermitidos],
       },
-      premios: premios.map((premio) => ({
+      // "convertida": minijuego anterior a los porcentajes. Sigue sorteando con
+      // sus pesos originales hasta que el administrador revise y guarde.
+      probabilidadModo: probabilidades.modo,
+      premios: premios.map((premio, index) => ({
         id: premio.id,
         nombre: premio.nombre,
         tipo: premio.tipo,
         ...(premio.valor != null ? { valor: premio.valor } : {}),
         stock: premio.stock,
         weight: premio.weight,
+        probabilidad: probabilidades.porcentajes[index] ?? 0,
         ...(premio.especial ? { especial: true } : {}),
         ...(premio.maxGanadores != null
           ? { maxGanadores: premio.maxGanadores }
@@ -876,7 +883,10 @@ export class MinijuegoService {
       nombre: premio.nombre,
       tipo: premio.tipo,
       stock: premio.stock,
+      // weight = probabilidad en unidades de 0.001 %. Se conserva para que
+      // un backend anterior (rollback) sortee con la misma distribución.
       weight: premio.weight,
+      probabilidad: premio.probabilidad,
       orden: premio.orden,
       color: premio.color,
       ...(premio.especial ? { especial: true } : {}),
@@ -1051,6 +1061,9 @@ export class MinijuegoService {
         typeof data.weight === "number" && data.weight >= 1
           ? Math.floor(data.weight)
           : 1,
+      ...(percentToUnits(data.probabilidad) != null
+        ? { probabilidad: data.probabilidad as number }
+        : {}),
       orden: typeof data.orden === "number" ? data.orden : 0,
       ...(typeof data.color === "string" ? { color: data.color } : {}),
       ...(typeof data.imagenUrl === "string"

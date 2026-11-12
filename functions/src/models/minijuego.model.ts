@@ -51,7 +51,14 @@ export interface MinijuegoPremio {
   tipo: PrizeType;
   valor?: number;
   stock: number | null;
+  /**
+   * Peso relativo usado por el sorteo. En premios guardados con porcentaje
+   * vale lo mismo que la probabilidad en unidades de 0.001 % (30 % = 30000),
+   * así el sorteo antiguo y el nuevo producen la misma distribución.
+   */
   weight: number;
+  /** Probabilidad configurada en porcentaje (0.001 a 100). Ausente en premios antiguos. */
+  probabilidad?: number;
   orden: number;
   color?: string;
   imagenUrl?: string;
@@ -100,7 +107,10 @@ export interface PremioInput {
   tipo: PrizeType;
   valor?: number;
   stock?: number | null;
+  /** Obsoleto: se ignora al guardar. Usar probabilidad. */
   weight?: number;
+  /** Probabilidad en porcentaje, con hasta 3 decimales. */
+  probabilidad?: number;
   descripcion?: string;
   terminos?: string;
   validoDesde?: string | null;

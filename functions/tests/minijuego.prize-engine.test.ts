@@ -716,6 +716,22 @@ describe("motor real de premios", () => {
   });
 
   it("completa la caducidad vacía con el premio actual o el fin de la campaña", async () => {
+    // Fija "hoy" dentro de la campaña: con el reloj real la prueba dejaba de
+    // pasar después del 28/10/2026. Solo se simula Date, no los temporizadores.
+    jest.useFakeTimers({
+      now: new Date("2026-10-20T18:00:00.000Z"),
+      doNotFake: [
+        "nextTick",
+        "setImmediate",
+        "clearImmediate",
+        "setTimeout",
+        "clearTimeout",
+        "setInterval",
+        "clearInterval",
+        "queueMicrotask",
+      ],
+    });
+    try {
     const id = "caducidad-campana";
     const fin = new Date("2026-10-28T06:00:00.000Z");
     const inicio = new Date("2026-10-13T06:00:00.000Z");
@@ -761,6 +777,9 @@ describe("motor real de premios", () => {
     expect(fromPrize[0]?.caducaEl).toBe(prizeEnd.toISOString());
     expect(fromPrize[0]?.terminos).toBe("Presentar identificación en taquilla.");
     expect(fromPrize[0]?.validoDesde).toBe(inicio.toISOString());
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

@@ -13,6 +13,13 @@ import {
   PrizeType,
 } from "../models/minijuego.model";
 import { RolUsuario } from "../models/usuario.model";
+import {
+  PROBABILITY_TOTAL_UNITS,
+  describeProbabilityTotal,
+  percentToUnits,
+  unitsToPercent,
+  weightsToUnits,
+} from "./minijuego.probability";
 
 export const SEGMENT_COLORS = [
   "#0E6B4F",
@@ -60,7 +67,10 @@ export type PreparedPremio = {
   tipo: PrizeType;
   valor?: number;
   stock: number | null;
+  /** Probabilidad en unidades de 0.001 % (igual a probabilidad * 1000). */
   weight: number;
+  /** Probabilidad configurada en porcentaje. */
+  probabilidad: number;
   orden: number;
   color: string;
   imagenUrl?: string;
@@ -258,15 +268,70 @@ export function isVisibleInCatalog(input: {
   }
 }
 
+/**
+ * Peso entero con el que participa cada premio en el sorteo.
+ *
+ * - Si todos los premios tienen una probabilidad porcentual válida, se usan
+ *   sus unidades de 0.001 % (30 % = 30000). Así los porcentajes decimales se
+ *   sortean con enteros, sin redondeos ni sesgos.
+ * - Si algún premio no la tiene (minijuegos creados antes de los porcentajes),
+ *   se usan los pesos relativos originales sin cambios, para que esos
+ *   minijuegos sigan sorteando exactamente igual que antes.
+ */
+export function prizeDrawWeights(
+  premios: Array<Pick<MinijuegoPremio, "weight" | "probabilidad">>,
+): number[] {
+  const units = premios.map((premio) => percentToUnits(premio.probabilidad));
+  const percentMode =
+    premios.length > 0 && units.every((value) => value != null);
+
+  return premios.map((premio, index) => {
+    if (percentMode) return units[index] ?? 0;
+    return Number.isInteger(premio.weight) && premio.weight >= 1
+      ? premio.weight
+      : 0;
+  });
+}
+
+/**
+ * Probabilidades que ve el administrador.
+ * Para minijuegos antiguos convierte los pesos a porcentajes equivalentes que
+ * suman exactamente 100 % (método del mayor residuo, precisión 0.001 %).
+ */
+export function adminPrizeProbabilities(
+  premios: Array<Pick<MinijuegoPremio, "weight" | "probabilidad">>,
+): { modo: "porcentaje" | "convertida"; porcentajes: number[] } {
+  const units = premios.map((premio) => percentToUnits(premio.probabilidad));
+  if (premios.length > 0 && units.every((value) => value != null)) {
+    return {
+      modo: "porcentaje",
+      porcentajes: units.map((value) => unitsToPercent(value ?? 0)),
+    };
+  }
+
+  return {
+    modo: "convertida",
+    porcentajes: weightsToUnits(premios.map((premio) => premio.weight)).map(
+      unitsToPercent,
+    ),
+  };
+}
+
 export function pickWeightedPrize(
   premios: MinijuegoPremio[],
   randomInt: (maxExclusive: number) => number,
 ): MinijuegoPremio {
-  const eligible = premios.filter((premio) => {
-    if (!Number.isInteger(premio.weight) || premio.weight < 1) return false;
-    if (premio.stock == null) return true;
-    return premio.stock > 0;
-  });
+  const weights = prizeDrawWeights(premios);
+  // Los premios agotados salen del sorteo. Al sortear sobre la suma de los
+  // que quedan, su probabilidad se redistribuye proporcionalmente sin tocar
+  // los porcentajes guardados.
+  const eligible = premios
+    .map((premio, index) => ({ premio, weight: weights[index] }))
+    .filter(({ premio, weight }) => {
+      if (!Number.isInteger(weight) || weight < 1) return false;
+      if (premio.stock == null) return true;
+      return premio.stock > 0;
+    });
 
   if (eligible.length === 0) {
     throw new MinijuegoError(
@@ -276,7 +341,7 @@ export function pickWeightedPrize(
     );
   }
 
-  const total = eligible.reduce((sum, premio) => sum + premio.weight, 0);
+  const total = eligible.reduce((sum, item) => sum + item.weight, 0);
   let cursor = randomInt(total);
 
   if (!Number.isInteger(cursor) || cursor < 0 || cursor >= total) {
@@ -287,12 +352,12 @@ export function pickWeightedPrize(
     );
   }
 
-  for (const premio of eligible) {
-    cursor -= premio.weight;
-    if (cursor < 0) return premio;
+  for (const item of eligible) {
+    cursor -= item.weight;
+    if (cursor < 0) return item.premio;
   }
 
-  return eligible[eligible.length - 1];
+  return eligible[eligible.length - 1].premio;
 }
 
 export function drawAvailablePrize(
@@ -568,6 +633,15 @@ export function prepareMinijuegoWrite(input: GuardarMinijuegoInput): {
     );
   }
 
+  const totalUnits = premios.reduce((sum, premio) => sum + premio.weight, 0);
+  if (totalUnits !== PROBABILITY_TOTAL_UNITS) {
+    throw new MinijuegoError(
+      "MINIGAME_INVALID_PROBABILITY_TOTAL",
+      400,
+      describeProbabilityTotal(totalUnits).message,
+    );
+  }
+
   return {
     beneficio: {
       titulo: input.beneficio.titulo.trim(),
@@ -640,12 +714,21 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
     stock = premio.stock;
   }
 
-  const weight = premio.weight ?? 1;
-  if (!Number.isInteger(weight) || weight < 1 || weight > 10_000) {
+  // El peso relativo antiguo ya no se acepta como configuración: el
+  // porcentaje es la única fuente de verdad.
+  if (premio.probabilidad == null) {
     throw new MinijuegoError(
-      "MINIGAME_INVALID_PRIZE",
+      "MINIGAME_PROBABILITY_REQUIRED",
       400,
-      "El peso del premio debe ser un entero mayor a cero.",
+      "Falta la probabilidad (%) de un premio. Recarga el panel e inténtalo de nuevo.",
+    );
+  }
+  const units = percentToUnits(premio.probabilidad);
+  if (units == null || units < 1) {
+    throw new MinijuegoError(
+      "MINIGAME_INVALID_PROBABILITY",
+      400,
+      "La probabilidad de cada premio debe ser mayor a 0% y hasta 100%, con máximo 3 decimales.",
     );
   }
 
@@ -693,7 +776,8 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
     tipo,
     ...(valor != null ? { valor } : {}),
     stock,
-    weight,
+    weight: units,
+    probabilidad: unitsToPercent(units),
     orden: index,
     color,
     ...(premio.especial === true && stock != null

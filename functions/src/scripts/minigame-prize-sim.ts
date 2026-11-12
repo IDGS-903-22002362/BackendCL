@@ -4,7 +4,8 @@
  */
 import { randomInt } from "crypto";
 import type { MinijuegoPremio, PrizeType } from "../models/minijuego.model";
-import { pickWeightedPrize } from "../services/minijuego.logic";
+import { pickWeightedPrize, prizeDrawWeights } from "../services/minijuego.logic";
+import { percentToUnits } from "../services/minijuego.probability";
 
 export const POINT_LADDER: Array<{ valor: number; weight: number }> = [
   { valor: 10, weight: 30 },
@@ -18,6 +19,21 @@ export const POINT_LADDER: Array<{ valor: number; weight: number }> = [
   { valor: 90, weight: 4 },
   { valor: 100, weight: 3 },
 ];
+
+/** Configuración porcentual de referencia: con el especial de 0.3 % suma 100 %. */
+export const PERCENT_LADDER: Array<{ valor: number; probabilidad: number }> = [
+  { valor: 10, probabilidad: 30 },
+  { valor: 20, probabilidad: 25 },
+  { valor: 30, probabilidad: 15 },
+  { valor: 40, probabilidad: 10 },
+  { valor: 50, probabilidad: 7 },
+  { valor: 60, probabilidad: 5 },
+  { valor: 70, probabilidad: 3 },
+  { valor: 80, probabilidad: 2 },
+  { valor: 90, probabilidad: 1.5 },
+  { valor: 100, probabilidad: 1.2 },
+];
+export const SPECIAL_PROBABILITY = 0.3;
 
 export const SPECIAL_PRIZE_NAME = "2 boletos León vs América";
 export const SPECIAL_WEIGHT = 1;
@@ -61,6 +77,57 @@ export function buildLadder(
   };
 
   return [...points, special];
+}
+
+/** Ruleta con probabilidades porcentuales, como la guarda el panel nuevo. */
+export function buildPercentLadder(
+  minijuegoId: string,
+  options?: { specialStock?: number | null; specialProbability?: number },
+): MinijuegoPremio[] {
+  const specialProbability = options?.specialProbability ?? SPECIAL_PROBABILITY;
+  const points: MinijuegoPremio[] = PERCENT_LADDER.map((item, index) => ({
+    id: `p${item.valor}`,
+    minijuegoId,
+    nombre: `${item.valor} pts`,
+    tipo: "points",
+    valor: item.valor,
+    stock: null,
+    weight: percentToUnits(item.probabilidad) ?? 0,
+    probabilidad: item.probabilidad,
+    orden: index,
+  }));
+  const specialStock = options?.specialStock === undefined ? null : options.specialStock;
+  return [
+    ...points,
+    {
+      id: "especial",
+      minijuegoId,
+      nombre: SPECIAL_PRIZE_NAME,
+      tipo: "physical",
+      stock: specialStock,
+      weight: percentToUnits(specialProbability) ?? 0,
+      probabilidad: specialProbability,
+      orden: points.length,
+      especial: true,
+      ...(typeof specialStock === "number" ? { maxGanadores: specialStock } : {}),
+    },
+  ];
+}
+
+/**
+ * Probabilidad efectiva de cada premio en el sorteo actual: su peso entre la
+ * suma de los premios con stock. Con porcentajes y sin agotados, coincide con
+ * el porcentaje configurado; con agotados, refleja la redistribución.
+ */
+export function effectiveProbabilities(prizes: MinijuegoPremio[]): Map<string, number> {
+  const weights = prizeDrawWeights(prizes);
+  const available = prizes.map(
+    (prize, index) => (prize.stock == null || prize.stock > 0 ? weights[index] : 0),
+  );
+  const total = available.reduce((sum, weight) => sum + weight, 0);
+  return new Map(
+    prizes.map((prize, index) => [prize.id, total > 0 ? available[index] / total : 0]),
+  );
 }
 
 export function simulatePrizeCounts(
@@ -110,21 +177,24 @@ export function formatProbabilityTable(
   counts: Map<string, number>,
   draws: number,
 ): string {
-  const total = prizes.reduce((sum, prize) => sum + prize.weight, 0);
-  const header = `${"Premio".padEnd(32)}${"Peso".padEnd(8)}${"Esperado".padEnd(12)}Observado`;
+  const effective = effectiveProbabilities(prizes);
+  const header = `${"Premio".padEnd(32)}${"Config.".padEnd(10)}${"Esperado".padEnd(12)}${"Observado".padEnd(12)}Desv. (sigma)`;
   const lines = prizes.map((prize) => {
     const observed = counts.get(prize.id) ?? 0;
-    const expected = prize.weight / total;
-    const label = prize.especial ? "Especial" : prize.nombre;
-    const expectedText = `${(expected * 100).toFixed(2)}%`;
-    const observedText = `${((observed / draws) * 100).toFixed(2)}%`;
-    return `${label.padEnd(32)}${String(prize.weight).padEnd(8)}${expectedText.padEnd(12)}${observedText}`;
+    const expected = effective.get(prize.id) ?? 0;
+    const label = prize.especial ? `Especial (${prize.nombre})`.slice(0, 31) : prize.nombre;
+    const configured =
+      prize.probabilidad != null ? `${prize.probabilidad}%` : `peso ${prize.weight}`;
+    const sd = Math.sqrt(draws * expected * (1 - expected));
+    const sigma = sd > 0 ? ((observed - draws * expected) / sd).toFixed(2) : "0.00";
+    const expectedText = `${(expected * 100).toFixed(3)}%`;
+    const observedText = `${((observed / draws) * 100).toFixed(3)}%`;
+    return `${label.padEnd(32)}${configured.padEnd(10)}${expectedText.padEnd(12)}${observedText.padEnd(12)}${sigma}`;
   });
 
   return [
     `Simulaciones: ${draws}`,
-    "Tolerancia: 4 sigma = 4 * sqrt(n * p * (1 - p)), con p = peso / pesoTotal",
-    `Peso total: ${total}`,
+    "Tolerancia: 4 sigma = 4 * sqrt(n * p * (1 - p)), con p = probabilidad efectiva",
     header,
     ...lines,
   ].join("\n");

@@ -4,6 +4,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getMessaging } from "firebase-admin/messaging";
 import * as path from "path";
 import * as fs from "fs";
+import { assertLocalFirestoreTarget } from "./local-firestore-guard";
 
 let serviceAccount;
 
@@ -31,17 +32,14 @@ if (isCloudFunction && firestoreEmulatorHost) {
     "FIRESTORE_EMULATOR_HOST está definido en Cloud Functions. Producción debe usar Firestore real.",
   );
 }
-if (process.env.IS_LOCAL === "true" && !firestoreEmulatorHost) {
-  console.warn(
-    "Servidor local usando Firestore real. Los minijuegos y demás escrituras no van al emulador.",
-  );
-}
 
 const adminApps = Array.isArray(admin.apps) ? admin.apps : [];
 let appOficial = adminApps.find((app) => app?.name === "APP_OFICIAL");
 
 if (!appOficial) {
   const projectId = process.env.APP_OFICIAL_PROJECT_ID || "app-oficial-leon";
+  // En desarrollo local exige el emulador (no afecta Cloud Functions).
+  assertLocalFirestoreTarget({ app: "APP_OFICIAL", projectId });
   const storageBucket =
     process.env.APP_OFICIAL_STORAGE_BUCKET ||
     `${projectId}.firebasestorage.app`;
