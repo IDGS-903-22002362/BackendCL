@@ -17,6 +17,10 @@ import {
   listGanadoresEspecial,
   updateBeneficioMinijuego,
 } from "../controllers/minijuegos/minijuego.controller";
+import {
+  parseCartaImagenMultipart,
+  uploadCartaImagen,
+} from "../controllers/minijuegos/carta-imagen.controller";
 import { guardarMinijuegoSchema } from "../middleware/validators/minijuego.validator";
 import { handleMultipart } from "../middleware/multipart-handler";
 import { verifyRole } from "../middleware/validation.middleware";
@@ -99,6 +103,17 @@ router.post(
   verifyRole(BENEFICIOS_STAFF_ROLES),
   validateBody(guardarMinijuegoSchema),
   createBeneficioMinijuego,
+);
+
+// Arte de la carta coleccionable del premio especial. No depende de un
+// minijuego: el panel sube al guardar y manda la URL en cartaImagenUrl.
+// multipart, campo "imagen", 1 archivo JPEG/PNG/WebP de hasta 10 MB.
+router.post(
+  "/minijuego/carta-imagen",
+  authMiddleware,
+  verifyRole(BENEFICIOS_STAFF_ROLES),
+  parseCartaImagenMultipart,
+  uploadCartaImagen,
 );
 
 /**

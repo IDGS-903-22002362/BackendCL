@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  MAX_PREMIOS_MINIJUEGO,
   MINIJUEGO_TIPOS,
   MINIJUEGO_VISIBILIDADES,
   PRIZE_TYPES,
@@ -24,20 +25,34 @@ const premioSchema = z
     // Obsoleto: se acepta para no romper paneles abiertos antes del cambio,
     // pero se ignora. La configuración usa probabilidad.
     weight: z.number().int().min(0).max(100_000).optional(),
-    // Porcentaje con hasta 3 decimales. La precisión y la suma exacta de
-    // 100 % se validan en prepareMinijuegoWrite.
+    // Porcentaje con hasta 3 decimales (0 % = premio deshabilitado). La
+    // precisión y la suma exacta de 100 % se validan en prepareMinijuegoWrite.
     probabilidad: z.number().finite().min(0).max(100).optional(),
     descripcion: z.string().trim().max(200).optional(),
     terminos: z.string().trim().max(4000).optional(),
     validoDesde: z.string().trim().max(40).nullable().optional(),
     caducaEl: z.string().trim().max(40).nullable().optional(),
     imagenUrl: z.string().trim().max(2000).optional(),
+    // Arte de la carta coleccionable (solo premio especial). Ausente =
+    // conservar al editar; null o '' = quitar; URL = la subida al bucket.
+    cartaImagenUrl: z.string().trim().max(2048).nullable().optional(),
     color: z.string().trim().max(7).optional(),
     especial: z.boolean().optional(),
     maxGanadores: z.number().int().min(0).optional(),
   })
   .strict()
   .superRefine((premio, ctx) => {
+    if (
+      typeof premio.cartaImagenUrl === "string" &&
+      premio.cartaImagenUrl.length > 0 &&
+      premio.especial !== true
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["cartaImagenUrl"],
+        message: "Solo el premio especial puede tener carta coleccionable.",
+      });
+    }
     const desde = readIsoDate(premio.validoDesde);
     const hasta = readIsoDate(premio.caducaEl);
     if (!desde.ok) {
@@ -95,7 +110,9 @@ export const guardarMinijuegoSchema = z
           .strict(),
       })
       .strict(),
-    premios: z.array(premioSchema).min(1).max(12),
+    // Los ids repetidos y el resto de reglas entre premios se validan en
+    // prepareMinijuegoWrite (400 MINIGAME_INVALID_PRIZE).
+    premios: z.array(premioSchema).min(1).max(MAX_PREMIOS_MINIJUEGO),
   })
   .strict();
 

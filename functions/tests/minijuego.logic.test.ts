@@ -561,7 +561,7 @@ describe("minijuego logic", () => {
     ).toEqual({ stock: 0, maxGanadores: 1 });
   });
 
-  it("el catálogo público no lleva ganadores y el admin solo devuelve uid, correo y teléfono", () => {
+  it("el catálogo público no lleva ganadores y el admin solo devuelve uid, nombre, correo y teléfono", () => {
     const segments = rouletteSegments([
       premio({ id: "p40", nombre: "40 puntos", valor: 40, weight: 10 }),
       premio({
@@ -606,6 +606,7 @@ describe("minijuego logic", () => {
       ganadores: [
         {
           uid: "fhDPCB4OtqbuGdwQtPiupxByKI92",
+          nombre: null,
           email: "jonyhdzmichaca@gmail.com",
           telefono: "4771234567",
         },
@@ -613,6 +614,7 @@ describe("minijuego logic", () => {
     });
     expect(Object.keys(adminView.ganadores[0])).toEqual([
       "uid",
+      "nombre",
       "email",
       "telefono",
     ]);
