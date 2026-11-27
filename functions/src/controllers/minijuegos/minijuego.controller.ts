@@ -46,6 +46,7 @@ export const updateBeneficioMinijuego = async (req: Request, res: Response) => {
     const data = await minijuegoService.updateMinijuegoBeneficio(
       req.params.id,
       req.body as GuardarMinijuegoInput,
+      { uid: req.user?.uid },
     );
     return res.status(200).json({
       success: true,

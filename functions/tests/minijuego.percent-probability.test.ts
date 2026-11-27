@@ -192,9 +192,31 @@ describe("probabilidades porcentuales: validación al guardar", () => {
     );
   });
 
-  it("rechaza 0 %, negativos, más de 100 % y premios sin probabilidad", () => {
-    expectError(() => prepareMinijuegoWrite(input(pointsInput([100, 0]))), "MINIGAME_INVALID_PROBABILITY");
+  it("acepta 0 % (premio deshabilitado) y rechaza negativos, más de 100 %, no numéricos y premios sin probabilidad", () => {
+    const prepared = prepareMinijuegoWrite(input(pointsInput([100, 0])));
+    expect(prepared.premios[1]).toMatchObject({ probabilidad: 0, weight: 0 });
+
     expectError(() => prepareMinijuegoWrite(input(pointsInput([101, -1]))), "MINIGAME_INVALID_PROBABILITY");
+    expectError(() => prepareMinijuegoWrite(input(pointsInput([100, -1]))), "MINIGAME_INVALID_PROBABILITY");
+    expectError(
+      () => prepareMinijuegoWrite(input(pointsInput([100, Number.NaN]))),
+      "MINIGAME_INVALID_PROBABILITY",
+    );
+    expectError(
+      () =>
+        prepareMinijuegoWrite(
+          input([
+            { nombre: "10 puntos", tipo: "points", valor: 10, probabilidad: 100 },
+            {
+              nombre: "20 puntos",
+              tipo: "points",
+              valor: 20,
+              probabilidad: "0" as unknown as number,
+            },
+          ]),
+        ),
+      "MINIGAME_INVALID_PROBABILITY",
+    );
     expectError(
       () =>
         prepareMinijuegoWrite(

@@ -3,6 +3,7 @@ import { firestoreApp } from "../config/app.firebase";
 import { admin } from "../config/firebase.admin";
 import type { Beneficio } from "../models/beneficios.model";
 import {
+  CartaDiseno,
   GuardarMinijuegoInput,
   MINIJUEGO_TIPOS,
   Minijuego,
@@ -12,6 +13,7 @@ import {
   PrizeType,
 } from "../models/minijuego.model";
 import loyaltyEngineService from "../modules/loyalty/services/loyalty-engine.service";
+import { checkCartaImagenUrl } from "./carta-imagen.service";
 import { percentToUnits } from "./minijuego.probability";
 import {
   BeneficioViewer,
@@ -21,9 +23,12 @@ import {
   assertPlayable,
   assertIdempotencyKey,
   decidePlay,
+  hasEligiblePrize,
   isVisibleInCatalog,
+  nombreDeUsuario,
   normalizeEmail,
   buildSpecialWinner,
+  resolveCartaImagenUrl,
   resolveSpecialStock,
   rouletteSegmentLabel,
   resolveBeneficioEspecialEstado,
@@ -34,6 +39,9 @@ import {
 
 const MINIJUEGOS_COLLECTION = "minijuegos";
 const PREMIOS_SUBCOLLECTION = "premios";
+// Premios quitados al editar: se copian aquí (mismos datos + archivadoEl y
+// archivadoPor) para no perder la trazabilidad de jugadas y ganadores.
+const PREMIOS_ARCHIVADOS_SUBCOLLECTION = "premiosArchivados";
 const USUARIOS_COLLECTION = "usuariosApp";
 const JUGADAS_SUBCOLLECTION = "minijuego_jugadas";
 const ESTADO_SUBCOLLECTION = "minijuego_estado";
@@ -55,6 +63,12 @@ export class MinijuegoService {
 
   private premios(minijuegoId: string) {
     return this.collection.doc(minijuegoId).collection(PREMIOS_SUBCOLLECTION);
+  }
+
+  private premiosArchivados(minijuegoId: string) {
+    return this.collection
+      .doc(minijuegoId)
+      .collection(PREMIOS_ARCHIVADOS_SUBCOLLECTION);
   }
 
   private plays(uid: string) {
@@ -204,6 +218,7 @@ export class MinijuegoService {
     }
     const prepared = prepareMinijuegoWrite(input);
     await this.assertUsuariosExisten(prepared.minijuego.audiencia.usuariosPermitidos);
+    await this.verifyCartaImagenes(prepared.premios, new Map());
     const beneficioRef = firestoreApp.collection(BENEFICIOS_COLLECTION).doc();
     const minijuegoRef = this.collection.doc(beneficioRef.id);
     const now = new Date();
@@ -252,6 +267,7 @@ export class MinijuegoService {
   async updateMinijuegoBeneficio(
     beneficioId: string,
     input: GuardarMinijuegoInput,
+    actor?: { uid?: string },
   ): Promise<Record<string, unknown>> {
     if (process.env.IS_LOCAL === "true") {
       console.info("[LOCAL SAVE minijuego]", {
@@ -261,6 +277,13 @@ export class MinijuegoService {
     }
     const prepared = prepareMinijuegoWrite(input);
     await this.assertUsuariosExisten(prepared.minijuego.audiencia.usuariosPermitidos);
+    const cartasGuardadas = prepared.premios.some(
+      (premio) => typeof premio.cartaImagenUrl === "string",
+    )
+      ? await this.cartaImagenUrlsGuardadas(beneficioId)
+      : new Map<string, string>();
+    await this.verifyCartaImagenes(prepared.premios, cartasGuardadas);
+    const archivadoPor = actor?.uid?.trim() ?? "";
     const beneficioRef = firestoreApp
       .collection(BENEFICIOS_COLLECTION)
       .doc(beneficioId);
@@ -283,12 +306,26 @@ export class MinijuegoService {
       const minijuegoRef = this.collection.doc(minijuegoId);
       const minijuegoSnap = await tx.get(minijuegoRef);
       const premiosSnap = await tx.get(this.premios(minijuegoId));
-      const ganadoresSnap = await tx.get(
-        firestoreApp
-          .collection(GANADORES_ESPECIAL_COLLECTION)
-          .where("minijuegoId", "==", minijuegoId)
-          .limit(200),
-      );
+      const existingIds = new Set(premiosSnap.docs.map((doc) => doc.id));
+      // El stock del especial descuenta solo a los ganadores de ESE premio
+      // (sin tope), para que un especial nuevo no herede las victorias de uno
+      // reemplazado.
+      const especialExistenteId = prepared.premios.find(
+        (premio) =>
+          premio.especial === true && !!premio.id && existingIds.has(premio.id),
+      )?.id;
+      const ganadoresEspecial = especialExistenteId
+        ? (
+            await tx.get(
+              firestoreApp
+                .collection(GANADORES_ESPECIAL_COLLECTION)
+                .where("minijuegoId", "==", minijuegoId)
+                .where("premioId", "==", especialExistenteId),
+            )
+          ).docs.filter(
+            (doc) => doc.data()?.premioId === especialExistenteId,
+          ).length
+        : 0;
       const nowTs = admin.firestore.Timestamp.now();
       const createdAt = minijuegoSnap.exists
         ? minijuegoSnap.data()?.createdAt ?? nowTs
@@ -325,12 +362,17 @@ export class MinijuegoService {
           .map((premio) => premio.id)
           .filter((id): id is string => !!id),
       );
-      const existingIds = new Set(premiosSnap.docs.map((doc) => doc.id));
 
+      // Los premios que ya no vienen no se borran sin rastro: se archivan en
+      // la misma transacción. Jugadas, ganadores y puntos no se tocan.
       for (const doc of premiosSnap.docs) {
-        if (!keptIds.has(doc.id)) {
-          tx.delete(doc.ref);
-        }
+        if (keptIds.has(doc.id)) continue;
+        tx.set(this.premiosArchivados(minijuegoId).doc(doc.id), {
+          ...doc.data(),
+          archivadoEl: nowTs,
+          ...(archivadoPor ? { archivadoPor } : {}),
+        });
+        tx.delete(doc.ref);
       }
 
       const existingById = new Map(
@@ -353,12 +395,23 @@ export class MinijuegoService {
                     : null,
                 previousStock:
                   typeof previous?.stock === "number" ? previous.stock : null,
-                awarded: ganadoresSnap.size,
+                awarded:
+                  premio.id && premio.id === especialExistenteId
+                    ? ganadoresEspecial
+                    : 0,
               })
             : null;
-        const stored = resolved
-          ? { ...premio, stock: resolved.stock, maxGanadores: resolved.maxGanadores }
-          : premio;
+        const stored: PreparedPremio = {
+          ...premio,
+          ...(resolved
+            ? { stock: resolved.stock, maxGanadores: resolved.maxGanadores }
+            : {}),
+          cartaImagenUrl: resolveCartaImagenUrl({
+            especial: premio.especial,
+            requested: premio.cartaImagenUrl,
+            previous,
+          }),
+        };
         tx.set(ref, this.premioDocument(ref.id, minijuegoId, stored, nowTs));
       }
     });
@@ -402,6 +455,9 @@ export class MinijuegoService {
       segments: rouletteSegments(premios, pending?.prizeId).map((premio) =>
         this.toSegment(premio),
       ),
+      // false solo si ningún premio puede salir y no hay jugada pendiente:
+      // jugar respondería 409 MINIGAME_NO_PRIZES.
+      premiosDisponibles: Boolean(pending) || hasEligiblePrize(premios),
       pendingPlay: settled
         ? this.toPlayResponse(
             settled,
@@ -517,6 +573,10 @@ export class MinijuegoService {
               ).data(),
             })
           : null;
+      // Copia inmutable del especial (incluida la carta) tomada del premio
+      // leído en esta misma transacción. Nunca se rellena después.
+      const especialCopia = winnerProfile ? this.especialSnapshot(prize) : null;
+      const cartaCopia = winnerProfile ? this.cartaSnapshot(prize) : null;
       const playRef = this.plays(actor.uid).doc();
       const now = admin.firestore.Timestamp.now();
       const status =
@@ -538,7 +598,7 @@ export class MinijuegoService {
       if (prize.descripcion) playData.prizeDescription = prize.descripcion;
       if (prize.valor != null) playData.prizeValue = prize.valor;
       if (prize.imagenUrl) playData.prizeImageUrl = prize.imagenUrl;
-      if (winnerProfile) Object.assign(playData, this.especialSnapshot(prize));
+      if (especialCopia) Object.assign(playData, especialCopia);
 
       tx.set(playRef, playData);
       if (typeof prize.stock === "number") {
@@ -572,7 +632,7 @@ export class MinijuegoService {
             premioId: prize.id,
             premioNombre: prize.nombre,
             createdAt: now,
-            ...this.especialSnapshot(prize),
+            ...(especialCopia ?? {}),
           },
         );
       }
@@ -599,6 +659,7 @@ export class MinijuegoService {
           prizeDescription: prize.descripcion,
           prizeValue: prize.valor,
           prizeImageUrl: prize.imagenUrl,
+          ...(cartaCopia ?? {}),
           status,
           idempotencyKey,
           revelado: false,
@@ -777,6 +838,14 @@ export class MinijuegoService {
         : {}),
       ...(play.prizeValue != null ? { prizeValue: play.prizeValue } : {}),
       ...(play.prizeImageUrl ? { prizeImageUrl: play.prizeImageUrl } : {}),
+      // Solo jugadas del especial guardadas con la copia de la carta; las
+      // demás (y las anteriores) no llevan estos campos.
+      ...(play.cartaImagenUrl !== undefined || play.cartaDiseno !== undefined
+        ? {
+            cartaImagenUrl: play.cartaImagenUrl ?? null,
+            cartaDiseno: play.cartaDiseno ?? null,
+          }
+        : {}),
       resultPresentationKey: play.prizeId,
       alreadyPlayed: play.alreadyPlayed,
       createdAt: play.createdAt,
@@ -833,6 +902,9 @@ export class MinijuegoService {
           : {}),
         ...(premio.caducaEl ? { caducaEl: premio.caducaEl.toISOString() } : {}),
         ...(premio.imagenUrl ? { imagenUrl: premio.imagenUrl } : {}),
+        ...(premio.cartaImagenUrl
+          ? { cartaImagenUrl: premio.cartaImagenUrl }
+          : {}),
         ...(premio.color ? { color: premio.color } : {}),
       })),
     };
@@ -897,6 +969,13 @@ export class MinijuegoService {
     };
     if (premio.valor != null) document.valor = premio.valor;
     if (premio.imagenUrl) document.imagenUrl = premio.imagenUrl;
+    if (
+      premio.especial &&
+      typeof premio.cartaImagenUrl === "string" &&
+      premio.cartaImagenUrl
+    ) {
+      document.cartaImagenUrl = premio.cartaImagenUrl;
+    }
     if (premio.descripcion) document.descripcion = premio.descripcion;
     if (premio.terminos) document.terminos = premio.terminos;
     if (premio.validoDesde) {
@@ -1069,6 +1148,11 @@ export class MinijuegoService {
       ...(typeof data.imagenUrl === "string"
         ? { imagenUrl: data.imagenUrl }
         : {}),
+      ...(data.especial === true &&
+      typeof data.cartaImagenUrl === "string" &&
+      data.cartaImagenUrl.trim()
+        ? { cartaImagenUrl: data.cartaImagenUrl.trim() }
+        : {}),
       ...(typeof data.descripcion === "string"
         ? { descripcion: data.descripcion }
         : {}),
@@ -1109,6 +1193,12 @@ export class MinijuegoService {
         : {}),
       ...(typeof data.prizeImageUrl === "string"
         ? { prizeImageUrl: data.prizeImageUrl }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(data, "cartaImagenUrl")
+        ? { cartaImagenUrl: this.presentText(data, "cartaImagenUrl") }
+        : {}),
+      ...(this.presentText(data, "cartaDiseno")
+        ? { cartaDiseno: this.presentText(data, "cartaDiseno") as string }
         : {}),
       status: data.status === "pending_reward" ? "pending_reward" : "completed",
       idempotencyKey:
@@ -1171,6 +1261,64 @@ export class MinijuegoService {
     return date;
   }
 
+
+  /**
+   * Valida las cartaImagenUrl nuevas antes de abrir la transacción: que sean
+   * exactamente una URL de carta del bucket propio y que el objeto exista en
+   * Storage. Una URL igual a la que ya tenía el mismo premio no se vuelve a
+   * comprobar (las cartas nunca se borran). Nunca se descarta en silencio.
+   */
+  private async verifyCartaImagenes(
+    premios: PreparedPremio[],
+    guardadas: Map<string, string>,
+  ): Promise<void> {
+    for (const premio of premios) {
+      const url = premio.cartaImagenUrl;
+      if (premio.especial !== true || typeof url !== "string" || !url) continue;
+      if (premio.id && guardadas.get(premio.id) === url) continue;
+
+      const check = await checkCartaImagenUrl(url);
+      if (check.ok) continue;
+      if (check.reason === "unavailable") {
+        throw new MinijuegoError(
+          "MINIGAME_CARD_IMAGE_UNAVAILABLE",
+          503,
+          "No pudimos verificar la imagen de la carta coleccionable. Intenta de nuevo en unos minutos.",
+        );
+      }
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_PRIZE",
+        400,
+        check.reason === "missing"
+          ? "No encontramos la imagen de la carta coleccionable. Vuelve a subirla."
+          : "La imagen de la carta coleccionable no es válida. Súbela de nuevo desde el panel.",
+      );
+    }
+  }
+
+  /** cartaImagenUrl guardada en cada premio especial del minijuego del beneficio. */
+  private async cartaImagenUrlsGuardadas(
+    beneficioId: string,
+  ): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    const beneficioSnap = await firestoreApp
+      .collection(BENEFICIOS_COLLECTION)
+      .doc(beneficioId)
+      .get();
+    if (!beneficioSnap.exists) return result;
+
+    const data = beneficioSnap.data() ?? {};
+    const minijuegoId =
+      typeof data.minijuegoId === "string" && data.minijuegoId.trim()
+        ? data.minijuegoId.trim()
+        : beneficioId;
+    const snapshot = await this.premios(minijuegoId).get();
+    for (const doc of snapshot.docs) {
+      const url = this.mapPremio(doc).cartaImagenUrl;
+      if (url) result.set(doc.id, url);
+    }
+    return result;
+  }
 
   private async assertUsuariosExisten(uids: string[]): Promise<void> {
     for (const uid of uids) {
@@ -1311,19 +1459,66 @@ export class MinijuegoService {
     }
     const premios = await this.loadPremios(minijuegoId);
     const especial = premios.find((premio) => premio.especial);
-    const rows = await this.listGanadoresEspecial(minijuegoId);
+    // Con especial vivo se cuentan y listan solo SUS ganadores, sin tope: el
+    // mismo criterio que su stock al editar (resolveSpecialStock). Los de
+    // especiales reemplazados siguen en Firestore, pero no entran en el
+    // «X / máximo». Sin especial vivo se listan todos, como antes.
+    const rows = especial
+      ? await this.listGanadoresDePremio(minijuegoId, especial.id)
+      : await this.listGanadoresEspecial(minijuegoId);
     const maxGanadores =
       especial?.maxGanadores ??
       (especial?.stock != null ? especial.stock + rows.length : null);
+    // El registro del ganador no guarda el nombre: se muestra el actual del
+    // perfil (usuariosApp/{uid}). Los registros históricos no se reescriben.
+    const nombres = await this.nombresDeUsuarios(rows.map((row) => row.uid));
     return toSpecialWinnersView({
       premio: especial?.nombre ?? "",
       maxGanadores,
       ganadores: rows.map((row) => ({
         uid: row.uid,
+        nombre: nombres.get(row.uid) ?? null,
         email: row.email,
         telefono: row.telefono,
       })),
     });
+  }
+
+  /**
+   * Nombre actual de cada usuario según su perfil en usuariosApp: una sola
+   * lectura por uid distinto, en lotes de 100 y sin escrituras. Nunca lanza:
+   * si la lectura falla, el listado de ganadores se devuelve igual y los
+   * nombres que no se alcanzaron a leer quedan en null.
+   */
+  private async nombresDeUsuarios(
+    uids: string[],
+  ): Promise<Map<string, string | null>> {
+    const unicos = [...new Set(uids.filter((uid) => uid.trim().length > 0))];
+    const nombres = new Map<string, string | null>();
+    try {
+      for (let index = 0; index < unicos.length; index += 100) {
+        const lote = unicos.slice(index, index + 100);
+        const snapshots = await firestoreApp.getAll(
+          ...lote.map((uid) =>
+            firestoreApp.collection(USUARIOS_COLLECTION).doc(uid),
+          ),
+        );
+        lote.forEach((uid, posicion) => {
+          const snapshot = snapshots[posicion];
+          nombres.set(
+            uid,
+            snapshot?.exists ? nombreDeUsuario(snapshot.data()) : null,
+          );
+        });
+      }
+    } catch (error) {
+      // Sin datos personales en el log: solo cuántos usuarios se buscaban.
+      console.warn("ganadores_especial_nombres_error", {
+        usuarios: unicos.length,
+        error: error instanceof Error ? error.message : "unknown",
+      });
+    }
+    return nombres;
   }
 
   async listGanadoresEspecial(minijuegoId?: string) {
@@ -1332,7 +1527,26 @@ export class MinijuegoService {
       ? await collection.where("minijuegoId", "==", minijuegoId).limit(200).get()
       : await collection.orderBy("createdAt", "desc").limit(200).get();
 
-    return snapshot.docs
+    return this.toGanadorRows(snapshot.docs);
+  }
+
+  /**
+   * Todos los ganadores de un premio del minijuego, sin tope: la misma consulta
+   * con la que update descuenta el stock del especial.
+   */
+  private async listGanadoresDePremio(minijuegoId: string, premioId: string) {
+    const snapshot = await firestoreApp
+      .collection(GANADORES_ESPECIAL_COLLECTION)
+      .where("minijuegoId", "==", minijuegoId)
+      .where("premioId", "==", premioId)
+      .get();
+    return this.toGanadorRows(snapshot.docs).filter(
+      (row) => row.premioId === premioId,
+    );
+  }
+
+  private toGanadorRows(docs: FirebaseFirestore.QueryDocumentSnapshot[]) {
+    return docs
       .map((doc) => {
         const data = doc.data();
         return {
@@ -1367,6 +1581,23 @@ export class MinijuegoService {
         ? admin.firestore.Timestamp.fromDate(prize.caducaEl)
         : null,
       premioImagenUrl: prize.imagenUrl ?? "",
+      ...this.cartaSnapshot(prize),
+    };
+  }
+
+  /**
+   * Carta coleccionable copiada al ganar el especial. cartaDiseno deja
+   * explícito el diseño de las cartas nuevas, para que no dependa del nombre
+   * del premio (las cartas anteriores no lo tienen).
+   */
+  private cartaSnapshot(prize: MinijuegoPremio): {
+    cartaImagenUrl: string | null;
+    cartaDiseno: CartaDiseno;
+  } {
+    const cartaImagenUrl = prize.cartaImagenUrl?.trim() || null;
+    return {
+      cartaImagenUrl,
+      cartaDiseno: cartaImagenUrl ? "personalizada" : "predeterminada",
     };
   }
 
@@ -1403,8 +1634,13 @@ export class MinijuegoService {
   ): Promise<MinijuegoPremio | null> {
     if (!minijuegoId || !premioId) return null;
     const snapshot = await this.premios(minijuegoId).doc(premioId).get();
-    if (!snapshot.exists) return null;
-    return this.mapPremio(snapshot);
+    if (snapshot.exists) return this.mapPremio(snapshot);
+    // Premio quitado al editar: sus datos siguen en el archivo.
+    const archivado = await this.premiosArchivados(minijuegoId)
+      .doc(premioId)
+      .get();
+    if (!archivado.exists) return null;
+    return this.mapPremio(archivado);
   }
 
   private toMisBeneficio(
@@ -1443,6 +1679,10 @@ export class MinijuegoService {
       premioNombre:
         typeof data.premioNombre === "string" ? data.premioNombre : "",
       premioImagenUrl: imagen || null,
+      // Solo la copia guardada al ganar (inmutable): sin respaldo al premio
+      // vivo. Registros anteriores → null.
+      cartaImagenUrl: this.presentText(data, "cartaImagenUrl"),
+      cartaDiseno: this.presentText(data, "cartaDiseno"),
       ganadoEl: ganadoEl.toISOString(),
       terminos,
       validoDesde: validoDesde ? validoDesde.toISOString() : null,

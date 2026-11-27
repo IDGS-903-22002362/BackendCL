@@ -1,6 +1,7 @@
 import { BeneficioTipo } from "../models/beneficios.model";
 import {
   GuardarMinijuegoInput,
+  MAX_PREMIOS_MINIJUEGO,
   MINIJUEGO_TIPOS,
   Minijuego,
   MinijuegoAudiencia,
@@ -74,6 +75,11 @@ export type PreparedPremio = {
   orden: number;
   color: string;
   imagenUrl?: string;
+  /**
+   * Solo premio especial. undefined = no se envió (al editar se conserva la
+   * del mismo premio); null = sin carta; string = URL a validar y guardar.
+   */
+  cartaImagenUrl?: string | null;
   descripcion?: string;
   terminos?: string;
   validoDesde?: Date;
@@ -277,6 +283,9 @@ export function isVisibleInCatalog(input: {
  * - Si algún premio no la tiene (minijuegos creados antes de los porcentajes),
  *   se usan los pesos relativos originales sin cambios, para que esos
  *   minijuegos sigan sorteando exactamente igual que antes.
+ * - Un premio con probabilidad definida de 0 % pesa 0 en ambos modos: queda
+ *   guardado pero nunca sale, aunque su peso relativo diga otra cosa
+ *   (mapPremio fuerza weight ≥ 1 para los minijuegos antiguos).
  */
 export function prizeDrawWeights(
   premios: Array<Pick<MinijuegoPremio, "weight" | "probabilidad">>,
@@ -287,10 +296,36 @@ export function prizeDrawWeights(
 
   return premios.map((premio, index) => {
     if (percentMode) return units[index] ?? 0;
+    if (units[index] === 0) return 0;
     return Number.isInteger(premio.weight) && premio.weight >= 1
       ? premio.weight
       : 0;
   });
+}
+
+type DrawablePrize = Pick<MinijuegoPremio, "weight" | "probabilidad" | "stock">;
+
+function isEligibleDraw(stock: number | null, weight: number): boolean {
+  if (!Number.isInteger(weight) || weight < 1) return false;
+  return stock == null || stock > 0;
+}
+
+/**
+ * Premios que pueden salir, con su peso efectivo: stock disponible (null =
+ * ilimitado) y peso ≥ 1 (un premio de 0 % nunca sale). Es el mismo criterio
+ * para el sorteo, los sectores de la ruleta y premiosDisponibles.
+ */
+export function eligiblePrizes<T extends DrawablePrize>(
+  premios: T[],
+): Array<{ premio: T; weight: number }> {
+  const weights = prizeDrawWeights(premios);
+  return premios
+    .map((premio, index) => ({ premio, weight: weights[index] ?? 0 }))
+    .filter(({ premio, weight }) => isEligibleDraw(premio.stock, weight));
+}
+
+export function hasEligiblePrize(premios: DrawablePrize[]): boolean {
+  return eligiblePrizes(premios).length > 0;
 }
 
 /**
@@ -309,11 +344,11 @@ export function adminPrizeProbabilities(
     };
   }
 
+  // Con los pesos efectivos del sorteo: un premio que tenga 0 % definido se
+  // ve en 0 % (nunca sale), aunque su peso relativo sea mayor.
   return {
     modo: "convertida",
-    porcentajes: weightsToUnits(premios.map((premio) => premio.weight)).map(
-      unitsToPercent,
-    ),
+    porcentajes: weightsToUnits(prizeDrawWeights(premios)).map(unitsToPercent),
   };
 }
 
@@ -321,17 +356,10 @@ export function pickWeightedPrize(
   premios: MinijuegoPremio[],
   randomInt: (maxExclusive: number) => number,
 ): MinijuegoPremio {
-  const weights = prizeDrawWeights(premios);
-  // Los premios agotados salen del sorteo. Al sortear sobre la suma de los
-  // que quedan, su probabilidad se redistribuye proporcionalmente sin tocar
-  // los porcentajes guardados.
-  const eligible = premios
-    .map((premio, index) => ({ premio, weight: weights[index] }))
-    .filter(({ premio, weight }) => {
-      if (!Number.isInteger(weight) || weight < 1) return false;
-      if (premio.stock == null) return true;
-      return premio.stock > 0;
-    });
+  // Los premios agotados y los de 0 % salen del sorteo. Al sortear sobre la
+  // suma de los que quedan, la probabilidad de un agotado se redistribuye
+  // proporcionalmente sin tocar los porcentajes guardados.
+  const eligible = eligiblePrizes(premios);
 
   if (eligible.length === 0) {
     throw new MinijuegoError(
@@ -463,10 +491,28 @@ export function resolveSpecialStock(input: {
   };
 }
 
+/**
+ * Nombre del socio que ve el panel: el campo «nombre» de su perfil en
+ * usuariosApp, recortado. null si no hay perfil o si el nombre falta, no es
+ * texto o queda vacío (el panel lo muestra como «No disponible»).
+ */
+export function nombreDeUsuario(data: unknown): string | null {
+  if (data == null || typeof data !== "object") return null;
+  const nombre = (data as { nombre?: unknown }).nombre;
+  if (typeof nombre !== "string") return null;
+  const recortado = nombre.trim();
+  return recortado.length > 0 ? recortado : null;
+}
+
 export function toSpecialWinnersView(input: {
   premio: string;
   maxGanadores: number | null;
-  ganadores: Array<{ uid: string; email: string; telefono: string }>;
+  ganadores: Array<{
+    uid: string;
+    nombre?: string | null;
+    email: string;
+    telefono: string;
+  }>;
 }) {
   return {
     premio: input.premio,
@@ -474,20 +520,55 @@ export function toSpecialWinnersView(input: {
     totalGanadores: input.ganadores.length,
     ganadores: input.ganadores.map((ganador) => ({
       uid: ganador.uid,
+      nombre: ganador.nombre ?? null,
       email: ganador.email,
       telefono: ganador.telefono,
     })),
   };
 }
 
-export function rouletteSegments<T extends { id: string; stock: number | null }>(
+/**
+ * Sectores de la ruleta: solo los premios que pueden salir (mismo criterio
+ * que el sorteo: sin agotados ni 0 %). Se conserva el premio de la jugada
+ * pendiente si sigue entre los premios, para que la ruleta pueda caer en él.
+ */
+export function rouletteSegments<T extends { id: string } & DrawablePrize>(
   premios: T[],
   keepPrizeId?: string,
 ): T[] {
-  return premios.filter((premio) => {
+  const weights = prizeDrawWeights(premios);
+  return premios.filter((premio, index) => {
     if (keepPrizeId && premio.id === keepPrizeId) return true;
-    return premio.stock == null || premio.stock > 0;
+    return isEligibleDraw(premio.stock, weights[index] ?? 0);
   });
+}
+
+/**
+ * Carta coleccionable que queda guardada en un premio al crear o editar.
+ * - Solo el premio especial tiene carta.
+ * - requested undefined (no se envió): se conserva la del mismo premio si ya
+ *   era especial; al crear no hay anterior, así que queda sin carta.
+ * - null o '': sin carta.
+ * - string: esa URL (el servicio ya la validó).
+ */
+export function resolveCartaImagenUrl(input: {
+  especial?: boolean;
+  requested?: string | null;
+  previous?: { especial?: unknown; cartaImagenUrl?: unknown } | null;
+}): string | undefined {
+  if (input.especial !== true) return undefined;
+  if (input.requested === undefined) {
+    const previous = input.previous;
+    if (
+      previous?.especial === true &&
+      typeof previous.cartaImagenUrl === "string" &&
+      previous.cartaImagenUrl.trim()
+    ) {
+      return previous.cartaImagenUrl.trim();
+    }
+    return undefined;
+  }
+  return input.requested ? input.requested : undefined;
 }
 
 export function decidePlay(input: {
@@ -614,17 +695,30 @@ export function prepareMinijuegoWrite(input: GuardarMinijuegoInput): {
     );
   }
 
-  if (input.premios.length > 12) {
+  if (input.premios.length > MAX_PREMIOS_MINIJUEGO) {
     throw new MinijuegoError(
       "MINIGAME_TOO_MANY_PRIZES",
       400,
-      "Un minijuego puede tener máximo 12 premios.",
+      `Un minijuego puede tener máximo ${MAX_PREMIOS_MINIJUEGO} premios.`,
     );
   }
 
   const premios = input.premios.map((premio, index) =>
     preparePremio(premio, index),
   );
+  const positionById = new Map<string, number>();
+  premios.forEach((premio, index) => {
+    if (!premio.id) return;
+    const first = positionById.get(premio.id);
+    if (first != null) {
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_PRIZE",
+        400,
+        `El premio ${index + 1} repite el id del premio ${first + 1}. Recarga el panel e inténtalo de nuevo.`,
+      );
+    }
+    positionById.set(premio.id, index);
+  });
   if (premios.filter((premio) => premio.especial).length > 1) {
     throw new MinijuegoError(
       "MINIGAME_INVALID_PRIZE",
@@ -723,12 +817,15 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
       "Falta la probabilidad (%) de un premio. Recarga el panel e inténtalo de nuevo.",
     );
   }
+  // 0 % es válido: el premio queda guardado pero deshabilitado (nunca sale ni
+  // aparece como sector). Vacío ya se rechazó arriba; aquí se rechaza lo no
+  // numérico, negativo, mayor a 100 o con más de 3 decimales.
   const units = percentToUnits(premio.probabilidad);
-  if (units == null || units < 1) {
+  if (units == null) {
     throw new MinijuegoError(
       "MINIGAME_INVALID_PROBABILITY",
       400,
-      "La probabilidad de cada premio debe ser mayor a 0% y hasta 100%, con máximo 3 decimales.",
+      "La probabilidad de cada premio debe estar entre 0% y 100%, con máximo 3 decimales.",
     );
   }
 
@@ -765,6 +862,37 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
     }
   }
 
+  // Carta coleccionable, en tres estados (ver PreparedPremio). Una URL que no
+  // sea del bucket propio se rechaza en el servicio, nunca se descarta.
+  const rawCarta: unknown = premio.cartaImagenUrl;
+  let cartaImagenUrl: string | null | undefined;
+  if (rawCarta !== undefined && rawCarta !== null && typeof rawCarta !== "string") {
+    throw new MinijuegoError(
+      "MINIGAME_INVALID_PRIZE",
+      400,
+      "La imagen de la carta coleccionable no es válida.",
+    );
+  }
+  if (typeof rawCarta === "string" && rawCarta.trim()) {
+    if (premio.especial !== true) {
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_PRIZE",
+        400,
+        "Solo el premio especial puede tener carta coleccionable.",
+      );
+    }
+    if (rawCarta.trim().length > 2048) {
+      throw new MinijuegoError(
+        "MINIGAME_INVALID_PRIZE",
+        400,
+        "La imagen de la carta coleccionable no es válida.",
+      );
+    }
+    cartaImagenUrl = rawCarta.trim();
+  } else if (rawCarta !== undefined && premio.especial === true) {
+    cartaImagenUrl = null;
+  }
+
   const color =
     premio.color && COLOR_RE.test(premio.color)
       ? premio.color
@@ -791,6 +919,7 @@ function preparePremio(premio: PremioInput, index: number): PreparedPremio {
     ...(readImageUrl(premio.imagenUrl)
       ? { imagenUrl: readImageUrl(premio.imagenUrl) }
       : {}),
+    ...(cartaImagenUrl !== undefined ? { cartaImagenUrl } : {}),
     ...(descripcion ? { descripcion } : {}),
     ...(terminos ? { terminos } : {}),
     ...(validoDesde ? { validoDesde } : {}),

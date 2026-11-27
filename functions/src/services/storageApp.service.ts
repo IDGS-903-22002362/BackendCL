@@ -2,6 +2,7 @@
 import { storageAppOficial } from "../config/app.firebase";
 import * as path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { isProtectedCartaImagenPath } from "./carta-imagen.service";
 
 //apunta hacia el proyecto de app-oficial-leon, para almacenar las imagenes de noticias, galería, etc.
 export class StorageNoticiasService {
@@ -50,6 +51,13 @@ export class StorageNoticiasService {
     }
 
     async deleteFile(fileUrl: string): Promise<void> {
+        // Las cartas coleccionables (minijuegos/cartas/) son inmutables: las
+        // referencian jugadas y ganadores, así que nunca se borran.
+        const protegido = this.getFileNameFromUrl(fileUrl);
+        if (protegido && isProtectedCartaImagenPath(protegido)) {
+            console.warn("Se rechazó borrar una carta coleccionable:", protegido);
+            throw new Error("Las imágenes de cartas coleccionables no se pueden borrar");
+        }
         try {
             const fileName = this.getFileNameFromUrl(fileUrl);
             if (!fileName) throw new Error("URL de archivo inválida");

@@ -26,6 +26,23 @@ export const MINIJUEGO_PLAY_STATUSES = ["pending_reward", "completed"] as const;
 
 export type MinijuegoPlayStatus = (typeof MINIJUEGO_PLAY_STATUSES)[number];
 
+/**
+ * Tope técnico de premios por minijuego (incluye el especial). Lo comparten
+ * el validador, la lógica y el panel: play() lee todos los premios en su
+ * transacción y la edición los reescribe todos en la suya.
+ */
+export const MAX_PREMIOS_MINIJUEGO = 50;
+
+/**
+ * Diseño de la carta que se copia al ganar el premio especial:
+ * - personalizada: la carta usa cartaImagenUrl como arte.
+ * - predeterminada: la carta genérica, sin depender del nombre del premio.
+ * Los registros anteriores no tienen marcador (la app usa su lógica antigua).
+ */
+export const CARTA_DISENOS = ["personalizada", "predeterminada"] as const;
+
+export type CartaDiseno = (typeof CARTA_DISENOS)[number];
+
 export interface MinijuegoAudiencia {
   visibilidad: MinijuegoVisibilidad;
   usuariosPermitidos: string[];
@@ -57,11 +74,16 @@ export interface MinijuegoPremio {
    * así el sorteo antiguo y el nuevo producen la misma distribución.
    */
   weight: number;
-  /** Probabilidad configurada en porcentaje (0.001 a 100). Ausente en premios antiguos. */
+  /**
+   * Probabilidad configurada en porcentaje (0 a 100). 0 % = guardado pero
+   * deshabilitado: nunca sale. Ausente en premios antiguos.
+   */
   probabilidad?: number;
   orden: number;
   color?: string;
   imagenUrl?: string;
+  /** Arte de la carta coleccionable. Solo en el premio especial. */
+  cartaImagenUrl?: string;
   descripcion?: string;
   terminos?: string;
   validoDesde?: Date;
@@ -86,6 +108,13 @@ export interface MinijuegoPlay {
   prizeDescription?: string;
   prizeValue?: number;
   prizeImageUrl?: string;
+  /**
+   * Copia inmutable del arte de la carta al ganar el especial (null = sin
+   * arte propio). Ausente en jugadas que no son del especial o anteriores.
+   */
+  cartaImagenUrl?: string | null;
+  /** Marcador de diseño copiado al ganar el especial (ver CARTA_DISENOS). */
+  cartaDiseno?: string;
   status: MinijuegoPlayStatus;
   idempotencyKey: string;
   revelado: boolean;
@@ -116,6 +145,11 @@ export interface PremioInput {
   validoDesde?: string | null;
   caducaEl?: string | null;
   imagenUrl?: string;
+  /**
+   * Solo premio especial. Ausente = conservar la del mismo premio al editar
+   * (sin carta al crear); null o '' = sin carta; URL = la subida al bucket.
+   */
+  cartaImagenUrl?: string | null;
   color?: string;
   especial?: boolean;
   maxGanadores?: number;
