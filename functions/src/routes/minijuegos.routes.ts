@@ -1,5 +1,9 @@
 import { Router } from "express";
 import {
+  getMisCartasPrueba,
+  soloConCartasDePrueba,
+} from "../controllers/minijuegos/cartas-prueba.controller";
+import {
   acknowledge,
   getDetails,
   getGanadoresEspecial,
@@ -25,6 +29,15 @@ const MINIJUEGO_STAFF_ROLES = [
 const router = Router();
 
 router.get("/me/beneficios", authMiddleware, getMisBeneficios);
+
+// Solo existe en entornos de prueba (TEST_PRIZE_CARDS=true y Firestore no
+// productivo). Si no, se salta antes de autenticar y responde el 404 global.
+router.get(
+  "/me/cartas-prueba",
+  soloConCartasDePrueba,
+  authMiddleware,
+  getMisCartasPrueba,
+);
 
 router.get(
   "/:id/pending-play",
